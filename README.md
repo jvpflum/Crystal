@@ -1,175 +1,206 @@
-# Mogwai - Voice-First Local AI Assistant
+<p align="center">
+  <img src="public/icon.png" width="120" alt="Crystal Logo" />
+</p>
 
-A beautiful, voice-first AI assistant that runs 100% locally on your NVIDIA GPU. Like having your own personal Jarvis.
+<h1 align="center">Crystal</h1>
 
-![Mogwai](https://img.shields.io/badge/AI-Local%20First-blue)
-![GPU](https://img.shields.io/badge/GPU-NVIDIA%205090-green)
-![License](https://img.shields.io/badge/License-MIT-yellow)
+<p align="center">
+  <strong>Your personal AI that runs entirely on your machine.</strong><br/>
+  The most complete desktop frontend for <a href="https://github.com/nichochar/open-claw">OpenClaw</a> — voice-first, GPU-accelerated, zero cloud dependency.
+</p>
+
+<p align="center">
+  <a href="#features"><img src="https://img.shields.io/badge/Views-18%20Built--In-blue?style=flat-square" alt="Views" /></a>
+  <a href="#requirements"><img src="https://img.shields.io/badge/GPU-NVIDIA%20RTX-76b900?style=flat-square&logo=nvidia" alt="NVIDIA" /></a>
+  <a href="#tech-stack"><img src="https://img.shields.io/badge/Tauri-2.0-24c8db?style=flat-square&logo=tauri" alt="Tauri" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="MIT" /></a>
+</p>
+
+---
+
+## Why Crystal?
+
+Most AI tools send your data to someone else's server. Crystal doesn't. It's a native desktop app that connects your local LLM (via Ollama) to OpenClaw's autonomous agent framework — giving you a personal AI assistant that can actually *do things* on your computer, not just chat.
+
+- **Nothing leaves your machine.** Your conversations, files, and system data stay local.
+- **No subscriptions.** Run any open-weight model on your own GPU.
+- **One-click everything.** Crystal auto-starts Ollama, the OpenClaw gateway, and voice servers. Open the app and go.
+
+---
 
 ## Features
 
-- **Voice-First Interaction** - Talk to your AI naturally with wake word detection
-- **100% Local** - All AI processing happens on your machine, your data never leaves
-- **Tool Integration** - Execute shell commands, manage files, search the web
-- **Templates & Workflows** - Pre-built automation for common tasks
-- **Skill Marketplace** - Extend capabilities with installable skills
-- **Glass UI** - Beautiful, modern glassmorphism interface
+### AI Chat with Tool Use
+Markdown-rendered conversations with an agent that can create files, run shell commands, search your memory, and execute multi-step workflows — all through natural language.
+
+### OpenClaw Integration
+Full frontend for the OpenClaw agent framework. Manage skills, plugins, agents, channels, sessions, memory, hooks, cron jobs, security, and nodes — all from one UI.
+
+### System Dashboard & PC Optimizer
+Live GPU, CPU, RAM, and disk monitoring. One-click system optimization: flush DNS, clear temp files, manage startup apps, reset network stack, run Defender scans, and more.
+
+### Voice-First
+Wake word detection, speech-to-text (Whisper), and text-to-speech — all running locally. Talk to Crystal like Jarvis.
+
+### 18 Specialized Views
+
+| View | What it does |
+|------|-------------|
+| **Home** | Dashboard with system stats, GPU monitor, quick actions, PC optimizer |
+| **Chat** | AI conversation with tool use, slash commands, markdown rendering |
+| **Models** | Browse, pull, delete, and benchmark Ollama models |
+| **Marketplace** | Install and manage OpenClaw skills and plugins |
+| **Templates** | Pre-built and custom automation workflows |
+| **Agents** | Configure and manage OpenClaw agents |
+| **Channels** | Connect WhatsApp, Telegram, Discord, Slack, Signal, and more |
+| **Memory** | View and search the agent's curated + daily memory |
+| **Sessions** | Browse and manage conversation sessions |
+| **Tools** | View all registered tools and their schemas |
+| **Activity** | Real-time agent activity log with auto-refresh |
+| **Cron** | Schedule recurring agent tasks with templates |
+| **Security** | Audit, approvals, secrets management |
+| **Hooks** | Manage event-driven agent hooks |
+| **Browser** | OpenClaw browser automation (browser-use) |
+| **Nodes** | Multi-node agent orchestration |
+| **Doctor** | Diagnostics and health checks |
+| **Settings** | LLM config, themes, gateway token, system prompt |
+
+### Performance Optimized
+- **Lazy-loaded views** — only the active tab's code is loaded
+- **CLI response caching** — repeated OpenClaw commands return cached results
+- **Visibility-aware polling** — background monitors pause when their tab is hidden
+- **Vendor bundle splitting** — React, markdown, and animation libraries cached separately
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Desktop Runtime | [Tauri 2.0](https://v2.tauri.app/) |
+| Frontend | React 19, TypeScript, Zustand, Tailwind CSS |
+| Backend | Rust (tokio, reqwest, serde) |
+| AI Agent | [OpenClaw](https://github.com/nichochar/open-claw) |
+| LLM Inference | [Ollama](https://ollama.com/) (local) |
+| Voice STT | Whisper (local, optional) |
+| Voice TTS | Kokoro TTS (local, optional) |
+
+---
 
 ## Requirements
 
-- **Windows 10/11** (macOS/Linux support planned)
-- **NVIDIA GPU** with 24GB+ VRAM (RTX 4090, 5090, etc.)
-- **Ollama** installed with a model pulled (e.g. `ollama pull gpt-oss:20b`)
-- **Node.js 18+** and pnpm
-- **Rust** (for Tauri)
-- **Python 3.10+** (optional, for voice features)
+- **Windows 10/11** (macOS/Linux planned)
+- **NVIDIA GPU** with 16GB+ VRAM (RTX 4070 Ti or better recommended)
+- **Node.js 18+** and **pnpm**
+- **Rust** toolchain (for Tauri)
+- **Ollama** installed with at least one model
+- **Python 3.10+** *(optional — for voice features)*
+
+---
 
 ## Quick Start
 
-### 1. Install Ollama & Pull a Model
-
-```powershell
-# Install Ollama from https://ollama.com
-# Then pull a model:
-ollama pull gpt-oss:20b
-```
-
-### 2. Install Dependencies
+### 1. Install Ollama and pull a model
 
 ```bash
-cd mogwai
+# https://ollama.com/download
+ollama pull qwen2.5:32b
+```
+
+### 2. Clone and install
+
+```bash
+git clone https://github.com/jvpflum/Crystal.git
+cd Crystal
 pnpm install
 ```
 
-### 3. Setup Voice (Optional)
-
-Voice features require Python 3.10+:
-
-```powershell
-.\scripts\setup.ps1
-```
-
-### 4. Start Mogwai
+### 3. Run
 
 ```bash
 pnpm tauri dev
 ```
 
-Mogwai auto-starts Ollama and voice servers. No manual server management needed.
+Crystal auto-starts Ollama and the OpenClaw gateway. No manual server management needed.
 
-## Architecture
+### 4. Voice setup *(optional)*
+
+```powershell
+pip install -r scripts/requirements.txt
+```
+
+Crystal auto-launches Whisper and TTS servers on startup if Python is available.
+
+---
+
+## Project Structure
 
 ```
-+-----------------------------------------------------+
-|                    Mogwai App                        |
-|  +-----------------------------------------------+  |
-|  |              Tauri (Desktop)                   |  |
-|  |  +-----------------------------------------+  |  |
-|  |  |         React + TypeScript              |  |  |
-|  |  |  - Glass UI Components                  |  |  |
-|  |  |  - Voice Orb                            |  |  |
-|  |  |  - Chat Interface                       |  |  |
-|  |  |  - Templates & Tools                    |  |  |
-|  |  +-----------------------------------------+  |  |
-|  |  +-----------------------------------------+  |  |
-|  |  |            Rust Backend                 |  |  |
-|  |  |  - File System Access                   |  |  |
-|  |  |  - Shell Execution                      |  |  |
-|  |  |  - System Tray                          |  |  |
-|  |  |  - Server Auto-Start                    |  |  |
-|  |  +-----------------------------------------+  |  |
-|  +-----------------------------------------------+  |
-+-----------------------------------------------------+
-                         |
-                         v
-+-----------------------------------------------------+
-|              Local AI Services                      |
-|  +-------------+  +-------------+  +-------------+  |
-|  |   Ollama    |  |  Whisper    |  |    TTS      |  |
-|  |  :11434     |  |   :8080     |  |   :8081     |  |
-|  |             |  |             |  |             |  |
-|  | gpt-oss:20b |  | large-v3    |  |  Kokoro     |  |
-|  +-------------+  +-------------+  +-------------+  |
-+-----------------------------------------------------+
+Crystal/
+├── src/                        # React frontend
+│   ├── components/
+│   │   ├── shell/              # TitleBar, Navigation, CommandPalette
+│   │   ├── views/              # 18 feature views
+│   │   ├── voice/              # VoiceOrb component
+│   │   └── widgets/            # GpuMonitor, etc.
+│   ├── hooks/                  # useOpenClaw, useVoice, useStorage
+│   ├── lib/                    # Agent brain, OpenClaw client, tools, cache
+│   └── stores/                 # Zustand state (app, theme)
+├── src-tauri/                  # Rust backend
+│   └── src/lib.rs              # Commands, server lifecycle, file ops
+├── scripts/                    # Voice server scripts
+│   ├── whisper_server.py       # Whisper STT server
+│   ├── tts_server.py           # Kokoro TTS server
+│   └── requirements.txt        # Python dependencies
+└── public/                     # Static assets (icon, etc.)
 ```
+
+---
 
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+Space` | Toggle Mogwai window (global) |
-| `Ctrl+Shift+M` | Activate voice input |
-
-## Project Structure
-
-```
-mogwai/
-├── src/                    # React frontend
-│   ├── components/         # UI components
-│   │   ├── shell/         # TitleBar, Navigation
-│   │   ├── views/         # Main views (Chat, Settings, etc.)
-│   │   └── voice/         # VoiceOrb
-│   ├── hooks/             # React hooks
-│   ├── lib/               # Core services
-│   │   ├── agent.ts       # AI agent loop
-│   │   ├── openclaw.ts    # LLM client (Ollama / LM Studio)
-│   │   ├── tools.ts       # Tool definitions
-│   │   ├── voice.ts       # Voice service
-│   │   ├── templates.ts   # Workflow templates
-│   │   └── marketplace.ts # Skills marketplace
-│   └── stores/            # Zustand state
-├── src-tauri/             # Rust backend
-│   └── src/lib.rs         # Tauri commands + server management
-├── scripts/               # Server scripts
-│   ├── start-all.ps1      # Start all services (manual/debug)
-│   ├── start-whisper.ps1  # Whisper STT
-│   ├── start-tts.ps1      # TTS server
-│   └── requirements.txt   # Python deps
-└── package.json
-```
-
-## Configuration
-
-### Changing the Model
-
-Use the Settings view in Mogwai to switch between installed Ollama models, or pull new ones:
-
-```powershell
-ollama pull qwen2.5:32b
-ollama pull gpt-oss:20b
-```
-
-### Changing Whisper Model
-
-```powershell
-.\scripts\start-whisper.ps1 -Model "medium"  # Options: tiny, base, small, medium, large-v3
-```
-
-## Troubleshooting
-
-### "LLM not connected"
-Make sure Ollama is running:
-```powershell
-ollama serve
-```
-
-### "Voice server offline"
-Mogwai auto-starts voice servers if Python is installed. If they're still offline:
-```powershell
-.\scripts\setup.ps1   # Install Python deps
-```
-
-### Build errors
-```bash
-pnpm clean
-pnpm install
-pnpm tauri build
-```
-
-## License
-
-MIT License - see LICENSE file for details.
+| `Ctrl + Space` | Toggle Crystal window (global) |
+| `Ctrl + K` | Command palette |
+| `Ctrl + Shift + M` | Activate voice input |
 
 ---
 
-Made with care by taming the Gremlin into a friendly Mogwai
+## Configuration
+
+### Switch models
+Use the **Models** tab to browse, pull, and set your active model — or from the terminal:
+
+```bash
+ollama pull llama3.1:70b
+```
+
+### Themes
+Crystal ships with 5 built-in themes. Switch in **Settings > Appearance**.
+
+### System prompt
+Customize the agent's personality and instructions in **Settings > System Prompt**.
+
+---
+
+## Contributing
+
+Contributions welcome. Please open an issue first to discuss what you'd like to change.
+
+```bash
+# Dev mode with hot reload
+pnpm tauri dev
+```
+
+---
+
+## License
+
+MIT
+
+---
+
+<p align="center">
+  <sub>Built with Tauri, React, Rust, and OpenClaw. Runs on your hardware, not ours.</sub>
+</p>

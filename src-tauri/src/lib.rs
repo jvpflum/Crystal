@@ -67,7 +67,7 @@ async fn execute_command(command: String, cwd: Option<String>) -> Result<Command
         #[cfg(target_os = "windows")]
         let output = {
             let mut cmd = Command::new("powershell");
-            cmd.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &command])
+            cmd.args(["-NoProfile", "-NonInteractive", "-Command", &command])
                 .current_dir(&working_dir)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -294,10 +294,10 @@ fn find_python() -> Option<String> {
     None
 }
 
-/// Spawn a hidden background process on Windows.
-/// Wraps the command through powershell -WindowStyle Hidden to ensure
-/// no console window appears, even for .cmd/.bat scripts that normally
-/// flash cmd.exe.
+/// Spawn a background process with no visible window on Windows.
+/// Uses CREATE_NO_WINDOW to prevent console allocation entirely.
+/// Do NOT combine with -WindowStyle Hidden (it conflicts by creating
+/// then hiding a window, causing a brief flash).
 #[cfg(target_os = "windows")]
 fn spawn_hidden(program: &str, args: &[&str]) -> std::io::Result<Child> {
     let full_cmd = if args.is_empty() {
@@ -310,7 +310,7 @@ fn spawn_hidden(program: &str, args: &[&str]) -> std::io::Result<Child> {
         format!("& '{}' {}", program, args_str)
     };
     Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &full_cmd])
+        .args(["-NoProfile", "-NonInteractive", "-Command", &full_cmd])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .stdin(Stdio::null())
