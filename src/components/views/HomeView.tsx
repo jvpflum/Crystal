@@ -19,7 +19,7 @@ import {
 let _dashboardCache: { data: DashboardData; ts: number } | null = null;
 let _sysStatsCache: { data: Partial<SysStats>; ts: number } | null = null;
 const DASHBOARD_TTL = 60_000; // refresh dashboard every 60s
-const SYS_POLL_INTERVAL = 15_000; // poll system stats every 15s
+const SYS_POLL_INTERVAL = 30_000;
 
 interface DashboardData {
   gateway: { connected: boolean; latencyMs: number };
@@ -638,27 +638,7 @@ function SystemMonitor() {
 
   const poll = useCallback(async () => {
     try {
-      const psScript = `
-$cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
-$os = Get-CimInstance Win32_OperatingSystem
-$ramTotal = [math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
-$ramUsed = [math]::Round(($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / 1MB, 1)
-$disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
-$diskTotal = [math]::Round($disk.Size / 1GB, 0)
-$diskUsed = [math]::Round(($disk.Size - $disk.FreeSpace) / 1GB, 0)
-$up = (Get-Date) - $os.LastBootUpTime
-$upStr = "$($up.Days)d $($up.Hours)h $($up.Minutes)m"
-Write-Output "CPU_USAGE:$cpu"
-Write-Output "RAM_USED:$ramUsed"
-Write-Output "RAM_TOTAL:$ramTotal"
-Write-Output "DISK_USED:$diskUsed"
-Write-Output "DISK_TOTAL:$diskTotal"
-Write-Output "UPTIME:$upStr"
-`.trim().replace(/\n/g, "; ");
-
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: psScript, cwd: null,
-      });
+      const result = await invoke<{ stdout: string; code: number }>("get_sys_stats");
       if (result.code === 0) {
         const parsed = parseSysStats(result.stdout);
         _sysStatsCache = { data: parsed, ts: Date.now() };

@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "@/stores/appStore";
 
 let _gpuCache: { data: GpuStats; ts: number } | null = null;
-const GPU_POLL_MS = 5000;
+const GPU_POLL_MS = 10000;
 
 interface GpuStats {
   name: string;
@@ -79,10 +79,7 @@ export function GpuMonitor() {
 
   const poll = useCallback(async () => {
     try {
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "nvidia-smi --query-gpu=name,utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu,power.draw,power.limit --format=csv,noheader,nounits",
-        cwd: null,
-      });
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("get_gpu_stats");
       if (result.code === 0) {
         const parsed = parseGpuStats(result.stdout);
         if (parsed) {

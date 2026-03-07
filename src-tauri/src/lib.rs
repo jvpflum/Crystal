@@ -57,6 +57,97 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+/// GPU stats via nvidia-smi directly — no PowerShell, no cmd.exe.
+/// This is called every few seconds so it must never flash a window.
+#[tauri::command]
+async fn get_gpu_stats() -> Result<CommandResult, String> {
+    tokio::task::spawn_blocking(|| {
+        #[cfg(target_os = "windows")]
+        let output = {
+            let mut cmd = Command::new("nvidia-smi");
+            cmd.args([
+                "--query-gpu=name,utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu,power.draw,power.limit",
+                "--format=csv,noheader,nounits",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null())
+            .creation_flags(0x08000000);
+            cmd.output()
+        };
+        #[cfg(not(target_os = "windows"))]
+        let output = Command::new("nvidia-smi")
+            .args([
+                "--query-gpu=name,utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu,power.draw,power.limit",
+                "--format=csv,noheader,nounits",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null())
+            .output();
+
+        match output {
+            Ok(out) => Ok(CommandResult {
+                stdout: String::from_utf8_lossy(&out.stdout).to_string(),
+                stderr: String::from_utf8_lossy(&out.stderr).to_string(),
+                code: out.status.code().unwrap_or(-1),
+            }),
+            Err(e) => Err(format!("nvidia-smi failed: {}", e)),
+        }
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
+}
+
+/// System stats via a single wmic batch — avoids PowerShell entirely.
+#[tauri::command]
+async fn get_sys_stats() -> Result<CommandResult, String> {
+    tokio::task::spawn_blocking(|| {
+        #[cfg(target_os = "windows")]
+        let output = {
+            let script = r#"
+$cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
+$os = Get-CimInstance Win32_OperatingSystem
+$ramTotal = [math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
+$ramUsed = [math]::Round(($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / 1MB, 1)
+$disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
+$diskTotal = [math]::Round($disk.Size / 1GB, 0)
+$diskUsed = [math]::Round(($disk.Size - $disk.FreeSpace) / 1GB, 0)
+$up = (Get-Date) - $os.LastBootUpTime
+$upStr = "$($up.Days)d $($up.Hours)h $($up.Minutes)m"
+Write-Output "CPU_USAGE:$cpu"
+Write-Output "RAM_USED:$ramUsed"
+Write-Output "RAM_TOTAL:$ramTotal"
+Write-Output "DISK_USED:$diskUsed"
+Write-Output "DISK_TOTAL:$diskTotal"
+Write-Output "UPTIME:$upStr"
+"#;
+            let mut cmd = Command::new("powershell");
+            cmd.args(["-NoProfile", "-NonInteractive", "-Command", script])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .stdin(Stdio::null())
+                .creation_flags(0x08000000);
+            cmd.output()
+        };
+        #[cfg(not(target_os = "windows"))]
+        let output = Command::new("sh")
+            .args(["-c", "echo CPU_USAGE:0; echo RAM_USED:0; echo RAM_TOTAL:0"])
+            .output();
+
+        match output {
+            Ok(out) => Ok(CommandResult {
+                stdout: String::from_utf8_lossy(&out.stdout).to_string(),
+                stderr: String::from_utf8_lossy(&out.stderr).to_string(),
+                code: out.status.code().unwrap_or(-1),
+            }),
+            Err(e) => Err(format!("System stats failed: {}", e)),
+        }
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
+}
+
 #[tauri::command]
 async fn execute_command(command: String, cwd: Option<String>) -> Result<CommandResult, String> {
     tokio::task::spawn_blocking(move || {
@@ -660,6 +751,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             execute_command,
+            get_gpu_stats,
+            get_sys_stats,
             read_file,
             write_file,
             list_directory,
