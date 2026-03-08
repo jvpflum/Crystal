@@ -676,6 +676,14 @@ export function SettingsView() {
                 }}>
                   {availableModels.map((m) => {
                     const active = m === getModel();
+                    const sizeMatch = m.match(/:(\d+)b/i);
+                    const sizeB = sizeMatch ? parseInt(sizeMatch[1]) : null;
+                    const speedTag = sizeB
+                      ? sizeB <= 8 ? { label: "Blazing", color: "#4ade80" }
+                      : sizeB <= 14 ? { label: "Fast", color: "#60a5fa" }
+                      : sizeB <= 32 ? { label: "Balanced", color: "#fbbf24" }
+                      : { label: "Slow", color: "#f87171" }
+                      : null;
                     return (
                       <button
                         key={m}
@@ -696,7 +704,14 @@ export function SettingsView() {
                         }}
                       >
                         {active && <IconCheck />}
-                        <span style={{ marginLeft: active ? 0 : 18 }}>{m}</span>
+                        <span style={{ marginLeft: active ? 0 : 18, flex: 1 }}>{m}</span>
+                        {speedTag && (
+                          <span style={{
+                            fontSize: 9, padding: "1px 5px", borderRadius: 4,
+                            background: `${speedTag.color}22`, color: speedTag.color,
+                            fontFamily: "system-ui", fontWeight: 600,
+                          }}>{speedTag.label}</span>
+                        )}
                       </button>
                     );
                   })}

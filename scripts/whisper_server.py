@@ -19,7 +19,7 @@ app.add_middleware(
 )
 
 model = None
-model_name = os.environ.get("WHISPER_MODEL", "large-v3")
+model_name = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
 
 @app.on_event("startup")
 async def load_model():
@@ -48,7 +48,7 @@ async def inference(file: UploadFile = File(...)):
         tmp_path = tmp.name
     
     try:
-        segments, info = model.transcribe(tmp_path, beam_size=5)
+        segments, info = model.transcribe(tmp_path, beam_size=1, vad_filter=True)
         text = " ".join([segment.text for segment in segments])
         return {
             "text": text.strip(),

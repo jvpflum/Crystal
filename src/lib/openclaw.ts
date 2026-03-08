@@ -90,11 +90,11 @@ export interface OpenClawConfig {
 
 /* ─── Backend configs ─── */
 
-interface BackendDef { baseUrl: string; defaultModel: string; }
+interface BackendDef { baseUrl: string; nativeUrl: string; defaultModel: string; }
 
 const BACKENDS: Record<InferenceBackend, BackendDef> = {
-  ollama: { baseUrl: "http://127.0.0.1:11434/v1", defaultModel: "auto" },
-  lmstudio: { baseUrl: "http://127.0.0.1:1234/v1", defaultModel: "default" },
+  ollama: { baseUrl: "http://127.0.0.1:11434/v1", nativeUrl: "http://127.0.0.1:11434", defaultModel: "auto" },
+  lmstudio: { baseUrl: "http://127.0.0.1:1234/v1", nativeUrl: "http://127.0.0.1:1234", defaultModel: "default" },
 };
 
 /* ─── Supported channels ─── */
@@ -121,8 +121,10 @@ class OpenClawClient {
   /* LLM backend */
   private backend: InferenceBackend = "ollama";
   private baseUrl: string;
+  private nativeUrl: string;
   private model: string;
   private llmConnected = false;
+  private modelWarmedUp = false;
 
   /* Gateway (checked via Rust port probe) */
   private gwStatus: GatewayStatus = "disconnected";
@@ -140,7 +142,9 @@ class OpenClawClient {
   constructor() {
     const cfg = BACKENDS[this.backend];
     this.baseUrl = cfg.baseUrl;
+    this.nativeUrl = cfg.nativeUrl;
     this.model = cfg.defaultModel;
+    this.warmUp();
   }
 
   /* ── Rust HTTP proxy ── */
@@ -398,8 +402,11 @@ class OpenClawClient {
     this.backend = b;
     const cfg = BACKENDS[b];
     this.baseUrl = cfg.baseUrl;
+    this.nativeUrl = cfg.nativeUrl;
     this.model = cfg.defaultModel;
     this.llmConnected = false;
+    this.modelWarmedUp = false;
+    this.warmUp();
   }
   getBackend(): InferenceBackend { return this.backend; }
 
@@ -412,6 +419,38 @@ class OpenClawClient {
   }
   isConnected(): boolean { return this.llmConnected; }
 
+  /**
+   * Pre-load the model into GPU memory so the first real request is fast.
+   * Sends a trivial prompt with keep_alive=-1 (never unload).
+   */
+  async warmUp(): Promise<void> {
+    if (this.modelWarmedUp) return;
+    try {
+      if (this.model === "auto") await this.autoDetectModel();
+      if (this.model === "auto") return;
+
+      console.log(`[Crystal] Warming up model: ${this.model}`);
+      const resp = await fetch(`${this.nativeUrl}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: this.model,
+          messages: [{ role: "user", content: "hi" }],
+          stream: false,
+          keep_alive: -1,
+          options: { num_predict: 1, num_ctx: 4096, num_gpu: 99 },
+        }),
+      });
+      if (resp.ok) {
+        this.modelWarmedUp = true;
+        this.llmConnected = true;
+        console.log(`[Crystal] Model warm — loaded in VRAM, keep_alive=-1`);
+      }
+    } catch (e) {
+      console.warn("[Crystal] Warm-up failed (Ollama may not be running):", e);
+    }
+  }
+
   async chat(messages: Message[]): Promise<string> {
     let full = "";
     for await (const chunk of this.streamChat(messages)) {
@@ -420,22 +459,46 @@ class OpenClawClient {
     return full || "No response";
   }
 
+  /**
+   * Stream chat using Ollama's native /api/chat for maximum performance.
+   * Uses keep_alive=-1 to keep model in VRAM, reduced context window,
+   * and all GPU layers for fastest token generation.
+   */
   async *streamChat(messages: Message[]): AsyncGenerator<string> {
     if (this.model === "auto") {
       await this.autoDetectModel();
     }
 
-    const url = `${this.baseUrl}/chat/completions`;
+    const isOllama = this.backend === "ollama";
+    const url = isOllama
+      ? `${this.nativeUrl}/api/chat`
+      : `${this.baseUrl}/chat/completions`;
+
+    const body = isOllama
+      ? {
+          model: this.model,
+          messages: messages.map(m => ({ role: m.role, content: m.content })),
+          stream: true,
+          keep_alive: -1,
+          options: {
+            num_predict: 1024,
+            num_ctx: 4096,
+            num_gpu: 99,
+            temperature: 0.6,
+          },
+        }
+      : {
+          model: this.model,
+          messages: messages.map(m => ({ role: m.role, content: m.content })),
+          stream: true,
+          max_tokens: 1024,
+          temperature: 0.6,
+        };
+
     const resp = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: this.model,
-        messages: messages.map(m => ({ role: m.role, content: m.content })),
-        stream: true,
-        max_tokens: 2048,
-        temperature: 0.7,
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!resp.ok) {
@@ -449,24 +512,41 @@ class OpenClawClient {
     const decoder = new TextDecoder();
     let buffer = "";
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith("data: ")) continue;
-        const payload = trimmed.slice(6);
-        if (payload === "[DONE]") return;
-        try {
-          const json = JSON.parse(payload);
-          const token = json.choices?.[0]?.delta?.content;
-          if (token) yield token;
-        } catch { /* skip malformed SSE chunks */ }
+    if (isOllama) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const json = JSON.parse(line);
+            const token = json.message?.content;
+            if (token) yield token;
+            if (json.done) return;
+          } catch { /* skip */ }
+        }
+      }
+    } else {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
+          const payload = trimmed.slice(6);
+          if (payload === "[DONE]") return;
+          try {
+            const json = JSON.parse(payload);
+            const token = json.choices?.[0]?.delta?.content;
+            if (token) yield token;
+          } catch { /* skip */ }
+        }
       }
     }
   }
@@ -489,13 +569,19 @@ class OpenClawClient {
     try {
       const models = await this.getModels();
       if (models.length > 0) {
-        this.model = models[0];
+        const preferred = ["qwen2.5:14b", "qwen2.5:7b", "llama3.1:8b", "mistral:7b"];
+        const match = preferred.find(p => models.some(m => m.startsWith(p)));
+        this.model = match || models[0];
         console.log(`[Crystal] Auto-detected model: ${this.model}`);
       }
     } catch { /* keep "auto" and let LLM call fail with clear error */ }
   }
 
-  setModel(m: string) { this.model = m; }
+  setModel(m: string) {
+    this.model = m;
+    this.modelWarmedUp = false;
+    this.warmUp();
+  }
   getModel(): string { return this.model; }
   getBaseUrl(): string { return this.baseUrl; }
   setBaseUrl(u: string) { this.baseUrl = u; }

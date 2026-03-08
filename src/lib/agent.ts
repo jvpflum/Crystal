@@ -80,7 +80,7 @@ Home: C:\\Users\\jarro. Desktop: C:\\Users\\jarro\\OneDrive\\Desktop.
 
 class AgentService {
   private conversationHistory: Message[] = [];
-  private maxHistoryLength = 20;
+  private maxHistoryLength = 12;
   private onStepCallback: ((step: AgentStep) => void) | null = null;
   private onActionCallback: ((actions: ActionButton[]) => void) | null = null;
   private crystalActionHandler: CrystalActionHandler | null = null;
