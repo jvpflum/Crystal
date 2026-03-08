@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 
-type CommandId = "doctor" | "deep" | "fix" | "status" | "health" | "validate";
+type CommandId = "doctor" | "deep" | "fix" | "full-fix" | "status" | "health" | "validate" | "memory-reindex";
 
 interface OutputBlock {
   id: string;
@@ -31,19 +31,21 @@ function classifyLine(line: string): "pass" | "fail" | "warn" | "neutral" {
 }
 
 const LINE_COLORS: Record<ReturnType<typeof classifyLine>, string> = {
-  pass: "#4ade80",
-  fail: "#f87171",
-  warn: "#fbbf24",
-  neutral: "rgba(255,255,255,0.7)",
+  pass: "var(--success)",
+  fail: "var(--error)",
+  warn: "var(--warning)",
+  neutral: "var(--text-muted)",
 };
 
 const COMMANDS: Record<CommandId, { cmd: string; label: string }> = {
-  doctor:   { cmd: "npx openclaw doctor",             label: "Doctor" },
-  deep:     { cmd: "npx openclaw doctor --deep",       label: "Deep Scan" },
-  fix:      { cmd: "npx openclaw doctor --fix",        label: "Auto Fix" },
-  status:   { cmd: "npx openclaw status",              label: "Status" },
-  health:   { cmd: "npx openclaw health",              label: "Gateway Health" },
-  validate: { cmd: "npx openclaw config validate",     label: "Config Validate" },
+  doctor:         { cmd: "npx openclaw doctor",                  label: "Doctor" },
+  deep:           { cmd: "npx openclaw doctor --deep --yes",       label: "Deep Scan" },
+  fix:            { cmd: "npx openclaw doctor --fix",              label: "Auto Fix" },
+  "full-fix":     { cmd: "npx openclaw doctor --deep --yes --fix", label: "Deep Fix (Auto)" },
+  status:         { cmd: "npx openclaw status",                    label: "Status" },
+  health:         { cmd: "npx openclaw health",                     label: "Gateway Health" },
+  validate:       { cmd: "npx openclaw config validate",            label: "Config Validate" },
+  "memory-reindex": { cmd: "npx openclaw memory index --all",       label: "Reindex Memory" },
 };
 
 export function DoctorView() {
@@ -99,8 +101,8 @@ export function DoctorView() {
       {/* Header */}
       <div style={{ padding: "14px 20px 10px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Stethoscope style={{ width: 16, height: 16, color: "#3B82F6" }} />
-          <h2 style={{ color: "white", fontSize: 15, fontWeight: 600, margin: 0 }}>Doctor</h2>
+          <Stethoscope style={{ width: 16, height: 16, color: "var(--accent)" }} />
+          <h2 style={{ color: "var(--text)", fontSize: 15, fontWeight: 600, margin: 0 }}>Doctor</h2>
           {hasSummary && (
             <div style={{ display: "flex", gap: 8 }}>
               <Badge color="#4ade80" count={summary.pass} label="pass" />
@@ -114,13 +116,17 @@ export function DoctorView() {
             {running === "doctor" ? <Loader2 style={iconSm} className="animate-spin" /> : <Heart style={iconSm} />}
             Run Doctor
           </button>
-          <button onClick={() => run("deep")} disabled={running !== null} style={actionBtnStyle("#8b5cf6")}>
+          <button onClick={() => run("deep")} disabled={running !== null} style={actionBtnStyle("#3B82F6")}>
             {running === "deep" ? <Loader2 style={iconSm} className="animate-spin" /> : <Shield style={iconSm} />}
             Deep Scan
           </button>
           <button onClick={() => run("fix")} disabled={running !== null} style={actionBtnStyle("#4ade80")}>
             {running === "fix" ? <Loader2 style={iconSm} className="animate-spin" /> : <Wrench style={iconSm} />}
             Auto Fix
+          </button>
+          <button onClick={() => run("full-fix")} disabled={running !== null} style={actionBtnStyle("#10b981")}>
+            {running === "full-fix" ? <Loader2 style={iconSm} className="animate-spin" /> : <Wrench style={iconSm} />}
+            Deep Fix (Auto)
           </button>
           <button onClick={() => run("validate")} disabled={running !== null} style={ghostBtnStyle}>
             {running === "validate" ? <Loader2 style={iconSm} className="animate-spin" /> : <CheckCircle style={iconSm} />}
@@ -140,14 +146,15 @@ export function DoctorView() {
       <div style={{ padding: "0 20px 10px", display: "flex", gap: 6, flexShrink: 0 }}>
         <QuickAction label="Status" running={running === "status"} onClick={() => run("status")} disabled={running !== null} />
         <QuickAction label="Gateway Health" running={running === "health"} onClick={() => run("health")} disabled={running !== null} />
+        <QuickAction label="Reindex Memory" running={running === "memory-reindex"} onClick={() => run("memory-reindex")} disabled={running !== null} />
       </div>
 
       {/* Body */}
       <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "0 20px 20px" }}>
         {error && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)", marginBottom: 12 }}>
-            <AlertTriangle style={{ width: 14, height: 14, color: "#f87171", flexShrink: 0 }} />
-            <span style={{ fontSize: 11, color: "#f87171", flex: 1 }}>{error}</span>
+            <AlertTriangle style={{ width: 14, height: 14, color: "var(--error)", flexShrink: 0 }} />
+            <span style={{ fontSize: 11, color: "var(--error)", flex: 1 }}>{error}</span>
             <button onClick={() => setError(null)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", fontSize: 14, cursor: "pointer" }}>×</button>
           </div>
         )}
@@ -155,11 +162,11 @@ export function DoctorView() {
         {/* Summary cards */}
         {hasSummary && (
           <div style={{ marginBottom: 16 }}>
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 500, display: "block", marginBottom: 6 }}>Overview</span>
+            <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500, display: "block", marginBottom: 6 }}>Overview</span>
             <div style={{ display: "flex", gap: 8 }}>
               <SummaryCard icon={CheckCircle} label="Passed" count={summary.pass} color="#4ade80" />
               <SummaryCard icon={AlertTriangle} label="Warnings" count={summary.warn} color="#fbbf24" />
-              <SummaryCard icon={XCircle} label="Failed" count={summary.fail} color="#f87171" />
+              <SummaryCard icon={XCircle} label="Failed" count={summary.fail} color="var(--error)" />
             </div>
           </div>
         )}
@@ -167,7 +174,7 @@ export function DoctorView() {
         {/* Terminal output */}
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 500 }}>Output</span>
+            <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Output</span>
             {outputs.length > 0 && (
               <button onClick={clearOutput} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.25)", fontSize: 10, cursor: "pointer" }}>
                 Clear
@@ -179,7 +186,7 @@ export function DoctorView() {
             ref={termRef}
             style={{
               background: "rgba(0,0,0,0.35)",
-              border: "1px solid rgba(255,255,255,0.08)",
+              border: "1px solid var(--border)",
               borderRadius: 10,
               padding: 0,
               minHeight: 200,
@@ -202,12 +209,12 @@ export function DoctorView() {
                   <div style={{
                     padding: "6px 14px",
                     background: "rgba(255,255,255,0.04)",
-                    borderBottom: "1px solid rgba(255,255,255,0.06)",
+                    borderBottom: "1px solid var(--border)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
                   }}>
-                    <span style={{ fontSize: 10, fontWeight: 600, color: "#3B82F6" }}>
+                    <span style={{ fontSize: 10, fontWeight: 600, color: "var(--accent)" }}>
                       {block.label}
                     </span>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -219,7 +226,7 @@ export function DoctorView() {
                         padding: "1px 6px",
                         borderRadius: 8,
                         background: block.exitCode === 0 ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)",
-                        color: block.exitCode === 0 ? "#4ade80" : "#f87171",
+                        color: block.exitCode === 0 ? "#4ade80" : "var(--error)",
                         border: `1px solid ${block.exitCode === 0 ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)"}`,
                       }}>
                         exit {block.exitCode}
@@ -241,7 +248,7 @@ export function DoctorView() {
             )}
 
             {running && (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", color: "rgba(255,255,255,0.4)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", color: "var(--text-muted)" }}>
                 <Loader2 style={{ width: 12, height: 12 }} className="animate-spin" />
                 <span style={{ fontSize: 11 }}>Running {COMMANDS[running].label}...</span>
               </div>
@@ -267,17 +274,17 @@ function actionBtnStyle(color: string): React.CSSProperties {
 
 const ghostBtnStyle: React.CSSProperties = {
   display: "flex", alignItems: "center", gap: 4, padding: "4px 10px",
-  borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)",
+  borderRadius: 6, border: "1px solid var(--border)",
   background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.6)",
   fontSize: 11, cursor: "pointer",
 };
 
 function SummaryCard({ icon: Icon, label, count, color }: { icon: React.ElementType; label: string; count: number; color: string }) {
   return (
-    <div style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "12px 14px", textAlign: "center" }}>
+    <div style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", textAlign: "center" }}>
       <Icon style={{ width: 18, height: 18, color, margin: "0 auto 6px", display: "block" }} />
       <span style={{ fontSize: 20, fontWeight: 700, color, display: "block" }}>{count}</span>
-      <span style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>{label}</span>
+      <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{label}</span>
     </div>
   );
 }
@@ -294,7 +301,7 @@ function QuickAction({ label, running, onClick, disabled }: { label: string; run
   return (
     <button onClick={onClick} disabled={disabled} style={{
       display: "flex", alignItems: "center", gap: 4, padding: "3px 10px",
-      borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)",
+      borderRadius: 6, border: "1px solid var(--border)",
       background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)",
       fontSize: 10, cursor: "pointer",
     }}>

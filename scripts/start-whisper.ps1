@@ -1,4 +1,4 @@
-# Mogwai Whisper STT Server Startup Script
+# Crystal Whisper STT Server Startup Script
 # Requires: Python 3.10+, CUDA 12.x
 
 param(
@@ -7,7 +7,7 @@ param(
 )
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  Mogwai Whisper STT Server" -ForegroundColor Cyan
+Write-Host "  Crystal Whisper STT Server" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 

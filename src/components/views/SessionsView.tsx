@@ -88,8 +88,8 @@ export function SessionsView() {
       <div style={{ padding: "14px 20px 10px", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
-            <h2 style={{ color: "white", fontSize: 15, fontWeight: 600, margin: 0 }}>Sessions</h2>
-            <p style={{ margin: "2px 0 0", fontSize: 10, color: "rgba(255,255,255,0.4)" }}>
+            <h2 style={{ color: "var(--text)", fontSize: 15, fontWeight: 600, margin: 0 }}>Sessions</h2>
+            <p style={{ margin: "2px 0 0", fontSize: 10, color: "var(--text-muted)" }}>
               {sessions.length} active &middot; {formatTokens(totalTokensUsed)} tokens used
             </p>
           </div>
@@ -100,7 +100,7 @@ export function SessionsView() {
               style={{
                 display: "flex", alignItems: "center", gap: 4, padding: "4px 10px",
                 borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
-                background: "rgba(248,113,113,0.1)", color: "#f87171",
+                background: "rgba(248,113,113,0.1)", color: "var(--error)",
                 opacity: cleaning ? 0.5 : 1,
               }}
             >
@@ -116,7 +116,7 @@ export function SessionsView() {
               style={{
                 display: "flex", alignItems: "center", gap: 4, padding: "4px 10px",
                 borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
-                background: "rgba(59,130,246,0.15)", color: "#60a5fa",
+                background: "rgba(59,130,246,0.15)", color: "var(--accent)",
               }}
             >
               <RefreshCw style={{ width: 10, height: 10 }} className={loading ? "animate-spin" : ""} />
@@ -129,15 +129,15 @@ export function SessionsView() {
       <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "0 20px 16px" }}>
         {loading ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
-            <Loader2 style={{ width: 24, height: 24, color: "#3B82F6" }} className="animate-spin" />
+            <Loader2 style={{ width: 24, height: 24, color: "var(--accent)" }} className="animate-spin" />
           </div>
         ) : error ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 40, gap: 8 }}>
-            <AlertTriangle style={{ width: 24, height: 24, color: "#f87171" }} />
-            <p style={{ fontSize: 12, color: "#f87171", textAlign: "center" }}>{error}</p>
+            <AlertTriangle style={{ width: 24, height: 24, color: "var(--error)" }} />
+            <p style={{ fontSize: 12, color: "var(--error)", textAlign: "center" }}>{error}</p>
             <button onClick={loadSessions} style={{
               padding: "4px 12px", borderRadius: 6, border: "none",
-              background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.6)",
+              background: "var(--border)", color: "rgba(255,255,255,0.6)",
               fontSize: 11, cursor: "pointer",
             }}>
               Retry
@@ -175,26 +175,26 @@ function SessionCard({ session, formatAge, formatTokens }: {
     : 0;
   const usagePercent = (usageRatio * 100).toFixed(1);
 
-  const barColor = usageRatio > 0.85 ? "#f87171"
-    : usageRatio > 0.6 ? "#fbbf24"
-    : "#3B82F6";
+  const barColor = usageRatio > 0.85 ? "var(--error)"
+    : usageRatio > 0.6 ? "var(--warning)"
+    : "var(--accent)";
 
   return (
     <div style={{
-      background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+      background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)",
       borderRadius: 10, padding: "10px 12px",
     }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{
-              fontSize: 12, color: "white", fontWeight: 500, fontFamily: "monospace",
+              fontSize: 12, color: "var(--text)", fontWeight: 500, fontFamily: "monospace",
             }}>
               {session.agentId}
             </span>
             <span style={{
               fontSize: 9, padding: "1px 5px", borderRadius: 3,
-              background: "rgba(59,130,246,0.12)", color: "#60a5fa",
+              background: "rgba(59,130,246,0.12)", color: "var(--accent)",
             }}>
               {session.modelProvider}
             </span>
@@ -215,7 +215,7 @@ function SessionCard({ session, formatAge, formatTokens }: {
       </div>
 
       <div style={{ marginTop: 8, display: "flex", gap: 12 }}>
-        <TokenStat icon={Zap} label="Input" value={formatTokens(session.inputTokens)} color="#60a5fa" />
+        <TokenStat icon={Zap} label="Input" value={formatTokens(session.inputTokens)} color="var(--accent)" />
         <TokenStat icon={MessageSquare} label="Output" value={formatTokens(session.outputTokens)} color="#a78bfa" />
         <TokenStat icon={Cpu} label="Total" value={formatTokens(session.totalTokens)} color="rgba(255,255,255,0.6)" />
       </div>

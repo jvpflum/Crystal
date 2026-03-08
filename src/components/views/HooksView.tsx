@@ -200,13 +200,13 @@ export function HooksView() {
       {/* Header */}
       <div style={{ padding: "14px 20px 10px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <h2 style={{ color: "white", fontSize: 15, fontWeight: 600, margin: 0 }}>Hooks</h2>
+          <h2 style={{ color: "var(--text)", fontSize: 15, fontWeight: 600, margin: 0 }}>Hooks</h2>
           {!loading && (
             <div style={{ display: "flex", gap: 6 }}>
-              <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: "rgba(74,222,128,0.1)", color: "#4ade80", border: "1px solid rgba(74,222,128,0.2)" }}>
+              <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: "rgba(74,222,128,0.1)", color: "var(--success)", border: "1px solid rgba(74,222,128,0.2)" }}>
                 {enabledCount} active
               </span>
-              <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.4)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: "rgba(255,255,255,0.05)", color: "var(--text-muted)", border: "1px solid var(--border)" }}>
                 {hooks.length} total
               </span>
             </div>
@@ -218,7 +218,7 @@ export function HooksView() {
             style={{
               display: "flex", alignItems: "center", gap: 4, padding: "4px 10px",
               borderRadius: 6, border: "1px solid rgba(59,130,246,0.3)", background: "rgba(59,130,246,0.12)",
-              color: "#60a5fa", fontSize: 11, cursor: "pointer",
+              color: "var(--accent)", fontSize: 11, cursor: "pointer",
             }}
           >
             <Plus style={{ width: 12, height: 12 }} /> Install
@@ -228,7 +228,7 @@ export function HooksView() {
             disabled={updating}
             style={{
               display: "flex", alignItems: "center", gap: 4, padding: "4px 10px",
-              borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)",
+              borderRadius: 6, border: "1px solid var(--border)", background: "rgba(255,255,255,0.04)",
               color: "rgba(255,255,255,0.6)", fontSize: 11, cursor: "pointer",
             }}
           >
@@ -240,7 +240,7 @@ export function HooksView() {
             disabled={checkingEligibility}
             style={{
               display: "flex", alignItems: "center", gap: 4, padding: "4px 10px",
-              borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)",
+              borderRadius: 6, border: "1px solid var(--border)", background: "rgba(255,255,255,0.04)",
               color: "rgba(255,255,255,0.6)", fontSize: 11, cursor: "pointer",
             }}
           >
@@ -265,15 +265,15 @@ export function HooksView() {
         {/* Error */}
         {error && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)", marginBottom: 12 }}>
-            <AlertTriangle style={{ width: 14, height: 14, color: "#f87171", flexShrink: 0 }} />
-            <span style={{ fontSize: 11, color: "#f87171", flex: 1 }}>{error}</span>
+            <AlertTriangle style={{ width: 14, height: 14, color: "var(--error)", flexShrink: 0 }} />
+            <span style={{ fontSize: 11, color: "var(--error)", flex: 1 }}>{error}</span>
             <button onClick={() => setError(null)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", fontSize: 14, cursor: "pointer" }}>×</button>
           </div>
         )}
 
         {/* Install panel */}
         {showInstall && (
-          <div style={{ marginBottom: 12, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: 14 }}>
+          <div style={{ marginBottom: 12, background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
             <span style={{ fontSize: 10, textTransform: "uppercase", color: "rgba(255,255,255,0.35)", letterSpacing: 1, fontWeight: 600, display: "block", marginBottom: 8 }}>
               INSTALL HOOK
             </span>
@@ -285,7 +285,7 @@ export function HooksView() {
                 onKeyDown={(e) => e.key === "Enter" && installHook()}
                 style={{
                   flex: 1, fontSize: 12, padding: "8px 12px", borderRadius: 8,
-                  border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)",
+                  border: "1px solid var(--border)", background: "rgba(255,255,255,0.04)",
                   color: "rgba(255,255,255,0.9)", outline: "none",
                 }}
               />
@@ -294,7 +294,7 @@ export function HooksView() {
                 disabled={installing || !installSpec.trim()}
                 style={{
                   padding: "8px 16px", borderRadius: 8, border: "none",
-                  background: "rgba(59,130,246,0.2)", color: "#60a5fa",
+                  background: "rgba(59,130,246,0.2)", color: "var(--accent)",
                   fontSize: 12, fontWeight: 500, cursor: "pointer",
                   opacity: installing || !installSpec.trim() ? 0.5 : 1,
                 }}
@@ -311,7 +311,7 @@ export function HooksView() {
             <span style={{ fontSize: 10, textTransform: "uppercase", color: "rgba(255,255,255,0.35)", letterSpacing: 1, fontWeight: 600, display: "block", marginBottom: 6 }}>
               ELIGIBILITY CHECK
             </span>
-            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden" }}>
+            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
               {eligibility.length === 0 ? (
                 <div style={{ padding: "16px", textAlign: "center", fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
                   No eligibility data returned
@@ -326,11 +326,11 @@ export function HooksView() {
                     }}
                   >
                     {item.eligible ? (
-                      <CheckCircle style={{ width: 13, height: 13, color: "#4ade80", flexShrink: 0 }} />
+                      <CheckCircle style={{ width: 13, height: 13, color: "var(--success)", flexShrink: 0 }} />
                     ) : (
-                      <XCircle style={{ width: 13, height: 13, color: "#f87171", flexShrink: 0 }} />
+                      <XCircle style={{ width: 13, height: 13, color: "var(--error)", flexShrink: 0 }} />
                     )}
-                    <span style={{ fontSize: 12, color: "white", flex: 1, fontFamily: "monospace" }}>{item.name}</span>
+                    <span style={{ fontSize: 12, color: "var(--text)", flex: 1, fontFamily: "monospace" }}>{item.name}</span>
                     {item.reason && (
                       <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)" }}>{item.reason}</span>
                     )}
@@ -360,7 +360,7 @@ export function HooksView() {
               placeholder="Filter hooks..."
               style={{
                 width: "100%", fontSize: 12, padding: "8px 12px 8px 32px", borderRadius: 8,
-                border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)",
+                border: "1px solid var(--border)", background: "rgba(255,255,255,0.03)",
                 color: "rgba(255,255,255,0.8)", outline: "none", boxSizing: "border-box",
               }}
             />
@@ -378,7 +378,7 @@ export function HooksView() {
               <Loader2 style={{ width: 20, height: 20, color: "rgba(255,255,255,0.3)", animation: "spin 1s linear infinite" }} />
             </div>
           ) : filtered.length === 0 ? (
-            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "24px 16px", textAlign: "center" }}>
+            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", borderRadius: 10, padding: "24px 16px", textAlign: "center" }}>
               <Anchor style={{ width: 28, height: 28, color: "rgba(255,255,255,0.12)", margin: "0 auto 8px", display: "block" }} />
               <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0 }}>
                 {hooks.length === 0 ? "No hooks installed" : "No hooks match your filter"}
@@ -388,7 +388,7 @@ export function HooksView() {
               </p>
             </div>
           ) : (
-            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden" }}>
+            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
               {filtered.map((hook, i) => (
                 <div key={hook.name} style={{ borderBottom: i < filtered.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}>
@@ -402,24 +402,24 @@ export function HooksView() {
                       }
                     </button>
 
-                    <Anchor style={{ width: 14, height: 14, color: hook.enabled ? "#60a5fa" : "rgba(255,255,255,0.2)", flexShrink: 0 }} />
+                    <Anchor style={{ width: 14, height: 14, color: hook.enabled ? "var(--accent)" : "rgba(255,255,255,0.2)", flexShrink: 0 }} />
 
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontSize: 12, fontWeight: 500, color: "white", fontFamily: "monospace" }}>{hook.name}</span>
+                        <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text)", fontFamily: "monospace" }}>{hook.name}</span>
                         {hook.version && (
                           <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.35)" }}>
                             v{hook.version}
                           </span>
                         )}
                         {hook.type && (
-                          <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, background: "rgba(59,130,246,0.1)", color: "#60a5fa", border: "1px solid rgba(59,130,246,0.2)" }}>
+                          <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, background: "rgba(59,130,246,0.1)", color: "var(--accent)", border: "1px solid rgba(59,130,246,0.2)" }}>
                             {hook.type}
                           </span>
                         )}
                       </div>
                       {hook.description && (
-                        <p style={{ margin: "2px 0 0", fontSize: 10, color: "rgba(255,255,255,0.4)" }}>{hook.description}</p>
+                        <p style={{ margin: "2px 0 0", fontSize: 10, color: "var(--text-muted)" }}>{hook.description}</p>
                       )}
                     </div>
 
@@ -429,14 +429,14 @@ export function HooksView() {
                       disabled={toggling === hook.name}
                       style={{
                         width: 40, height: 22, borderRadius: 11, border: "none", cursor: "pointer",
-                        background: hook.enabled ? "rgba(74,222,128,0.3)" : "rgba(255,255,255,0.1)",
+                        background: hook.enabled ? "rgba(74,222,128,0.3)" : "var(--border)",
                         position: "relative", flexShrink: 0, transition: "background 0.2s",
                         opacity: toggling === hook.name ? 0.5 : 1,
                       }}
                     >
                       <div style={{
                         width: 16, height: 16, borderRadius: "50%",
-                        background: hook.enabled ? "#4ade80" : "rgba(255,255,255,0.4)",
+                        background: hook.enabled ? "var(--success)" : "rgba(255,255,255,0.4)",
                         position: "absolute", top: 3,
                         left: hook.enabled ? 21 : 3,
                         transition: "left 0.2s, background 0.2s",
@@ -485,7 +485,7 @@ export function HooksView() {
                             <div>
                               <span style={{ fontSize: 9, textTransform: "uppercase", color: "rgba(255,255,255,0.3)", letterSpacing: 0.5 }}>Config</span>
                               <pre style={{
-                                fontSize: 10, fontFamily: "monospace", color: "rgba(255,255,255,0.4)",
+                                fontSize: 10, fontFamily: "monospace", color: "var(--text-muted)",
                                 background: "rgba(0,0,0,0.2)", borderRadius: 6, padding: 8, marginTop: 4,
                                 overflow: "auto", maxHeight: 120,
                               }}>

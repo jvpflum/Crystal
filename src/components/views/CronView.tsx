@@ -16,6 +16,7 @@ import {
   Activity,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { escapeShellArg } from "@/lib/tools";
 
 interface CronJob {
   id: string;
@@ -102,8 +103,12 @@ export function CronView() {
         command: "npx openclaw cron list --json", cwd: null,
       });
       if (result.code === 0 && result.stdout.trim()) {
-        const parsed = JSON.parse(result.stdout);
-        setJobs(Array.isArray(parsed) ? parsed : parsed.jobs ?? []);
+        try {
+          const parsed = JSON.parse(result.stdout);
+          setJobs(Array.isArray(parsed) ? parsed : parsed.jobs ?? []);
+        } catch {
+          setJobs([]);
+        }
       } else {
         setJobs([]);
       }
@@ -169,9 +174,10 @@ export function CronView() {
     if (!sched.trim() || !msg.trim()) return;
     setAdding(true);
     try {
-      const escaped = msg.replace(/"/g, '\\"');
+      const escaped = escapeShellArg(msg);
+      const escapedSched = escapeShellArg(sched);
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `npx openclaw cron add --schedule "${sched}" --message "${escaped}" --agent main`, cwd: null,
+        command: `npx openclaw cron add --schedule "${escapedSched}" --message "${escaped}" --agent main`, cwd: null,
       });
       if (result.code === 0) {
         setNewSchedule(""); setNewMessage(""); setShowAdd(false);

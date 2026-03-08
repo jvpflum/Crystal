@@ -36,13 +36,13 @@ export function TitleBar() {
         <TitleButton onClick={() => setMinimized(true)} title="Float Mode">
           <Minimize2 style={{ width: 13, height: 13 }} />
         </TitleButton>
-        <TitleButton onClick={() => appWindow.hide()} title="Minimize">
+        <TitleButton onClick={() => appWindow.minimize()} title="Minimize" aria-label="Minimize">
           <Minus style={{ width: 13, height: 13 }} />
         </TitleButton>
-        <TitleButton onClick={() => appWindow.toggleMaximize()} title="Maximize">
+        <TitleButton onClick={() => appWindow.toggleMaximize()} title="Maximize" aria-label="Maximize">
           <Square style={{ width: 11, height: 11 }} />
         </TitleButton>
-        <TitleButton onClick={() => appWindow.hide()} title="Close" isClose>
+        <TitleButton onClick={() => appWindow.hide()} title="Minimize to tray" isClose aria-label="Minimize to tray">
           <X style={{ width: 13, height: 13 }} />
         </TitleButton>
       </div>
@@ -50,13 +50,14 @@ export function TitleBar() {
   );
 }
 
-function TitleButton({ onClick, title, isClose, children }: {
-  onClick: () => void; title: string; isClose?: boolean; children: React.ReactNode;
+function TitleButton({ onClick, title, isClose, children, "aria-label": ariaLabel }: {
+  onClick: () => void; title: string; isClose?: boolean; children: React.ReactNode; "aria-label"?: string;
 }) {
   return (
     <button
       onClick={onClick}
       title={title}
+      aria-label={ariaLabel || title}
       style={{
         width: 32, height: 28, borderRadius: 6, border: "none", cursor: "pointer",
         background: "transparent", color: "var(--text-muted)",

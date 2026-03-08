@@ -1,18 +1,18 @@
-import { useState, useEffect, useCallback, useRef, type CSSProperties } from "react";
+import { useState, useEffect, useCallback, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useAppStore, type AppView } from "@/stores/appStore";
+import { useAppStore } from "@/stores/appStore";
 import { openclawClient } from "@/lib/openclaw";
 import { cachedCommand } from "@/lib/cache";
 import { VoiceOrb } from "@/components/voice/VoiceOrb";
 import { GpuMonitor } from "@/components/widgets/GpuMonitor";
 import { LobsterIcon } from "@/components/LobsterIcon";
 import {
-  Radio, Bot, Monitor, Activity, Wrench, Box, Users, Brain,
-  Clock, Shield, Stethoscope, MessageSquare, Sun, Zap,
-  AlertTriangle, ShieldAlert, Database, Percent, Loader2, CheckCircle,
+  Radio, Bot, Monitor, Activity, Wrench,
+  Clock, Shield, Stethoscope, Sun, Zap,
+  AlertTriangle, ShieldAlert, Database, Percent, Loader2,
   Cpu, MemoryStick, HardDrive, Bolt, Trash2, Wifi, BatteryFull,
   Gauge, RefreshCw, Power, RotateCcw, FolderCog, ShieldCheck,
-  MonitorDown, Layers,
+  MonitorDown, Layers, Heart,
 } from "lucide-react";
 
 // Global caches so data survives tab switches without re-fetching
@@ -51,16 +51,6 @@ function safeParse(stdout: string) {
   try { return JSON.parse(stdout.slice(start)); } catch { return null; }
 }
 
-const NAV_ITEMS: { icon: React.ElementType; label: string; view: AppView; color: string }[] = [
-  { icon: MessageSquare, label: "Chat",     view: "conversation", color: "var(--accent)" },
-  { icon: Wrench,        label: "Skills",   view: "marketplace",  color: "var(--warning)" },
-  { icon: Box,           label: "Models",   view: "models",       color: "#a855f7" },
-  { icon: Users,         label: "Agents",   view: "agents",       color: "var(--accent)" },
-  { icon: Brain,         label: "Memory",   view: "memory",       color: "#a855f7" },
-  { icon: Clock,         label: "Cron",     view: "cron",         color: "var(--warning)" },
-  { icon: Shield,        label: "Security", view: "security",     color: "var(--success)" },
-  { icon: Stethoscope,   label: "Doctor",   view: "doctor",       color: "var(--error)" },
-];
 
 const card = (extra?: CSSProperties): CSSProperties => ({
   background: "var(--bg-elevated)",
@@ -90,10 +80,6 @@ export function HomeView() {
   const [loading, setLoading] = useState(true);
   const [actionRunning, setActionRunning] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<string | null>(null);
-  const [powerUpRunning, setPowerUpRunning] = useState(false);
-  const [powerUpProgress, setPowerUpProgress] = useState<string | null>(null);
-  const [powerUpComplete, setPowerUpComplete] = useState(false);
-  const [powerUpEnabledCount, setPowerUpEnabledCount] = useState<number | null>(null);
 
   useEffect(() => {
     if (_dashboardCache && Date.now() - _dashboardCache.ts < DASHBOARD_TTL) {
@@ -162,62 +148,6 @@ export function HomeView() {
       setActionResult(`Error: ${e instanceof Error ? e.message : "Unknown"}`);
     } finally {
       setActionRunning(null);
-    }
-  };
-
-  const runPowerUp = async () => {
-    setPowerUpRunning(true);
-    setPowerUpProgress(null);
-    setPowerUpComplete(false);
-    setPowerUpEnabledCount(null);
-    try {
-      setPowerUpProgress("Running setup...");
-      await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw setup --non-interactive --mode local",
-        cwd: null,
-      }).catch(() => {});
-
-      setPowerUpProgress("Fetching plugins...");
-      const pluginsResult = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw plugins list --json",
-        cwd: null,
-      });
-      const pluginsData = safeParse(pluginsResult.stdout);
-      const plugins = pluginsData?.plugins ?? [];
-      const disabled = plugins.filter((p: { enabled?: boolean; id?: string }) => !p.enabled && p.id);
-      const total = disabled.length;
-
-      let enabledCount = 0;
-      for (let i = 0; i < disabled.length; i++) {
-        setPowerUpProgress(`Enabling ${i + 1}/${total}...`);
-        await invoke("execute_command", {
-          command: `npx openclaw plugins enable ${disabled[i].id}`,
-          cwd: null,
-        }).catch(() => {});
-        enabledCount++;
-      }
-
-      setPowerUpProgress("Running security audit...");
-      await invoke("execute_command", {
-        command: "npx openclaw security audit --fix",
-        cwd: null,
-      }).catch(() => {});
-
-      setPowerUpProgress("Reindexing memory...");
-      await invoke("execute_command", {
-        command: "npx openclaw memory reindex",
-        cwd: null,
-      }).catch(() => {});
-
-      setPowerUpEnabledCount(enabledCount);
-      setPowerUpComplete(true);
-      setPowerUpProgress(null);
-    } catch {
-      setPowerUpProgress(null);
-      setPowerUpComplete(true);
-      setPowerUpEnabledCount(0);
-    } finally {
-      setPowerUpRunning(false);
     }
   };
 
@@ -320,79 +250,6 @@ export function HomeView() {
         <MetricCard icon={Database} label="Memory" value={loading ? "…" : data.memoryChunks} color="var(--success)" />
       </div>
 
-      {/* ── OpenClaw Power-Up ── */}
-      <div style={{
-        background: "linear-gradient(135deg, var(--accent-bg), rgba(139,92,246,0.08))",
-        border: "1px solid var(--accent-bg)",
-        borderRadius: 12,
-        padding: "16px 20px",
-        marginBottom: 16,
-      }}>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 10,
-            background: "linear-gradient(135deg, var(--accent-bg), rgba(139,92,246,0.2))",
-            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-          }}>
-            <Zap style={{ width: 18, height: 18, color: "var(--accent-hover)" }} />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--text)" }}>
-              Power Up OpenClaw
-            </h3>
-            <p style={{ margin: "4px 0 12px", fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>
-              {powerUpComplete
-                ? (powerUpEnabledCount !== null && powerUpEnabledCount > 0
-                  ? `Done! Enabled ${powerUpEnabledCount} plugin${powerUpEnabledCount === 1 ? "" : "s"}, fixed security, and reindexed memory.`
-                  : "Done! Security audit and memory reindex complete.")
-                : powerUpProgress ?? "One click to enable all plugins, fix security, and reindex memory."}
-            </p>
-            {powerUpComplete ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--success)", fontSize: 12 }}>
-                <CheckCircle style={{ width: 16, height: 16, flexShrink: 0 }} />
-                <span>All set</span>
-              </div>
-            ) : (
-              <button
-                onClick={runPowerUp}
-                disabled={powerUpRunning}
-                style={{
-                  background: "linear-gradient(135deg, var(--accent), var(--accent-hover))",
-                  border: "none",
-                  borderRadius: 8,
-                  padding: "8px 16px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "var(--text)",
-                  cursor: powerUpRunning ? "wait" : "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                  opacity: powerUpRunning ? 0.8 : 1,
-                }}
-              >
-                {powerUpRunning ? (
-                  <>
-                    <Loader2 style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} />
-                    {powerUpProgress ?? "Running..."}
-                  </>
-                ) : (
-                  "Power Up"
-                )}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Quick Navigation ── */}
-      <SectionLabel text="Navigate" />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 20 }}>
-        {NAV_ITEMS.map(n => (
-          <NavCard key={n.view} icon={n.icon} label={n.label} color={n.color} onClick={() => setView(n.view)} />
-        ))}
-      </div>
-
       {/* ── Quick Actions ── */}
       <SectionLabel text="Quick Actions" />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
@@ -469,6 +326,10 @@ export function HomeView() {
       {/* ── System Monitor ── */}
       <SectionLabel text="System Monitor" />
       <SystemMonitor />
+
+      {/* ── Heartbeat (Autonomous Monitoring) ── */}
+      <SectionLabel text="Heartbeat" />
+      <HeartbeatCard />
 
       {/* ── PC Optimizer ── */}
       <SectionLabel text="PC Optimizer" />
@@ -548,25 +409,6 @@ function MetricCard({ icon: Icon, label, value, color }: {
       <p style={{ margin: 0, fontSize: 16, color: "var(--text)", fontWeight: 700, lineHeight: 1.1 }}>{value}</p>
       <p style={{ margin: "3px 0 0", fontSize: 9, color: "var(--text-muted)" }}>{label}</p>
     </div>
-  );
-}
-
-function NavCard({ icon: Icon, label, color, onClick }: {
-  icon: React.ElementType; label: string; color: string; onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      onMouseEnter={hoverIn}
-      onMouseLeave={hoverOut}
-      style={{
-        ...card({ padding: "14px 8px", cursor: "pointer" }),
-        display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
-      }}
-    >
-      <Icon style={{ width: 18, height: 18, color }} />
-      <span style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 500 }}>{label}</span>
-    </button>
   );
 }
 
@@ -743,6 +585,285 @@ function SystemMonitor() {
   );
 }
 
+/* ─── Heartbeat (Autonomous Monitoring) ─── */
+
+const HEARTBEAT_INTERVALS = [
+  { label: "15 min", minutes: 15 },
+  { label: "30 min", minutes: 30 },
+  { label: "1 hr", minutes: 60 },
+  { label: "2 hr", minutes: 120 },
+] as const;
+
+const HEARTBEAT_PRESETS = [
+  "Monitor my inbox and summarize unread emails",
+  "Check GitHub for new issues and PRs on my repos",
+  "Review my calendar and remind me of upcoming events",
+  "Check system health and alert if disk usage > 90%",
+];
+
+interface HeartbeatStatus {
+  enabled?: boolean;
+  intervalMinutes?: number;
+  lastRun?: string;
+  message?: string;
+}
+
+function HeartbeatCard() {
+  const [status, setStatus] = useState<HeartbeatStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState("");
+  const [intervalMinutes, setIntervalMinutes] = useState<number>(30);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: "npx openclaw heartbeat status --json",
+        cwd: null,
+      });
+      const parsed = safeParse(result.stdout);
+      if (parsed) {
+        setStatus({
+          enabled: parsed.enabled ?? parsed.heartbeat?.enabled,
+          intervalMinutes: parsed.intervalMinutes ?? parsed.interval ?? parsed.heartbeat?.intervalMinutes,
+          lastRun: parsed.lastRun ?? parsed.last_run ?? parsed.heartbeat?.lastRun,
+          message: parsed.message ?? parsed.heartbeat?.message,
+        });
+        setIntervalMinutes(parsed.intervalMinutes ?? parsed.interval ?? parsed.heartbeat?.intervalMinutes ?? 30);
+        setPrompt(parsed.message ?? parsed.heartbeat?.message ?? "");
+      } else {
+        setStatus({ enabled: false });
+      }
+    } catch {
+      setStatus({ enabled: false });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStatus();
+  }, [fetchStatus]);
+
+  const toggleHeartbeat = async () => {
+    const enabled = status?.enabled ?? false;
+    setBusy("toggle");
+    try {
+      await invoke("execute_command", {
+        command: enabled ? "npx openclaw heartbeat disable" : "npx openclaw heartbeat enable",
+        cwd: null,
+      });
+      await fetchStatus();
+    } catch {
+      /* degrade gracefully */
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const setHeartbeatInterval = async (minutes: number) => {
+    setBusy("interval");
+    try {
+      await invoke("execute_command", {
+        command: `npx openclaw heartbeat interval ${minutes}`,
+        cwd: null,
+      });
+      setIntervalMinutes(minutes);
+      await fetchStatus();
+    } catch {
+      /* degrade gracefully */
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const savePrompt = async () => {
+    if (!prompt.trim()) return;
+    setBusy("save");
+    try {
+      const escaped = prompt.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      await invoke("execute_command", {
+        command: `npx openclaw heartbeat set --message "${escaped}"`,
+        cwd: null,
+      });
+      await fetchStatus();
+    } catch {
+      /* degrade gracefully */
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ ...card({ padding: 20, textAlign: "center" as const, marginBottom: 16 }) }}>
+        <Loader2 style={{ width: 16, height: 16, color: "var(--text-muted)", animation: "spin 1s linear infinite" }} />
+      </div>
+    );
+  }
+
+  const isEnabled = status?.enabled ?? false;
+
+  return (
+    <div
+      onMouseEnter={hoverIn}
+      onMouseLeave={hoverOut}
+      style={{
+        ...card({ padding: "16px 20px", marginBottom: 16 }),
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 10,
+            background: `color-mix(in srgb, ${isEnabled ? "var(--accent)" : "var(--text-muted)"} 12%, transparent)`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Heart style={{ width: 18, height: 18, color: isEnabled ? "var(--accent)" : "var(--text-muted)" }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--text)" }}>
+            Autonomous Heartbeat
+          </h3>
+          <p style={{ margin: "2px 0 0", fontSize: 11, color: "var(--text-muted)" }}>
+            {isEnabled ? "Active" : "Disabled"} • Interval: {intervalMinutes} min
+            {status?.lastRun ? ` • Last run: ${status.lastRun}` : ""}
+          </p>
+        </div>
+        <button
+          onClick={toggleHeartbeat}
+          disabled={busy === "toggle"}
+          style={{
+            background: isEnabled ? "var(--bg-hover)" : "var(--accent)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: "8px 14px",
+            fontSize: 11,
+            fontWeight: 600,
+            color: "var(--text)",
+            cursor: busy === "toggle" ? "wait" : "pointer",
+            opacity: busy === "toggle" ? 0.7 : 1,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          {busy === "toggle" ? (
+            <>
+              <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite", flexShrink: 0 }} />
+              Updating...
+            </>
+          ) : (
+            isEnabled ? "Disable" : "Enable"
+          )}
+        </button>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <label style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          Interval
+        </label>
+        <select
+          value={intervalMinutes}
+          onChange={(e) => setHeartbeatInterval(Number(e.target.value))}
+          disabled={busy === "interval"}
+          style={{
+            background: "var(--bg-hover)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: "8px 12px",
+            fontSize: 12,
+            color: "var(--text)",
+            cursor: busy === "interval" ? "wait" : "pointer",
+            maxWidth: 140,
+          }}
+        >
+          {HEARTBEAT_INTERVALS.map(({ label, minutes }) => (
+            <option key={minutes} value={minutes}>{label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <label style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          What should Crystal monitor for you?
+        </label>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="e.g. Monitor my inbox and summarize unread emails"
+          rows={3}
+          style={{
+            background: "var(--bg-hover)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: "10px 12px",
+            fontSize: 12,
+            color: "var(--text)",
+            resize: "vertical",
+            fontFamily: "inherit",
+          }}
+        />
+        <button
+          onClick={savePrompt}
+          disabled={busy === "save" || !prompt.trim()}
+          style={{
+            background: "var(--accent)",
+            border: "none",
+            borderRadius: 8,
+            padding: "8px 16px",
+            fontSize: 11,
+            fontWeight: 600,
+            color: "var(--text)",
+            cursor: busy === "save" || !prompt.trim() ? "not-allowed" : "pointer",
+            alignSelf: "flex-start",
+            opacity: busy === "save" || !prompt.trim() ? 0.6 : 1,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          {busy === "save" ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite", flexShrink: 0 }} /> : null}
+          Save
+        </button>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          Quick presets
+        </span>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {HEARTBEAT_PRESETS.map((preset) => (
+            <button
+              key={preset}
+              onClick={() => setPrompt(preset)}
+              style={{
+                background: "var(--bg-hover)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                padding: "6px 10px",
+                fontSize: 10,
+                color: "var(--text-secondary)",
+                cursor: "pointer",
+              }}
+            >
+              {preset}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── PC Optimizer ─── */
 
 interface OptimizerAction {
@@ -753,6 +874,7 @@ interface OptimizerAction {
   color: string;
   command: string;
   successMsg: string;
+  confirm?: string;
 }
 
 const OPTIMIZER_ACTIONS: OptimizerAction[] = [
@@ -854,6 +976,7 @@ const OPTIMIZER_ACTIONS: OptimizerAction[] = [
     color: "#8b5cf6",
     command: `Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VisualEffects" -Name VisualFXSetting -Value 2 -ErrorAction SilentlyContinue; Set-ItemProperty -Path "HKCU:\\Control Panel\\Desktop" -Name UserPreferencesMask -Value ([byte[]](0x90,0x12,0x03,0x80,0x10,0x00,0x00,0x00)) -ErrorAction SilentlyContinue; Write-Output 'Visual effects set to best performance (restart Explorer to apply)'`,
     successMsg: "Visual effects minimized",
+    confirm: "This will disable Windows visual effects (animations, shadows, transparency). Continue?",
   },
   {
     id: "gpu-reset",
@@ -863,6 +986,7 @@ const OPTIMIZER_ACTIONS: OptimizerAction[] = [
     color: "#06b6d4",
     command: `$dev = Get-PnpDevice -Class Display -Status OK -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -match 'NVIDIA' }; if ($dev) { Disable-PnpDevice -InstanceId $dev.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Enable-PnpDevice -InstanceId $dev.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Write-Output "NVIDIA GPU driver restarted" } else { Write-Output "No NVIDIA device found" }`,
     successMsg: "GPU driver restarted",
+    confirm: "This will briefly disable and re-enable your NVIDIA GPU driver. Your screen may flicker. Continue?",
   },
 ];
 
@@ -871,6 +995,7 @@ function PcOptimizer() {
   const [results, setResults] = useState<Record<string, { success: boolean; message: string }>>({});
 
   const runAction = async (action: OptimizerAction) => {
+    if (action.confirm && !window.confirm(action.confirm)) return;
     setRunningId(action.id);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {

@@ -20,7 +20,7 @@ export type AppView =
   | "nodes"
   | "browser";
 
-export type VoiceState = "idle" | "listening" | "thinking" | "speaking";
+export type VoiceState = "idle" | "listening" | "processing" | "thinking" | "speaking";
 
 interface AppState {
   currentView: AppView;

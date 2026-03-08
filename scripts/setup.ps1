@@ -1,8 +1,8 @@
-# Mogwai Setup Script
+# Crystal Setup Script
 # Installs Python and required dependencies for voice servers
 
 Write-Host "========================================" -ForegroundColor Magenta
-Write-Host "  Mogwai Setup - Voice Server Setup" -ForegroundColor Magenta
+Write-Host "  Crystal Setup - Voice Server Setup" -ForegroundColor Magenta
 Write-Host "========================================" -ForegroundColor Magenta
 Write-Host ""
 
@@ -75,10 +75,10 @@ Write-Host "========================================" -ForegroundColor Green
 Write-Host "  Setup Complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "Voice servers will start automatically when you run Mogwai." -ForegroundColor White
+Write-Host "Voice servers will start automatically when you run Crystal." -ForegroundColor White
 Write-Host ""
 Write-Host "To test the servers manually:" -ForegroundColor Gray
-Write-Host "  cd mogwai" -ForegroundColor Gray
+Write-Host "  cd crystal" -ForegroundColor Gray
 Write-Host "  .\scripts\start-whisper.ps1  # STT on port 8080" -ForegroundColor Gray
 Write-Host "  .\scripts\start-tts.ps1      # TTS on port 8081" -ForegroundColor Gray
 Write-Host ""

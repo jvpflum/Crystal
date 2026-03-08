@@ -9,16 +9,19 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, Runtime, AppHandle,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-#[derive(Serialize, Deserialize)]
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+#[derive(Serialize)]
 struct CommandResult {
     stdout: String,
     stderr: String,
     code: i32,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 struct ServerStatus {
     whisper_running: bool,
     tts_running: bool,
@@ -31,6 +34,7 @@ struct ServerProcesses {
     whisper: Option<Child>,
     tts: Option<Child>,
     openclaw: Option<Child>,
+    http_client: reqwest::Client,
 }
 
 struct AppState {
@@ -46,33 +50,28 @@ impl Default for AppState {
                 whisper: None,
                 tts: None,
                 openclaw: None,
+                http_client: reqwest::Client::new(),
             }),
             scripts_dir: Mutex::new(None),
         }
     }
 }
 
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
-/// GPU stats via nvidia-smi directly — no PowerShell, no cmd.exe.
-/// This is called every few seconds so it must never flash a window.
+/// GPU stats via nvidia-smi — routed through cmd.exe to prevent console flash.
 #[tauri::command]
 async fn get_gpu_stats() -> Result<CommandResult, String> {
     tokio::task::spawn_blocking(|| {
         #[cfg(target_os = "windows")]
         let output = {
-            let mut cmd = Command::new("nvidia-smi");
+            let mut cmd = Command::new("cmd");
             cmd.args([
-                "--query-gpu=name,utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu,power.draw,power.limit",
-                "--format=csv,noheader,nounits",
+                "/C",
+                "nvidia-smi --query-gpu=name,utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu,power.draw,power.limit --format=csv,noheader,nounits",
             ])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null())
-            .creation_flags(0x08000000);
+            .creation_flags(CREATE_NO_WINDOW);
             cmd.output()
         };
         #[cfg(not(target_os = "windows"))]
@@ -127,7 +126,7 @@ Write-Output "UPTIME:$upStr"
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .stdin(Stdio::null())
-                .creation_flags(0x08000000);
+                .creation_flags(CREATE_NO_WINDOW);
             cmd.output()
         };
         #[cfg(not(target_os = "windows"))]
@@ -186,7 +185,7 @@ async fn execute_command(command: String, cwd: Option<String>) -> Result<Command
             full_path.push_str(&sys_path);
             cmd.env("PATH", &full_path);
 
-            cmd.creation_flags(0x08000000).output()
+            cmd.creation_flags(CREATE_NO_WINDOW).output()
         };
 
         #[cfg(not(target_os = "windows"))]
@@ -279,8 +278,21 @@ fn list_directory(path: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-async fn http_proxy(method: String, url: String, body: Option<String>, headers: Option<std::collections::HashMap<String, String>>) -> Result<String, String> {
-    let client = reqwest::Client::new();
+async fn http_proxy(state: tauri::State<'_, AppState>, method: String, url: String, body: Option<String>, headers: Option<std::collections::HashMap<String, String>>) -> Result<String, String> {
+    if let Ok(parsed) = url.parse::<reqwest::Url>() {
+        match parsed.host_str() {
+            Some("localhost") | Some("127.0.0.1") | Some("0.0.0.0") => {}
+            _ => return Err("http_proxy restricted to localhost".to_string()),
+        }
+    } else {
+        return Err("Invalid URL".to_string());
+    }
+
+    let client = {
+        let servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
+        servers.http_client.clone()
+    };
+
     let mut req = match method.to_uppercase().as_str() {
         "GET" => client.get(&url),
         "POST" => client.post(&url),
@@ -335,13 +347,14 @@ fn find_python() -> Option<String> {
     let candidates = ["python", "python3", "py"];
     
     for cmd in candidates {
-        let result = Command::new(cmd)
-            .args(["--version"])
+        let mut command = Command::new(cmd);
+        command.args(["--version"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .stdin(Stdio::null())
-            .creation_flags(0x08000000)
-            .status();
+            .stdin(Stdio::null());
+        #[cfg(target_os = "windows")]
+        command.creation_flags(CREATE_NO_WINDOW);
+        let result = command.status();
         
         if let Ok(status) = result {
             if status.success() {
@@ -386,26 +399,26 @@ fn find_python() -> Option<String> {
 }
 
 /// Spawn a background process with no visible window on Windows.
-/// Uses CREATE_NO_WINDOW to prevent console allocation entirely.
-/// Do NOT combine with -WindowStyle Hidden (it conflicts by creating
-/// then hiding a window, causing a brief flash).
 #[cfg(target_os = "windows")]
 fn spawn_hidden(program: &str, args: &[&str]) -> std::io::Result<Child> {
+    fn escape_ps(s: &str) -> String {
+        s.replace('\'', "''")
+    }
     let full_cmd = if args.is_empty() {
-        format!("& '{}'", program)
+        format!("& '{}'", escape_ps(program))
     } else {
         let args_str = args.iter()
-            .map(|a| format!("'{}'", a))
+            .map(|a| format!("'{}'", escape_ps(a)))
             .collect::<Vec<_>>()
             .join(" ");
-        format!("& '{}' {}", program, args_str)
+        format!("& '{}' {}", escape_ps(program), args_str)
     };
     Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", &full_cmd])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .stdin(Stdio::null())
-        .creation_flags(0x08000000)
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn()
 }
 
@@ -435,7 +448,7 @@ fn start_openclaw_daemon(state: tauri::State<AppState>) -> Result<String, String
         return Ok("OpenClaw daemon already running".to_string());
     }
     
-    let mut servers = state.servers.lock().unwrap();
+    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
     
     match spawn_hidden("npx", &["openclaw", "gateway", "--port", "18789"]) {
         Ok(child) => {
@@ -448,11 +461,11 @@ fn start_openclaw_daemon(state: tauri::State<AppState>) -> Result<String, String
 
 #[tauri::command]
 fn start_voice_servers(state: tauri::State<AppState>) -> Result<String, String> {
-    let scripts_dir = state.scripts_dir.lock().unwrap();
+    let scripts_dir = state.scripts_dir.lock().unwrap_or_else(|e| e.into_inner());
     let scripts_path = scripts_dir.as_ref().ok_or("Scripts directory not set")?;
     
     let python_cmd = find_python().unwrap_or_else(|| "python".to_string());
-    let mut servers = state.servers.lock().unwrap();
+    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
     let mut started = Vec::new();
     
     if !check_port_in_use(8080) {
@@ -496,16 +509,16 @@ fn start_voice_servers(state: tauri::State<AppState>) -> Result<String, String> 
 
 #[tauri::command]
 fn stop_voice_servers(state: tauri::State<AppState>) -> Result<String, String> {
-    let mut servers = state.servers.lock().unwrap();
+    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
     let mut stopped = Vec::new();
     
     if let Some(mut child) = servers.whisper.take() {
-        let _ = child.kill();
+        kill_process_tree(&mut child);
         stopped.push("Whisper");
     }
     
     if let Some(mut child) = servers.tts.take() {
-        let _ = child.kill();
+        kill_process_tree(&mut child);
         stopped.push("TTS");
     }
     
@@ -523,17 +536,23 @@ fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     
     let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
 
+    let icon = app.default_window_icon()
+        .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?
+        .clone();
+
     let _tray = TrayIconBuilder::with_id("crystal-tray")
         .tooltip("Crystal - AI Desktop Assistant")
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(icon)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "quit" => {
+                cleanup_servers(app);
                 app.exit(0);
             }
             "show" => {
                 if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
@@ -554,6 +573,7 @@ fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
             {
                 let app = tray.app_handle();
                 if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
@@ -610,21 +630,30 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
         })
     });
     
-    // Start OpenClaw daemon if not already running
-    if !check_port_in_use(18789) {
-        println!("Starting OpenClaw daemon...");
-        match spawn_hidden("npx", &["openclaw", "gateway", "--port", "18789"]) {
-            Ok(child) => {
-                if let Some(state) = app.try_state::<AppState>() {
-                    let mut servers = state.servers.lock().unwrap();
-                    servers.openclaw = Some(child);
-                }
-                println!("OpenClaw gateway started on port 18789");
-            }
-            Err(e) => eprintln!("OpenClaw daemon not available: {} (agent will use direct LLM)", e),
+    // Kill any orphaned gateway from a previous session, then start a fresh one we own
+    if check_port_in_use(18789) {
+        println!("Killing orphaned OpenClaw gateway on port 18789...");
+        #[cfg(target_os = "windows")]
+        {
+            let mut cmd = Command::new("powershell");
+            cmd.args(["-NoProfile", "-NonInteractive", "-Command",
+                "Get-NetTCPConnection -LocalPort 18789 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"])
+                .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW);
+            let _ = cmd.output();
         }
-    } else {
-        println!("OpenClaw daemon already running on port 18789");
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+    }
+    println!("Starting OpenClaw daemon...");
+    match spawn_hidden("npx", &["openclaw", "gateway", "--port", "18789"]) {
+        Ok(child) => {
+            if let Some(state) = app.try_state::<AppState>() {
+                let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
+                servers.openclaw = Some(child);
+            }
+            println!("OpenClaw gateway started on port 18789");
+        }
+        Err(e) => eprintln!("OpenClaw daemon not available: {} (agent will use direct LLM)", e),
     }
 
     // Start Ollama if not already running
@@ -633,7 +662,7 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
         match spawn_hidden("ollama", &["serve"]) {
             Ok(child) => {
                 if let Some(state) = app.try_state::<AppState>() {
-                    let mut servers = state.servers.lock().unwrap();
+                    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
                     servers.llm = Some(child);
                 }
                 println!("Ollama started on port 11434");
@@ -649,7 +678,7 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
             println!("Scripts directory: {:?}", scripts_path);
             
             if let Some(state) = app.try_state::<AppState>() {
-                let mut dir = state.scripts_dir.lock().unwrap();
+                let mut dir = state.scripts_dir.lock().unwrap_or_else(|e| e.into_inner());
                 *dir = Some(scripts_path.to_string_lossy().to_string());
             }
             
@@ -662,9 +691,25 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
                 println!("Using Python: {}", python);
                 
                 if let Some(state) = app.try_state::<AppState>() {
-                    let mut servers = state.servers.lock().unwrap();
+                    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
 
-                    if whisper_script.exists() && !check_port_in_use(8080) {
+                    // Kill orphaned voice servers from previous sessions
+                    #[cfg(target_os = "windows")]
+                    {
+                        for port in [8080u16, 8081] {
+                            if check_port_in_use(port) {
+                                let kill_cmd = format!("Get-NetTCPConnection -LocalPort {} -ErrorAction SilentlyContinue | ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}", port);
+                                let mut cmd = Command::new("powershell");
+                                cmd.args(["-NoProfile", "-NonInteractive", "-Command", &kill_cmd])
+                                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                                    .creation_flags(CREATE_NO_WINDOW);
+                                let _ = cmd.output();
+                            }
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                    }
+
+                    if whisper_script.exists() {
                         println!("Starting Whisper STT server...");
                         let script_str = whisper_script.to_string_lossy().to_string();
                         match spawn_hidden(python, &[&script_str]) {
@@ -676,7 +721,7 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
                         }
                     }
                     
-                    if tts_script.exists() && !check_port_in_use(8081) {
+                    if tts_script.exists() {
                         println!("Starting TTS server...");
                         let script_str = tts_script.to_string_lossy().to_string();
                         match spawn_hidden(python, &[&script_str]) {
@@ -695,28 +740,46 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+fn kill_process_tree(child: &mut Child) {
+    let pid = child.id();
+    #[cfg(target_os = "windows")]
+    {
+        let mut cmd = Command::new("taskkill");
+        cmd.args(["/F", "/T", "/PID", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .stdin(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW);
+        let _ = cmd.output();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = child.kill();
+    }
+}
+
 fn cleanup_servers(app: &AppHandle<impl Runtime>) {
     if let Some(state) = app.try_state::<AppState>() {
-        let mut servers = state.servers.lock().unwrap();
+        let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
         
         if let Some(mut child) = servers.llm.take() {
             println!("Stopping LLM server...");
-            let _ = child.kill();
+            kill_process_tree(&mut child);
         }
         
         if let Some(mut child) = servers.whisper.take() {
             println!("Stopping Whisper server...");
-            let _ = child.kill();
+            kill_process_tree(&mut child);
         }
         
         if let Some(mut child) = servers.tts.take() {
             println!("Stopping TTS server...");
-            let _ = child.kill();
+            kill_process_tree(&mut child);
         }
         
         if let Some(mut child) = servers.openclaw.take() {
             println!("Stopping OpenClaw daemon...");
-            let _ = child.kill();
+            kill_process_tree(&mut child);
         }
     }
 }
@@ -736,20 +799,12 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            match event {
-                tauri::WindowEvent::CloseRequested { api, .. } => {
-                    // Hide to tray instead of closing
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
-                tauri::WindowEvent::Destroyed => {
-                    cleanup_servers(window.app_handle());
-                }
-                _ => {}
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
             }
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
             execute_command,
             get_gpu_stats,
             get_sys_stats,
@@ -763,6 +818,11 @@ pub fn run() {
             http_proxy,
             get_openclaw_token
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                cleanup_servers(app);
+            }
+        });
 }

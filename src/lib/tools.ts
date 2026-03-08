@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 
+/** Escapes a string for safe use as a PowerShell argument (backtick-escapes ` $ " \ and newlines). */
+export function escapeShellArg(s: string): string {
+  return s.replace(/[`$"\\]/g, (ch) => `\`${ch}`).replace(/\n/g, " ");
+}
+
 export interface ToolResult {
   success: boolean;
   output: string;
@@ -86,12 +91,37 @@ export async function listDirectory(path: string): Promise<ToolResult> {
 
 export async function webSearch(query: string): Promise<ToolResult> {
   try {
-    const response = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json`);
-    const data = await response.json();
-    return {
-      success: true,
-      output: JSON.stringify(data.RelatedTopics?.slice(0, 5) || [], null, 2),
-    };
+    const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Crystal/1.0" },
+    });
+    const html = await response.text();
+
+    const results: { title: string; url: string; snippet: string }[] = [];
+    const resultBlocks = html.split('class="result__body"');
+    for (let i = 1; i < resultBlocks.length && results.length < 5; i++) {
+      const block = resultBlocks[i];
+      const titleMatch = block.match(/class="result__a"[^>]*>([^<]+)</);
+      const urlMatch = block.match(/href="([^"]+)"/);
+      const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
+      if (titleMatch && urlMatch) {
+        let url = urlMatch[1];
+        if (url.startsWith("//duckduckgo.com/l/?uddg=")) {
+          url = decodeURIComponent(url.replace("//duckduckgo.com/l/?uddg=", "").split("&")[0]);
+        }
+        results.push({
+          title: titleMatch[1].trim(),
+          url,
+          snippet: (snippetMatch?.[1] || "").replace(/<[^>]+>/g, "").trim(),
+        });
+      }
+    }
+
+    if (results.length === 0) {
+      return { success: true, output: "No results found for: " + query };
+    }
+
+    const formatted = results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join("\n\n");
+    return { success: true, output: formatted };
   } catch (error) {
     return {
       success: false,

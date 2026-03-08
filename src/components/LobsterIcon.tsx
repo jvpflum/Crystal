@@ -1,4 +1,4 @@
-export function LobsterIcon({ size = 24 }: { size?: number; color?: string }) {
+export function LobsterIcon({ size = 24 }: { size?: number }) {
   return (
     <img
       src="/icon.png"

@@ -15,7 +15,7 @@ export async function cachedCommand(
   opts?: { cwd?: string | null; ttl?: number },
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   const ttl = opts?.ttl ?? DEFAULT_TTL;
-  const key = command;
+  const key = opts?.cwd ? `${command}@${opts.cwd}` : command;
 
   const cached = cache.get(key);
   if (cached && Date.now() - cached.ts < ttl) {

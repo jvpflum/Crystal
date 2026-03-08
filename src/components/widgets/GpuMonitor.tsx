@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Thermometer, Zap, MemoryStick, Gpu } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "@/stores/appStore";
 
 let _gpuCache: { data: GpuStats; ts: number } | null = null;
-const GPU_POLL_MS = 10000;
+const GPU_POLL_MS = 30_000;
 
 interface GpuStats {
   name: string;

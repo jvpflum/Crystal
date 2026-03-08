@@ -1,4 +1,4 @@
-# Mogwai Voice Server Dependencies
+# Crystal Voice Server Dependencies
 # Install with: pip install -r requirements.txt
 
 # Whisper STT

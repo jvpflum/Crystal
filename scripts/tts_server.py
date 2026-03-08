@@ -1,5 +1,5 @@
 """
-Mogwai TTS Server
+Crystal TTS Server
 FastAPI server for text-to-speech using Kokoro or system TTS fallback
 """
 
@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-app = FastAPI(title="Mogwai TTS")
+app = FastAPI(title="Crystal TTS")
 
 app.add_middleware(
     CORSMiddleware,

@@ -124,8 +124,6 @@ export function ConversationView() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [toolSteps, setToolSteps] = useState<AgentStep[]>([]);
-  const [, setStreamingContent] = useState("");
-  const [, setIsStreaming] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [micFlashRed, setMicFlashRed] = useState(false);
 
@@ -147,24 +145,24 @@ export function ConversationView() {
   const model = openclawClient.getModel();
 
   const slashCommands: SlashCommand[] = [
-    { cmd: "/home", label: "Home", description: "Go to dashboard", action: () => setView("home" as any) },
-    { cmd: "/skills", label: "Skills", description: "Browse 51 OpenClaw skills", action: () => setView("marketplace" as any) },
-    { cmd: "/plugins", label: "Plugins", description: "Manage plugins", action: () => setView("marketplace" as any) },
-    { cmd: "/models", label: "Models", description: "Manage Ollama models", action: () => setView("models" as any) },
-    { cmd: "/settings", label: "Settings", description: "App & gateway settings", action: () => setView("settings" as any) },
-    { cmd: "/security", label: "Security", description: "Run security audit", action: () => setView("security" as any) },
-    { cmd: "/doctor", label: "Doctor", description: "System diagnostics", action: () => setView("doctor" as any) },
-    { cmd: "/agents", label: "Agents", description: "Manage AI agents", action: () => setView("agents" as any) },
-    { cmd: "/memory", label: "Memory", description: "Search agent memory", action: () => setView("memory" as any) },
-    { cmd: "/channels", label: "Channels", description: "Connect messaging apps", action: () => setView("channels" as any) },
-    { cmd: "/cron", label: "Cron", description: "Scheduled tasks", action: () => setView("cron" as any) },
-    { cmd: "/hooks", label: "Hooks", description: "Agent lifecycle hooks", action: () => setView("hooks" as any) },
-    { cmd: "/nodes", label: "Nodes", description: "Multi-node management", action: () => setView("nodes" as any) },
-    { cmd: "/browser", label: "Browser", description: "Browser automation", action: () => setView("browser" as any) },
-    { cmd: "/tools", label: "Tools", description: "Sandbox & tool permissions", action: () => setView("tools" as any) },
-    { cmd: "/activity", label: "Activity", description: "Gateway event log", action: () => setView("activity" as any) },
-    { cmd: "/templates", label: "Templates", description: "Workflow builder", action: () => setView("templates" as any) },
-    { cmd: "/powerup", label: "Power Up", description: "Enable everything", action: () => setView("marketplace" as any) },
+    { cmd: "/home", label: "Home", description: "Go to dashboard", action: () => setView("home") },
+    { cmd: "/skills", label: "Skills", description: "Browse 51 OpenClaw skills", action: () => setView("marketplace") },
+    { cmd: "/plugins", label: "Plugins", description: "Manage plugins", action: () => setView("marketplace") },
+    { cmd: "/models", label: "Models", description: "Manage Ollama models", action: () => setView("models") },
+    { cmd: "/settings", label: "Settings", description: "App & gateway settings", action: () => setView("settings") },
+    { cmd: "/security", label: "Security", description: "Run security audit", action: () => setView("security") },
+    { cmd: "/doctor", label: "Doctor", description: "System diagnostics", action: () => setView("doctor") },
+    { cmd: "/agents", label: "Agents", description: "Manage AI agents", action: () => setView("agents") },
+    { cmd: "/memory", label: "Memory", description: "Search agent memory", action: () => setView("memory") },
+    { cmd: "/channels", label: "Channels", description: "Connect messaging apps", action: () => setView("channels") },
+    { cmd: "/cron", label: "Cron", description: "Scheduled tasks", action: () => setView("cron") },
+    { cmd: "/hooks", label: "Hooks", description: "Agent lifecycle hooks", action: () => setView("hooks") },
+    { cmd: "/nodes", label: "Nodes", description: "Multi-node management", action: () => setView("nodes") },
+    { cmd: "/browser", label: "Browser", description: "Browser automation", action: () => setView("browser") },
+    { cmd: "/tools", label: "Tools", description: "Sandbox & tool permissions", action: () => setView("tools") },
+    { cmd: "/activity", label: "Activity", description: "Gateway event log", action: () => setView("activity") },
+    { cmd: "/templates", label: "Templates", description: "Workflow builder", action: () => setView("templates") },
+    { cmd: "/powerup", label: "Power Up", description: "Enable everything", action: () => setView("marketplace") },
     { cmd: "/new", label: "New Chat", description: "Start a fresh conversation", action: () => handleNewChat() },
     { cmd: "/clear", label: "Clear", description: "Clear current chat", action: () => clearConversation() },
     { cmd: "/search", label: "Search", description: "Open command palette (Ctrl+K)", action: () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true })) },
@@ -198,10 +196,26 @@ export function ConversationView() {
   useEffect(() => { scrollToBottom(); }, [messages, toolSteps, scrollToBottom]);
 
   useEffect(() => {
+    const handler = (e: Event) => {
+      const text = (e as CustomEvent).detail;
+      if (text && !isLoading) {
+        setInput(text);
+        setTimeout(() => {
+          const btn = document.querySelector("[data-send-btn]") as HTMLButtonElement;
+          btn?.click();
+        }, 100);
+      }
+    };
+    window.addEventListener("crystal:voice-message", handler);
+    return () => window.removeEventListener("crystal:voice-message", handler);
+  }, [isLoading]);
+
+  useEffect(() => {
     agentService.onStep((step) => {
       setToolSteps(prev => [...prev.slice(-8), step]);
     });
     agentService.onActions((actions) => setActionButtons(actions));
+    return () => {};
   }, []);
 
   useEffect(() => {
@@ -256,33 +270,10 @@ export function ConversationView() {
     setIsListening(true);
   }, [isListening]);
 
-  const typewriterEffect = useCallback((text: string, messageId: string) => {
-    setIsStreaming(true);
-    let index = 0;
-    const chunkSize = 3;
-    const interval = setInterval(() => {
-      index += chunkSize;
-      if (index >= text.length) {
-        index = text.length;
-        clearInterval(interval);
-        setIsStreaming(false);
-        setStreamingContent("");
-      }
-      const partial = text.slice(0, index);
-      setStreamingContent(partial);
-      updateConversation(activeId, c => ({
-        ...c,
-        messages: c.messages.map(m => m.id === messageId ? { ...m, content: partial } : m),
-        updatedAt: Date.now(),
-      }));
-    }, 12);
-    return () => clearInterval(interval);
-  }, [activeId, updateConversation]);
-
   const sendMessage = async () => {
     if (!input.trim() || isLoading) return;
     const text = input;
-    const userMessage: Message = { id: Date.now().toString(), role: "user", content: text, timestamp: new Date() };
+    const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: text, timestamp: new Date() };
 
     updateConversation(activeId, c => {
       const updated = { ...c, messages: [...c.messages, userMessage], updatedAt: Date.now() };
@@ -299,26 +290,45 @@ export function ConversationView() {
     setActionButtons([]);
     inputRef.current?.focus();
 
+    const msgId = crypto.randomUUID();
+    const assistantMessage: Message = { id: msgId, role: "assistant", content: "", timestamp: new Date() };
+    updateConversation(activeId, c => ({
+      ...c,
+      messages: [...c.messages, assistantMessage],
+      updatedAt: Date.now(),
+    }));
+
     try {
-      const response = await agentService.chat(text);
-      const msgId = `a-${Date.now()}`;
-      const assistantMessage: Message = { id: msgId, role: "assistant", content: "", timestamp: new Date() };
+      let accumulated = "";
+      let lastFlush = 0;
+      const FLUSH_INTERVAL = 40;
+      for await (const token of agentService.streamChat(text)) {
+        accumulated += token;
+        const now = Date.now();
+        if (now - lastFlush >= FLUSH_INTERVAL) {
+          lastFlush = now;
+          const snapshot = accumulated;
+          updateConversation(activeId, c => ({
+            ...c,
+            messages: c.messages.map(m => m.id === msgId ? { ...m, content: snapshot } : m),
+            updatedAt: now,
+          }));
+        }
+      }
+      const finalContent = accumulated;
       updateConversation(activeId, c => ({
         ...c,
-        messages: [...c.messages, assistantMessage],
+        messages: c.messages.map(m => m.id === msgId ? { ...m, content: finalContent } : m),
         updatedAt: Date.now(),
       }));
-      setIsLoading(false);
-      typewriterEffect(response, msgId);
     } catch (err) {
-      const errorMessage: Message = {
-        id: `e-${Date.now()}`, role: "assistant",
-        content: `**Error:** ${err instanceof Error ? err.message : "Unknown error"}\n\nMake sure the inference server is running.`,
-        timestamp: new Date(),
-      };
       updateConversation(activeId, c => ({
         ...c,
-        messages: [...c.messages, errorMessage],
+        messages: c.messages.map(m =>
+          m.id === msgId
+            ? { ...m, content: `**Error:** ${err instanceof Error ? err.message : "Unknown error"}\n\nMake sure Ollama is running.` }
+            : m
+        ),
         updatedAt: Date.now(),
       }));
     } finally {
@@ -878,6 +888,7 @@ export function ConversationView() {
               }} />
             </button>
             <button
+              data-send-btn
               onClick={sendMessage}
               disabled={!input.trim() || isLoading}
               style={{

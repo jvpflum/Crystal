@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { escapeShellArg } from "@/lib/tools";
 import {
   Play,
   Loader2,
@@ -226,7 +227,7 @@ export function TemplatesView() {
       const step = workflow.steps[i];
       const msg = step.message.replace(/\{\{INPUT\}\}/g, userInput.trim());
       try {
-        const escaped = msg.replace(/"/g, '\\"').replace(/\n/g, ' ');
+        const escaped = escapeShellArg(msg);
         const command = `npx openclaw agent --agent main --message "${escaped}"`;
         const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
           command,

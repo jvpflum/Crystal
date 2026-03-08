@@ -1,13 +1,13 @@
-# Mogwai Full Stack Startup Script
+# Crystal Full Stack Startup Script
 # Starts voice services: Whisper STT, TTS
-# LLM is handled by Ollama (auto-detected by Mogwai)
+# LLM is handled by Ollama (auto-detected by Crystal)
 
 param(
     [switch]$SkipVoice
 )
 
 Write-Host "========================================" -ForegroundColor Magenta
-Write-Host "  Mogwai AI Assistant - Full Stack" -ForegroundColor Magenta  
+Write-Host "  Crystal AI Assistant - Full Stack" -ForegroundColor Magenta  
 Write-Host "========================================" -ForegroundColor Magenta
 Write-Host ""
 
@@ -62,5 +62,5 @@ if (-not $SkipVoice) {
     Write-Host "  - TTS:     http://127.0.0.1:8081 (Text-to-Speech)" -ForegroundColor Green
 }
 Write-Host ""
-Write-Host "Mogwai auto-starts all services. This script is for manual debugging only." -ForegroundColor Yellow
+Write-Host "Crystal auto-starts all services. This script is for manual debugging only." -ForegroundColor Yellow
 Write-Host ""

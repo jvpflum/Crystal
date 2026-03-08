@@ -38,7 +38,6 @@ export function BrowserView() {
   const [output, setOutput] = useState<string | null>(null);
   const [tabFilter, setTabFilter] = useState("");
   const [navigateUrl, setNavigateUrl] = useState("");
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tokenRef = useRef<string>("");
 
   const isRunning = status?.running === true || status?.status === "running";

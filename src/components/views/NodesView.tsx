@@ -10,6 +10,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { escapeShellArg } from "@/lib/tools";
 
 interface NodeItem {
   id: string;
@@ -71,7 +72,7 @@ export function NodesView() {
     setOutput(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `npx openclaw nodes ${action} ${nodeId} ${input}`,
+        command: `npx openclaw nodes ${action} ${escapeShellArg(nodeId)} "${escapeShellArg(input)}"`,
         cwd: null,
       });
       setOutput(result.code === 0 ? result.stdout || "Done." : result.stderr || "Command failed.");
@@ -131,7 +132,7 @@ export function NodesView() {
       {/* Header */}
       <div style={{ padding: "14px 20px 10px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
-          <h2 style={{ color: "white", fontSize: 15, fontWeight: 600, margin: 0 }}>Nodes</h2>
+          <h2 style={{ color: "var(--text)", fontSize: 15, fontWeight: 600, margin: 0 }}>Nodes</h2>
           {!loading && (
             <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", letterSpacing: 1, textTransform: "uppercase" }}>
               {filtered.length} node{filtered.length !== 1 ? "s" : ""}
@@ -143,7 +144,7 @@ export function NodesView() {
             onClick={() => setShowNotifyPrompt(true)}
             style={{
               display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6,
-              border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)",
+              border: "1px solid var(--border)", background: "rgba(255,255,255,0.04)",
               color: "rgba(255,255,255,0.6)", fontSize: 11, cursor: "pointer",
             }}
           >
@@ -168,8 +169,8 @@ export function NodesView() {
         {/* Error */}
         {error && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)", marginBottom: 12 }}>
-            <AlertTriangle style={{ width: 14, height: 14, color: "#f87171", flexShrink: 0 }} />
-            <span style={{ fontSize: 11, color: "#f87171", flex: 1 }}>{error}</span>
+            <AlertTriangle style={{ width: 14, height: 14, color: "var(--error)", flexShrink: 0 }} />
+            <span style={{ fontSize: 11, color: "var(--error)", flex: 1 }}>{error}</span>
             <button onClick={() => setError(null)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", fontSize: 14, cursor: "pointer" }}>×</button>
           </div>
         )}
@@ -185,7 +186,7 @@ export function NodesView() {
               autoFocus
               style={{
                 flex: 1, padding: "7px 10px", borderRadius: 8, background: "rgba(255,255,255,0.04)",
-                border: "1px solid rgba(255,255,255,0.1)", color: "white", fontSize: 12, outline: "none",
+                border: "1px solid var(--border)", color: "var(--text)", fontSize: 12, outline: "none",
               }}
             />
             <button
@@ -193,7 +194,7 @@ export function NodesView() {
               disabled={runningAction === "notify" || !notifyMessage.trim()}
               style={{
                 display: "flex", alignItems: "center", gap: 4, padding: "7px 14px", borderRadius: 8,
-                border: "none", background: "#3B82F6", color: "white", fontSize: 11, cursor: "pointer",
+                border: "none", background: "var(--accent)", color: "var(--text)", fontSize: 11, cursor: "pointer",
                 opacity: runningAction === "notify" || !notifyMessage.trim() ? 0.5 : 1, flexShrink: 0,
               }}
             >
@@ -223,7 +224,7 @@ export function NodesView() {
                   autoFocus
                   style={{
                     flex: 1, padding: "7px 10px", borderRadius: 8, background: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.1)", color: "white", fontSize: 12, outline: "none",
+                    border: "1px solid var(--border)", color: "var(--text)", fontSize: 12, outline: "none",
                   }}
                 />
                 <button
@@ -231,7 +232,7 @@ export function NodesView() {
                   disabled={!promptInput.trim()}
                   style={{
                     padding: "7px 14px", borderRadius: 8, border: "none", background: "rgba(59,130,246,0.15)",
-                    color: "#60a5fa", fontSize: 11, cursor: "pointer", opacity: !promptInput.trim() ? 0.5 : 1,
+                    color: "var(--accent)", fontSize: 11, cursor: "pointer", opacity: !promptInput.trim() ? 0.5 : 1,
                   }}
                 >
                   {promptTarget.action === "run" ? "Run" : "Invoke"}
@@ -254,8 +255,8 @@ export function NodesView() {
             placeholder="Filter nodes..."
             style={{
               width: "100%", padding: "7px 10px 7px 30px", borderRadius: 8,
-              background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
-              color: "white", fontSize: 12, outline: "none", boxSizing: "border-box",
+              background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)",
+              color: "var(--text)", fontSize: 12, outline: "none", boxSizing: "border-box",
             }}
           />
         </div>
@@ -294,15 +295,15 @@ export function NodesView() {
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <Network style={{ width: 14, height: 14, color: "#60a5fa", flexShrink: 0 }} />
+                      <Network style={{ width: 14, height: 14, color: "var(--accent)", flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ fontSize: 12, fontWeight: 500, color: "white" }}>{node.name || node.label || node.id}</span>
+                          <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text)" }}>{node.name || node.label || node.id}</span>
                           {node.type && (
                             <span style={{
                               fontSize: 9, padding: "1px 6px", borderRadius: 8,
                               background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.35)",
-                              border: "1px solid rgba(255,255,255,0.08)",
+                              border: "1px solid var(--border)",
                             }}>
                               {node.type}
                             </span>
@@ -327,7 +328,7 @@ export function NodesView() {
                           title="Run"
                           style={{
                             display: "flex", alignItems: "center", gap: 3, padding: "4px 8px", borderRadius: 6,
-                            border: "none", background: "rgba(59,130,246,0.15)", color: "#60a5fa",
+                            border: "none", background: "rgba(59,130,246,0.15)", color: "var(--accent)",
                             fontSize: 10, cursor: "pointer",
                           }}
                         >

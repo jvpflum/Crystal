@@ -1,4 +1,4 @@
-# Mogwai TTS Server Startup Script
+# Crystal TTS Server Startup Script
 # Supports: Kokoro (recommended), pyttsx3 (fallback)
 
 param(
@@ -6,7 +6,7 @@ param(
 )
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  Mogwai TTS Server" -ForegroundColor Cyan
+Write-Host "  Crystal TTS Server" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 

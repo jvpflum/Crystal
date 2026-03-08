@@ -228,7 +228,40 @@ const slate: Theme = {
   },
 };
 
-export const THEMES: Theme[] = [midnight, socal, arctic, ember, slate];
+const nvidia: Theme = {
+  id: "nvidia",
+  name: "NVIDIA",
+  description: "NVIDIA green on black — built for GPU power",
+  preview: ["#0a0a0a", "#121212", "#76b900", "#c8e6a0"],
+  colors: {
+    bgBase: "#0a0a0a",
+    bgSurface: "#121212",
+    bgElevated: "rgba(118,185,0,0.04)",
+    bgHover: "rgba(118,185,0,0.08)",
+    bgInput: "rgba(255,255,255,0.04)",
+    border: "rgba(118,185,0,0.12)",
+    borderSubtle: "rgba(118,185,0,0.06)",
+    text: "#e4f0d0",
+    textSecondary: "rgba(228,240,208,0.65)",
+    textMuted: "rgba(228,240,208,0.3)",
+    accent: "#76b900",
+    accentHover: "#8ecf10",
+    accentText: "#000000",
+    accentBg: "rgba(118,185,0,0.12)",
+    success: "#76b900",
+    error: "#f87171",
+    warning: "#fbbf24",
+    chatUser: "linear-gradient(135deg, #76b900, #5a9000)",
+    chatUserText: "#000000",
+    chatAssistant: "rgba(118,185,0,0.04)",
+    chatAssistantBorder: "rgba(118,185,0,0.1)",
+    scrollbar: "rgba(118,185,0,0.1)",
+    scrollbarHover: "rgba(118,185,0,0.25)",
+    selection: "rgba(118,185,0,0.25)",
+  },
+};
+
+export const THEMES: Theme[] = [midnight, socal, arctic, ember, slate, nvidia];
 
 function applyThemeToDOM(colors: ThemeColors) {
   const r = document.documentElement.style;
@@ -267,7 +300,7 @@ interface ThemeState {
 export const useThemeStore = create<ThemeState>((set, get) => {
   const saved = localStorage.getItem("crystal_theme") || "midnight";
   const initial = THEMES.find(t => t.id === saved) || midnight;
-  setTimeout(() => applyThemeToDOM(initial.colors), 0);
+  applyThemeToDOM(initial.colors);
 
   return {
     themeId: initial.id,

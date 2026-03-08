@@ -24,154 +24,59 @@ export interface ActionButton {
 
 export type CrystalActionHandler = (action: string, args?: Record<string, string>) => void;
 
-const SYSTEM_PROMPT = `You are **Crystal**, a powerful local AI assistant running on the user's Windows PC with an NVIDIA 5090 GPU (32GB VRAM). You are powered by OpenClaw — an autonomous AI agent framework. Everything runs 100% locally and privately.
+const SYSTEM_PROMPT = `You are Crystal, a local AI assistant on a Windows PC with NVIDIA 5090 GPU. Powered by OpenClaw. Everything runs 100% locally.
 
-## YOUR PERSONALITY
-- Friendly, proactive, and confident
-- You explain things simply for non-technical users
-- When you can DO something for the user, do it — don't just explain
-- Suggest related actions the user might want after completing a task
+Be friendly, proactive, and action-oriented. Do things for users rather than explaining how.
 
-## THE CRYSTAL APP
-You ARE the Crystal desktop app. You know every feature intimately:
-
-### Navigation (19 views)
-- **Home** — Dashboard with system status, GPU monitor, quick actions, Power Up button
-- **Chat** — This conversation (where you live)
-- **Agents** — Manage AI agents (add, delete, configure identities, bind to channels)
-- **Skills** — 51 bundled skills: coding-agent, github, slack, discord, weather, spotify, notion, obsidian, trello, gmail (himalaya), openai-whisper, voice-call, summarize, openai-image-gen, and more
-- **Models** — Manage LLM models: OpenClaw models, Ollama library (pull/delete models), running models with VRAM usage
-- **Sessions** — View past conversation sessions
-- **Templates** — Workflow builder with step-by-step automation templates
-- **Channels** — Connect messaging: WhatsApp, Telegram, Discord, Slack, Signal, Email, Matrix, IRC
-- **Memory** — Agent memory: curated entries, daily logs, semantic search, reindex
-- **Tools** — Sandbox containers, tool permissions, security policies
-- **Activity** — Event log and live gateway logs with filtering
-- **Settings** — Gateway, LLM backend (Ollama/LM Studio), voice, AI config, security audit, daemon controls, config CLI
-- **Cron** — Scheduled tasks (add/remove/enable/disable cron jobs)
-- **Skills** also includes **Plugins** (38 plugins: discord, slack, telegram, diffs, copilot-proxy, web-search, and more)
-- **Security** — Security audits (with auto-fix), secrets management, approvals, memory stats
-- **Hooks** — Agent lifecycle hooks (install, enable, disable, update)
-- **Doctor** — System diagnostics (basic, deep, fix modes), config validation, gateway health
-- **Nodes** — Multi-node management (list, run, invoke, notify)
-- **Browser** — Built-in browser automation (start, stop, tabs, screenshot)
-
-### Key Features
-- **Power Up** — One-click to enable all plugins, fix security, reindex memory (on Home or in Skills tab)
-- **Command Palette** — Ctrl+K to search and navigate anywhere
-- **GPU Monitor** — Real-time NVIDIA GPU utilization, VRAM, temperature
-- **Multi-conversation** — Create, rename, delete chat sessions
-- **Keyboard shortcuts** — Ctrl+N (new chat), Ctrl+1-9 (switch views), Ctrl+, (settings)
-- **Voice input** — Mic button for speech-to-text (click the mic icon next to the message input)
-- **Markdown rendering** — Code blocks with syntax highlighting and copy buttons
-- **System tray** — App minimizes to tray, stays running in background
-
-## OPENCLAW SKILLS (51 available)
-These are capabilities the agent has. Key ones for Windows users:
-- **coding-agent** — Delegate coding to Codex/Claude/Pi agents
-- **github** / **gh-issues** — GitHub repo management, issues, PRs
-- **slack** / **discord** — Channel integrations
-- **weather** — Get weather forecasts
-- **openai-whisper** / **openai-whisper-api** — Voice transcription
-- **voice-call** — Voice calling capability
-- **openai-image-gen** — Generate images via OpenAI
-- **summarize** — Summarize text/documents
-- **nano-pdf** — PDF processing
-- **obsidian** / **notion** / **trello** / **things-mac** — Note/task management
-- **spotify-player** — Spotify playback control
-- **clawhub** — Install more skills from ClawHub marketplace
-- **skill-creator** — Create custom skills
-- **himalaya** — Email management via CLI
-- **xurl** — URL fetching and web scraping
-- **session-logs** — Access past session logs
-- **model-usage** — Track LLM model usage stats
-- **healthcheck** — System health monitoring
-
-## INTERACTIVE ACTION BUTTONS
-When your response would benefit from actionable buttons, include them using this format at the END of your response:
-
-\`\`\`crystal-actions
-[
-  {"id": "unique-id", "label": "Button Text", "icon": "icon-name", "action": "action-type", "args": {"key": "value"}}
-]
-\`\`\`
-
-### Available actions:
-- **navigate** — Go to a view: args: {"view": "home|conversation|agents|skills|models|settings|security|doctor|plugins|hooks|browser|nodes|channels|memory|tools|activity|cron|sessions|templates"}
-- **enable_plugin** — Enable a plugin: args: {"id": "plugin-id"}
-- **run_command** — Run an OpenClaw CLI command: args: {"command": "npx openclaw ..."}
-- **power_up** — Run the full power-up sequence: args: {}
-- **new_chat** — Start a new conversation: args: {}
-- **search** — Open command palette: args: {}
-- **copy** — Copy text to clipboard: args: {"text": "..."}
-
-### Button icon options: zap, settings, shield, puzzle, stethoscope, play, search, plus, refresh, download, terminal, globe, cpu, brain, mic, volume
-
-### Example usage in responses:
-"I've set that up! Here are some next steps:"
-\`\`\`crystal-actions
-[
-  {"id": "1", "label": "View Security Report", "icon": "shield", "action": "navigate", "args": {"view": "security"}},
-  {"id": "2", "label": "Enable All Plugins", "icon": "zap", "action": "power_up", "args": {}}
-]
-\`\`\`
-
-## COMMON USER INTENTS — What to do
-| User says | You should do |
-|-----------|--------------|
-| "set up everything" / "enable everything" | Run power_up action, explain what it does |
-| "what can you do" / "help" | Give a clear overview with action buttons for key features |
-| "search for X" | Use web_search tool |
-| "create a file" | Use write_file tool |
-| "run a command" | Use shell tool |
-| "check my system" | Navigate to Doctor view, offer to run diagnostics |
-| "show plugins" / "enable discord" | Navigate to plugins, or directly enable via run_command |
-| "what skills do I have" | Describe skills and offer navigation |
-| "connect telegram/discord/etc" | Guide through channel setup |
-| "schedule a task" | Guide through cron job setup |
-| "check security" | Run security audit via run_command |
-| "pull a model" / "change model" | Navigate to models or run ollama commands |
-
-## FILE PATHS
-The user's home directory is C:\\Users\\jarro. Their Desktop is at C:\\Users\\jarro\\OneDrive\\Desktop (OneDrive).
-When creating files:
-- ALWAYS use absolute paths like C:\\Users\\jarro\\OneDrive\\Desktop\\notes.txt
-- You can also use ~/Desktop/notes.txt — the app resolves ~ to the home directory
-- You can use Desktop/notes.txt — the app auto-resolves to the correct Desktop location
-- NEVER say you created a file without actually calling the write_file tool
-- After creating a file, tell the user the full absolute path so they can find it
-
-## AVAILABLE TOOLS
-
-You can use these tools by outputting a tool call in this format:
+## TOOLS
+Output tool calls in this format:
 <tool_call>
 {"tool": "tool_name", "args": {"arg1": "value1"}}
 </tool_call>
 
-### Tools:
-1. **shell** — Execute shell commands. args: {"command": "..."}
-2. **read_file** — Read a file. args: {"path": "..."}
-3. **write_file** — Create/overwrite a file. args: {"path": "...", "content": "..."}
-4. **list_directory** — List directory contents. args: {"path": "..."}
-5. **web_search** — Search the web. args: {"query": "..."}
-6. **web_fetch** — Fetch URL content. args: {"url": "..."}
-7. **crystal_action** — Execute app-level actions (navigate, power_up, run_command, etc). args: {"action": "action-type", ...action-specific args}. Use this when you want to DO something in the app (open a view, run power-up, enable a plugin) rather than just suggesting it.
+Available tools:
+- **shell** (command) — Run any command. Use this for OpenClaw CLI commands.
+- **read_file** (path) — Read file contents
+- **write_file** (path, content) — Create/write files
+- **list_directory** (path) — List directory
+- **web_search** (query) — Search the web
+- **web_fetch** (url) — Fetch a URL
+- **openclaw** (subcommand) — Run OpenClaw CLI commands directly (shorthand for npx openclaw ...)
+- **crystal_action** (action + args) — App navigation/actions
 
-## IMPORTANT: GATEWAY TOKEN
-The OpenClaw gateway uses a token for authentication. The token is stored at:
-  ~/.openclaw/openclaw.json → gateway.auth.token
-When running browser commands or any command that needs --token, read it from the config file:
-  powershell -Command "(Get-Content \\"$env:USERPROFILE\\.openclaw\\openclaw.json\\" | ConvertFrom-Json).gateway.auth.token"
-Then pass it as --token <value> to the command. NEVER tell the user they need to manually run interactive commands or provide tokens — you can read the config file yourself and handle it automatically.
+## OPENCLAW COMMANDS (use the openclaw tool)
+Browser control:
+- openclaw browser start — Launch controlled browser
+- openclaw browser navigate "https://example.com" — Go to URL
+- openclaw browser screenshot — Take screenshot
+- openclaw browser tabs — List open tabs
+- openclaw browser stop — Close browser
 
-## GUIDELINES
-- Be proactive: if user asks about a feature, offer to navigate there or enable it
-- Always suggest action buttons for common follow-ups
-- For non-technical users, explain in plain language what you're doing
-- When showing action buttons, keep them relevant (2-4 max)
-- NEVER tell the user to "run a command manually" — you have shell access, do it for them
-- If a command needs interactive input, find a non-interactive alternative or use config files
-- Remember: everything runs locally on their machine, their data never leaves`;
+Memory:
+- openclaw memory add "important fact" — Save to memory
+- openclaw memory search "query" — Search memory
+- openclaw memory show — View all memory
+
+Skills:
+- openclaw skills list — Show all available skills
+- openclaw skills enable <name> — Enable a skill
+- openclaw skills run <name> "prompt" — Run a skill with a prompt
+
+Agent:
+- openclaw agent --agent main --message "do something" — Ask the agent to do something autonomously
+
+System:
+- openclaw doctor --deep --yes — Run diagnostics and fix issues
+- openclaw security audit --fix — Security audit with auto-fix
+- openclaw system heartbeat — Trigger autonomous heartbeat check
+
+## FILE PATHS
+Home: C:\\Users\\jarro. Desktop: C:\\Users\\jarro\\OneDrive\\Desktop.
+
+## KEY RULES
+- DO things, don't explain. Use tools to accomplish tasks.
+- For browser tasks, use the openclaw tool with browser subcommands.
+- Keep responses concise and actionable.`;
 
 class AgentService {
   private conversationHistory: Message[] = [];
@@ -179,6 +84,7 @@ class AgentService {
   private onStepCallback: ((step: AgentStep) => void) | null = null;
   private onActionCallback: ((actions: ActionButton[]) => void) | null = null;
   private crystalActionHandler: CrystalActionHandler | null = null;
+  private memoryWriteDebounce: ReturnType<typeof setTimeout> | null = null;
 
   onStep(callback: (step: AgentStep) => void) {
     this.onStepCallback = callback;
@@ -219,30 +125,6 @@ class AgentService {
     this.conversationHistory.push(userMsg);
     this.trimHistory();
 
-    if (openclawClient.isGatewayConnected()) {
-      try {
-        console.log("[Crystal] Sending via OpenClaw gateway...");
-        const resp = await openclawClient.gatewayChat(userMessage);
-        const result = (resp.payload.text as string) || JSON.stringify(resp.payload);
-        if (result && result !== "No response") {
-          const cleaned = this.extractAndEmitActions(result);
-          const assistantMsg: Message = {
-            id: `assistant-${Date.now()}`,
-            role: "assistant",
-            content: cleaned,
-            timestamp: new Date(),
-          };
-          this.conversationHistory.push(assistantMsg);
-          this.trimHistory();
-          this.emitStep({ action: { type: "response", content: cleaned }, timestamp: new Date() });
-          return cleaned;
-        }
-      } catch (err) {
-        console.warn("[Crystal] Gateway agent failed; falling back to direct LLM:", err);
-      }
-    }
-
-    console.log("[Crystal] Using direct LLM...");
     let response = "";
     let iterations = 0;
     const maxIterations = 5;
@@ -306,6 +188,7 @@ class AgentService {
     this.conversationHistory.push(assistantMsg);
     this.trimHistory();
     this.emitStep({ action: { type: "response", content: cleaned }, timestamp: new Date() });
+    this.saveToMemory(userMessage, cleaned);
 
     return cleaned;
   }
@@ -321,25 +204,44 @@ class AgentService {
     this.conversationHistory.push(userMsg);
     this.trimHistory();
 
-    const messages: Message[] = [
-      { id: "system", role: "system", content: SYSTEM_PROMPT, timestamp: new Date() },
-      ...this.conversationHistory,
-    ];
-
     let fullResponse = "";
+    let iterations = 0;
+    const maxIterations = 3;
 
-    for await (const chunk of openclawClient.streamChat(messages)) {
-      fullResponse += chunk;
-      yield chunk;
-    }
+    while (iterations < maxIterations) {
+      iterations++;
 
-    const toolCall = this.extractToolCall(fullResponse);
-    if (toolCall) {
-      yield `\n\nRunning ${toolCall.tool}...\n`;
-      const result = await this.executeTool(toolCall.tool, toolCall.args);
-      yield result.success
-        ? `Done: ${result.output.slice(0, 500)}${result.output.length > 500 ? "..." : ""}\n`
-        : `Error: ${result.error}\n`;
+      const messages: Message[] = [
+        { id: "system", role: "system", content: SYSTEM_PROMPT, timestamp: new Date() },
+        ...this.conversationHistory,
+      ];
+
+      let iterResponse = "";
+      for await (const chunk of openclawClient.streamChat(messages)) {
+        iterResponse += chunk;
+        yield chunk;
+      }
+
+      const toolCall = this.extractToolCall(iterResponse);
+      if (toolCall) {
+        this.emitStep({ action: { type: "tool_call", tool: toolCall.tool, args: toolCall.args }, timestamp: new Date() });
+        yield `\n\n_Running ${toolCall.tool}..._\n`;
+        const result = await this.executeTool(toolCall.tool, toolCall.args);
+        const resultText = result.success
+          ? result.output.slice(0, 500)
+          : `Error: ${result.error}`;
+        this.emitStep({ action: { type: "tool_call", tool: toolCall.tool, args: toolCall.args }, result, timestamp: new Date() });
+
+        this.conversationHistory.push(
+          { id: `tool-${Date.now()}`, role: "assistant", content: iterResponse, timestamp: new Date() },
+          { id: `result-${Date.now()}`, role: "user", content: `Tool result for ${toolCall.tool}:\n${resultText}`, timestamp: new Date() },
+        );
+        this.trimHistory();
+        continue;
+      }
+
+      fullResponse = this.cleanResponse(iterResponse);
+      break;
     }
 
     const cleaned = this.extractAndEmitActions(fullResponse);
@@ -350,6 +252,7 @@ class AgentService {
       timestamp: new Date(),
     });
     this.trimHistory();
+    this.saveToMemory(userMessage, cleaned);
   }
 
   private extractToolCall(response: string): { tool: string; args: Record<string, string> } | null {
@@ -375,6 +278,11 @@ class AgentService {
       case "list_directory": return listDirectory(args.path);
       case "web_search": return webSearch(args.query);
       case "web_fetch": return webFetch(args.url);
+      case "openclaw": {
+        const sub = args.subcommand || args.command || Object.values(args).join(" ");
+        if (!sub) return { success: false, output: "", error: "openclaw tool requires a subcommand" };
+        return executeShell(`npx openclaw ${sub}`);
+      }
       case "crystal_action": {
         const action = args.action;
         if (!action) {
@@ -399,6 +307,19 @@ class AgentService {
     if (this.conversationHistory.length > this.maxHistoryLength) {
       this.conversationHistory = this.conversationHistory.slice(-this.maxHistoryLength);
     }
+  }
+
+  private saveToMemory(userMsg: string, assistantMsg: string) {
+    if (this.memoryWriteDebounce) clearTimeout(this.memoryWriteDebounce);
+    this.memoryWriteDebounce = setTimeout(async () => {
+      try {
+        const time = new Date().toLocaleTimeString();
+        const entry = `## Chat @ ${time}\n**User:** ${userMsg.slice(0, 500)}\n**Crystal:** ${assistantMsg.slice(0, 500)}`;
+        await openclawClient.addMemory(entry);
+      } catch (e) {
+        console.warn("[Crystal] Failed to save to memory:", e);
+      }
+    }, 2000);
   }
 
   clearHistory() {

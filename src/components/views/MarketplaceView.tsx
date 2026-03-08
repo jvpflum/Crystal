@@ -228,6 +228,14 @@ function StatusBadge({ label, color, icon }: {
 
 // ─── Missing Deps Badges ────────────────────────────────────────
 
+const DEP_TITLES: Record<string, string> = {
+  "bin": "Required CLI tool not found in PATH. Install it to use this skill.",
+  "any-bin": "Needs at least one of these CLI tools. Install one to use this skill.",
+  "env": "Required environment variable not set. Add it to your system environment.",
+  "config": "Missing OpenClaw configuration entry. Run 'openclaw configure' to set it.",
+  "os": "This skill requires a different operating system.",
+};
+
 function MissingBadges({ missing }: { missing: SkillMissing }) {
   const items: { label: string; values: string[]; color: string }[] = [];
   if (missing.bins?.length > 0) items.push({ label: "bin", values: missing.bins, color: "var(--error)" });
@@ -243,6 +251,7 @@ function MissingBadges({ missing }: { missing: SkillMissing }) {
         item.values.map((v) => (
           <span
             key={`${item.label}-${v}`}
+            title={DEP_TITLES[item.label] ?? ""}
             style={{
               fontSize: 9, padding: "2px 6px", borderRadius: 4,
               background: `${item.color}15`, color: item.color,
@@ -262,6 +271,21 @@ function MissingBadges({ missing }: { missing: SkillMissing }) {
 // TAB 1: Skills
 // ═══════════════════════════════════════════════════════════════
 
+const MACOS_ONLY_SKILLS = new Set([
+  "things-mac", "apple-reminders", "apple-notes", "apple-calendar",
+  "apple-contacts", "apple-mail", "apple-music", "apple-shortcuts",
+  "apple-maps", "imessage", "macos-notifications", "macos-location",
+  "macos-screen", "macos-camera", "raycast", "hazel",
+]);
+
+const API_KEY_SKILLS = new Set([
+  "openai-image-gen", "openai-whisper-api", "openai-tts",
+  "elevenlabs", "spotify-player", "notion", "trello",
+  "linear", "gmail-pubsub",
+]);
+
+type SkillFilter = "all" | "ready" | "no-key";
+
 function SkillsTab() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [search, setSearch] = useState("");
@@ -269,12 +293,16 @@ function SkillsTab() {
   const [error, setError] = useState<string | null>(null);
   const [togglingSkills, setTogglingSkills] = useState<Set<string>>(new Set());
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
+  const [filter, setFilter] = useState<SkillFilter>("all");
 
   const loadSkills = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await cachedCommand("npx openclaw skills list --json", { ttl: 30_000 });
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: "npx openclaw skills list --json",
+        cwd: null,
+      });
       if (result.code !== 0) {
         setError(result.stderr || "Failed to list skills");
         return;
@@ -290,13 +318,33 @@ function SkillsTab() {
 
   useEffect(() => { loadSkills(); }, [loadSkills]);
 
+  const formatMissingForConfirm = (missing: SkillMissing): string => {
+    const parts: string[] = [];
+    if (missing.bins?.length) parts.push(`• bin: ${missing.bins.join(", ")}`);
+    if (missing.anyBins?.length) parts.push(`• any-bin: ${missing.anyBins.join(", ")}`);
+    if (missing.env?.length) parts.push(`• env: ${missing.env.join(", ")}`);
+    if (missing.config?.length) parts.push(`• config: ${missing.config.join(", ")}`);
+    if (missing.os?.length) parts.push(`• os: ${missing.os.join(", ")}`);
+    return parts.join("\n");
+  };
+
   const toggleSkill = async (skill: Skill) => {
+    if (skill.disabled && !skill.eligible && skill.missing) {
+      const missingList = formatMissingForConfirm(skill.missing);
+      const msg = `This skill has missing dependencies:\n\n${missingList}\n\nEnable anyway? It may not work correctly until dependencies are installed.`;
+      if (!window.confirm(msg)) return;
+    }
     setTogglingSkills((s) => new Set(s).add(skill.name));
     try {
       const action = skill.disabled ? "enable" : "disable";
-      await runCommand(`npx openclaw skills ${action} ${skill.name}`);
-      await loadSkills();
-    } catch { /* ignore */ }
+      const result = await runCommand(`npx openclaw skills ${action} ${skill.name}`);
+      if (result.code !== 0) {
+        window.alert(`Failed to ${action} ${skill.name}: ${result.stderr || result.stdout}`);
+      }
+    } catch (e) {
+      window.alert(`Failed to toggle ${skill.name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    await loadSkills();
     setTogglingSkills((s) => {
       const next = new Set(s);
       next.delete(skill.name);
@@ -315,6 +363,9 @@ function SkillsTab() {
   };
 
   const filtered = skills.filter((s) => {
+    if (MACOS_ONLY_SKILLS.has(s.name) || s.missing?.os?.some(o => o.toLowerCase().includes("darwin") || o.toLowerCase().includes("macos"))) return false;
+    if (filter === "no-key" && API_KEY_SKILLS.has(s.name)) return false;
+    if (filter === "ready" && (s.disabled || !s.eligible)) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return s.name.toLowerCase().includes(q)
@@ -363,6 +414,26 @@ function SkillsTab() {
           </div>
         </div>
         <SearchBar value={search} onChange={setSearch} placeholder="Search skills..." />
+        <div style={{ display: "flex", gap: 4, marginTop: 8, flexWrap: "wrap" }}>
+          {([
+            { id: "all", label: "All" },
+            { id: "ready", label: "Ready to Use" },
+            { id: "no-key", label: "No API Key Needed" },
+          ] as { id: SkillFilter; label: string }[]).map(f => (
+            <button
+              key={f.id}
+              onClick={() => setFilter(f.id)}
+              style={{
+                padding: "3px 10px", borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
+                background: filter === f.id ? "rgba(59,130,246,0.18)" : "var(--border)",
+                color: filter === f.id ? "var(--accent)" : "var(--text-muted)",
+                fontWeight: filter === f.id ? 600 : 400,
+              }}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "0 20px 16px" }}>
@@ -441,7 +512,13 @@ function SkillCard({ skill, toggling, onToggle, expanded, onExpand }: {
             ) : skill.eligible ? (
               <StatusBadge label="Ready" color="var(--success)" icon={<CheckCircle style={{ width: 8, height: 8 }} />} />
             ) : (
-              <StatusBadge label="Missing deps" color="var(--warning)" icon={<AlertTriangle style={{ width: 8, height: 8 }} />} />
+              <span style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
+                <StatusBadge label="Missing deps" color="var(--warning)" icon={<AlertTriangle style={{ width: 8, height: 8 }} />} />
+                <span style={{ fontSize: 9, color: "var(--warning)" }}>Some dependencies need to be installed</span>
+              </span>
+            )}
+            {API_KEY_SKILLS.has(skill.name) && (
+              <StatusBadge label="API key required" color="#fb923c" icon={<span style={{ fontSize: 7 }}>🔑</span>} />
             )}
             <span style={{
               fontSize: 9, padding: "1px 6px", borderRadius: 4,
@@ -520,7 +597,10 @@ function PluginsTab() {
     setLoading(true);
     setError(null);
     try {
-      const result = await cachedCommand("npx openclaw plugins list --json", { ttl: 30_000 });
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: "npx openclaw plugins list --json",
+        cwd: null,
+      });
       if (result.code !== 0) {
         setError(result.stderr || "Failed to list plugins");
         return;
@@ -540,9 +620,14 @@ function PluginsTab() {
     setTogglingPlugins((s) => new Set(s).add(plugin.id));
     try {
       const action = plugin.enabled ? "disable" : "enable";
-      await runCommand(`npx openclaw plugins ${action} ${plugin.id}`);
-      await loadPlugins();
-    } catch { /* ignore */ }
+      const result = await runCommand(`npx openclaw plugins ${action} ${plugin.id}`);
+      if (result.code !== 0) {
+        setError(`Failed to ${action} ${plugin.name}: ${result.stderr || result.stdout}`);
+      }
+    } catch (e) {
+      setError(`Failed to toggle ${plugin.name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    await loadPlugins();
     setTogglingPlugins((s) => {
       const next = new Set(s);
       next.delete(plugin.id);

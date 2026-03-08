@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Loader2, RefreshCw, Star, Cloud, HardDrive, Check, AlertTriangle,
   Search, ChevronDown, ChevronUp, Cpu, Scan, Download, Trash2, Info,
@@ -389,8 +389,7 @@ function OpenClawTab() {
       <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "0 20px 16px" }}>
         {loading ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
-            <Loader2 style={{ width: 24, height: 24, color: "#3B82F6", animation: "modSpin 1s linear infinite" }} />
-            <style>{`@keyframes modSpin { to { transform: rotate(360deg); } }`}</style>
+            <Loader2 className="animate-spin" style={{ width: 24, height: 24, color: "#3B82F6" }} />
           </div>
         ) : error ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 40, gap: 8 }}>
@@ -534,7 +533,7 @@ function OpenClawModelCard({ model, isDefault, settingDefault, onSetDefault, for
           }}
         >
           {settingDefault ? (
-            <Loader2 style={{ width: 10, height: 10, animation: "modSpin 1s linear infinite" }} />
+            <Loader2 className="animate-spin" style={{ width: 10, height: 10 }} />
           ) : (
             <Check style={{ width: 10, height: 10 }} />
           )}
@@ -757,8 +756,7 @@ function OllamaTab() {
       <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "0 20px 16px" }}>
         {loading ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
-            <Loader2 style={{ width: 24, height: 24, color: "#3B82F6", animation: "modSpin 1s linear infinite" }} />
-            <style>{`@keyframes modSpin { to { transform: rotate(360deg); } }`}</style>
+            <Loader2 className="animate-spin" style={{ width: 24, height: 24, color: "#3B82F6" }} />
           </div>
         ) : error ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 40, gap: 8 }}>
@@ -850,7 +848,7 @@ function OllamaTab() {
                             }}
                           >
                             {deleting === model.name ? (
-                              <Loader2 style={{ width: 10, height: 10, animation: "modSpin 1s linear infinite" }} />
+                              <Loader2 className="animate-spin" style={{ width: 10, height: 10 }} />
                             ) : (
                               <Check style={{ width: 10, height: 10 }} />
                             )}
@@ -915,7 +913,7 @@ function OllamaTab() {
                   }}>
                     {detailLoading ? (
                       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: 8 }}>
-                        <Loader2 style={{ width: 12, height: 12, color: "#3B82F6", animation: "modSpin 1s linear infinite" }} />
+                        <Loader2 className="animate-spin" style={{ width: 12, height: 12, color: "#3B82F6" }} />
                         <span style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>Loading details...</span>
                       </div>
                     ) : (
@@ -1004,8 +1002,7 @@ function RunningTab() {
       <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "0 20px 16px" }}>
         {loading ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
-            <Loader2 style={{ width: 24, height: 24, color: "#3B82F6", animation: "modSpin 1s linear infinite" }} />
-            <style>{`@keyframes modSpin { to { transform: rotate(360deg); } }`}</style>
+            <Loader2 className="animate-spin" style={{ width: 24, height: 24, color: "#3B82F6" }} />
           </div>
         ) : error ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 40, gap: 8 }}>

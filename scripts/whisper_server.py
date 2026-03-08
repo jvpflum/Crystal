@@ -1,5 +1,5 @@
 """
-Mogwai Whisper STT Server
+Crystal Whisper STT Server
 FastAPI server for speech-to-text using faster-whisper
 """
 
@@ -9,7 +9,7 @@ import tempfile
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="Mogwai Whisper STT")
+app = FastAPI(title="Crystal Whisper STT")
 
 app.add_middleware(
     CORSMiddleware,

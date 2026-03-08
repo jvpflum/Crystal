@@ -6,7 +6,6 @@ export function useVoice() {
   const [transcript, setTranscript] = useState<string>("");
   const [isWhisperConnected, setIsWhisperConnected] = useState(false);
   const [isTTSConnected, setIsTTSConnected] = useState(false);
-  const [isInitializing, setIsInitializing] = useState(true);
   const pollIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -18,30 +17,11 @@ export function useVoice() {
       const tts = await voiceService.checkTTSConnection();
       setIsWhisperConnected(whisper);
       setIsTTSConnected(tts);
-      return { whisper, tts };
     };
 
-    checkServers().then(({ whisper, tts }) => {
-      if (whisper && tts) {
-        setIsInitializing(false);
-      } else {
-        let attempts = 0;
-        const maxAttempts = 30;
-        
-        pollIntervalRef.current = window.setInterval(async () => {
-          attempts++;
-          const status = await checkServers();
-          
-          if ((status.whisper && status.tts) || attempts >= maxAttempts) {
-            setIsInitializing(false);
-            if (pollIntervalRef.current) {
-              clearInterval(pollIntervalRef.current);
-              pollIntervalRef.current = null;
-            }
-          }
-        }, 2000);
-      }
-    });
+    checkServers();
+
+    pollIntervalRef.current = window.setInterval(checkServers, 15000);
 
     return () => {
       if (pollIntervalRef.current) {
@@ -85,7 +65,8 @@ export function useVoice() {
     transcript,
     isWhisperConnected,
     isTTSConnected,
-    isInitializing,
+    hasSpeechRecognition: voiceService.hasSpeechRecognition(),
+    hasTTS: voiceService.hasTTS(),
     startListening,
     stopListening,
     speak,

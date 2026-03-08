@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Mic, MicOff } from "lucide-react";
 import { useVoice } from "@/hooks/useVoice";
 import type { VoiceState } from "@/lib/voice";
@@ -31,7 +32,18 @@ const stateLabels: Record<VoiceState, string> = {
 };
 
 export function VoiceOrb() {
-  const { voiceState, transcript, startListening, stopListening, isWhisperConnected } = useVoice();
+  const { voiceState, transcript, startListening, stopListening, hasSpeechRecognition } = useVoice();
+  const lastTranscript = useRef("");
+
+  useEffect(() => {
+    if (transcript && transcript !== lastTranscript.current && voiceState === "idle") {
+      lastTranscript.current = transcript;
+      window.dispatchEvent(new CustomEvent("crystal:navigate", { detail: "chat" }));
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("crystal:voice-message", { detail: transcript }));
+      }, 300);
+    }
+  }, [transcript, voiceState]);
 
   const handleClick = async () => {
     if (voiceState === "idle") {
@@ -42,6 +54,7 @@ export function VoiceOrb() {
   };
 
   const isActive = voiceState !== "idle";
+  const available = hasSpeechRecognition;
 
   return (
     <>
@@ -63,13 +76,14 @@ export function VoiceOrb() {
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
         <button
           onClick={handleClick}
+          disabled={!available}
           style={{
             position: "relative",
             width: 80,
             height: 80,
             borderRadius: "50%",
             border: "none",
-            cursor: "pointer",
+            cursor: available ? "pointer" : "not-allowed",
             background: gradients[voiceState],
             display: "flex",
             alignItems: "center",
@@ -79,13 +93,13 @@ export function VoiceOrb() {
               ? `0 0 24px ${glowColors[voiceState]}, 0 0 48px ${glowColors[voiceState]}`
               : `0 0 12px ${glowColors[voiceState]}`,
             outline: "none",
+            opacity: available ? 1 : 0.5,
           }}
-          onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.05)"; }}
+          onMouseEnter={e => { if (available) e.currentTarget.style.transform = "scale(1.05)"; }}
           onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; }}
-          onMouseDown={e => { e.currentTarget.style.transform = "scale(0.95)"; }}
-          onMouseUp={e => { e.currentTarget.style.transform = "scale(1.05)"; }}
+          onMouseDown={e => { if (available) e.currentTarget.style.transform = "scale(0.95)"; }}
+          onMouseUp={e => { if (available) e.currentTarget.style.transform = "scale(1.05)"; }}
         >
-          {/* Pulse ring (listening) */}
           {voiceState === "listening" && (
             <span style={{
               position: "absolute",
@@ -97,7 +111,6 @@ export function VoiceOrb() {
             }} />
           )}
 
-          {/* Outer ring */}
           {isActive && (
             <span style={{
               position: "absolute",
@@ -109,7 +122,6 @@ export function VoiceOrb() {
             }} />
           )}
 
-          {/* Inner core */}
           <span style={{
             width: 48,
             height: 48,
@@ -122,7 +134,7 @@ export function VoiceOrb() {
             justifyContent: "center",
             animation: voiceState === "processing" ? "vorb-spin 2s linear infinite" : "none",
           }}>
-            {isWhisperConnected ? (
+            {available ? (
               <Mic style={{
                 width: 22,
                 height: 22,
@@ -134,7 +146,6 @@ export function VoiceOrb() {
             )}
           </span>
 
-          {/* Glow overlay */}
           {isActive && (
             <span style={{
               position: "absolute",
@@ -147,28 +158,21 @@ export function VoiceOrb() {
           )}
         </button>
 
-        {/* Status label */}
         <div style={{ textAlign: "center", maxWidth: 200 }}>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", lineHeight: 1.4 }}>
-            {stateLabels[voiceState]}
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.4 }}>
+            {available ? stateLabels[voiceState] : "Voice not available"}
           </div>
 
           {transcript && voiceState === "idle" && (
             <div style={{
               fontSize: 11,
-              color: "rgba(255,255,255,0.5)",
+              color: "var(--text-muted)",
               marginTop: 4,
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
             }}>
               "{transcript}"
-            </div>
-          )}
-
-          {!isWhisperConnected && (
-            <div style={{ fontSize: 10, color: "#f87171", marginTop: 4 }}>
-              Voice server offline
             </div>
           )}
         </div>

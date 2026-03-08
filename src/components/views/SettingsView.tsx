@@ -147,7 +147,7 @@ export function SettingsView() {
     getModel, setModel, getModels,
   } = useOpenClaw();
   const {
-    isWhisperConnected, isTTSConnected, isInitializing, checkConnections,
+    isWhisperConnected, isTTSConnected, checkConnections,
   } = useVoice();
   const gatewayConnected = useAppStore(s => s.gatewayConnected);
   const { themeId, setTheme } = useThemeStore();
@@ -420,7 +420,7 @@ export function SettingsView() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-      <style dangerouslySetInnerHTML={{ __html: KEYFRAMES }} />
+      <style>{KEYFRAMES}</style>
 
       {/* Header */}
       <div style={{ padding: "18px 24px 8px", flexShrink: 0 }}>
@@ -745,8 +745,7 @@ export function SettingsView() {
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span
                   style={{
-                    ...dot(isWhisperConnected ? "var(--success)" : isInitializing ? "var(--warning)" : "var(--error)"),
-                    ...(isInitializing && !isWhisperConnected ? { animation: "_pulse 1.5s ease-in-out infinite" } : {}),
+                    ...dot(isWhisperConnected ? "var(--success)" : "var(--text-muted)"),
                   }}
                 />
                 <div>
@@ -756,8 +755,8 @@ export function SettingsView() {
                   </span>
                 </div>
               </div>
-              <span style={{ fontSize: 10, color: isWhisperConnected ? "var(--success)" : isInitializing ? "var(--warning)" : "var(--error)" }}>
-                {isWhisperConnected ? "Connected" : isInitializing ? "Starting..." : "Offline"}
+              <span style={{ fontSize: 10, color: isWhisperConnected ? "var(--success)" : "var(--text-muted)" }}>
+                {isWhisperConnected ? "Connected" : "Offline (using browser voice)"}
               </span>
             </div>
 
@@ -766,8 +765,7 @@ export function SettingsView() {
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span
                   style={{
-                    ...dot(isTTSConnected ? "var(--success)" : isInitializing ? "var(--warning)" : "var(--error)"),
-                    ...(isInitializing && !isTTSConnected ? { animation: "_pulse 1.5s ease-in-out infinite" } : {}),
+                    ...dot(isTTSConnected ? "var(--success)" : "var(--text-muted)"),
                   }}
                 />
                 <div>
@@ -777,8 +775,8 @@ export function SettingsView() {
                   </span>
                 </div>
               </div>
-              <span style={{ fontSize: 10, color: isTTSConnected ? "var(--success)" : isInitializing ? "var(--warning)" : "var(--error)" }}>
-                {isTTSConnected ? "Connected" : isInitializing ? "Starting..." : "Offline"}
+              <span style={{ fontSize: 10, color: isTTSConnected ? "var(--success)" : "var(--text-muted)" }}>
+                {isTTSConnected ? "Connected" : "Offline (using browser TTS)"}
               </span>
             </div>
 

@@ -105,7 +105,6 @@ export const SUPPORTED_CHANNELS: Omit<ChannelConfig, "enabled" | "connected" | "
   { id: "discord",    name: "Discord",     type: "discord",    icon: "🎮", description: "Discord bot with voice, threads, reactions" },
   { id: "slack",      name: "Slack",       type: "slack",      icon: "💼", description: "Slack workspace bot with channel access" },
   { id: "signal",     name: "Signal",      type: "signal",     icon: "🔒", description: "End-to-end encrypted Signal messaging" },
-  { id: "imessage",   name: "iMessage",    type: "imessage",   icon: "🍎", description: "Apple iMessage integration (macOS)" },
   { id: "googlechat", name: "Google Chat", type: "googlechat", icon: "🟢", description: "Google Workspace Chat integration" },
   { id: "email",      name: "Email",       type: "email",      icon: "📧", description: "IMAP/SMTP email monitoring and responses" },
   { id: "matrix",     name: "Matrix",      type: "matrix",     icon: "🔷", description: "Matrix/Element federated messaging" },
@@ -287,11 +286,23 @@ class OpenClawClient {
 
   async addMemory(content: string): Promise<void> {
     const home = await this.getOpenClawDir();
-    const memoryPath = `${home}\\MEMORY.md`;
-    let existing = "";
-    try { existing = await invoke<string>("read_file", { path: memoryPath }); } catch { /* new file */ }
-    const updated = existing + (existing ? "\n\n" : "") + `## ${new Date().toLocaleString()}\n\n${content}`;
-    await invoke("write_file", { path: memoryPath, content: updated });
+
+    const curatedPath = `${home}\\MEMORY.md`;
+    let curatedExisting = "";
+    try { curatedExisting = await invoke<string>("read_file", { path: curatedPath }); } catch { /* new file */ }
+    const curatedUpdated = curatedExisting + (curatedExisting ? "\n\n" : "") + content;
+    await invoke("write_file", { path: curatedPath, content: curatedUpdated });
+
+    const date = new Date().toISOString().split("T")[0];
+    const dailyDir = `${home}\\memory`;
+    const dailyPath = `${dailyDir}\\${date}.md`;
+    try {
+      await invoke("execute_command", { command: `New-Item -ItemType Directory -Force -Path "${dailyDir}"`, cwd: null });
+    } catch { /* dir may exist */ }
+    let dailyExisting = "";
+    try { dailyExisting = await invoke<string>("read_file", { path: dailyPath }); } catch { /* new file */ }
+    const dailyUpdated = dailyExisting + (dailyExisting ? "\n\n" : "") + content;
+    await invoke("write_file", { path: dailyPath, content: dailyUpdated });
   }
 
   async searchMemory(query: string): Promise<MemoryEntry[]> {
@@ -402,23 +413,62 @@ class OpenClawClient {
   isConnected(): boolean { return this.llmConnected; }
 
   async chat(messages: Message[]): Promise<string> {
+    let full = "";
+    for await (const chunk of this.streamChat(messages)) {
+      full += chunk;
+    }
+    return full || "No response";
+  }
+
+  async *streamChat(messages: Message[]): AsyncGenerator<string> {
     if (this.model === "auto") {
       await this.autoDetectModel();
     }
 
-    const r = await this.proxyFetch(`${this.baseUrl}/chat/completions`, "POST", JSON.stringify({
-      model: this.model,
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
-      stream: false, max_tokens: 4096, temperature: 0.7,
-    }));
-    if (r.status < 200 || r.status >= 300) throw new Error(`LLM error: ${r.status} - ${r.body?.slice(0, 200)}`);
-    const data = JSON.parse(r.body);
-    return data.choices[0]?.message?.content || "No response";
-  }
+    const url = `${this.baseUrl}/chat/completions`;
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: this.model,
+        messages: messages.map(m => ({ role: m.role, content: m.content })),
+        stream: true,
+        max_tokens: 2048,
+        temperature: 0.7,
+      }),
+    });
 
-  async *streamChat(messages: Message[]): AsyncGenerator<string> {
-    const result = await this.chat([...messages]);
-    yield result;
+    if (!resp.ok) {
+      const errBody = await resp.text().catch(() => "");
+      throw new Error(`LLM error: ${resp.status} - ${errBody.slice(0, 200)}`);
+    }
+
+    const reader = resp.body?.getReader();
+    if (!reader) throw new Error("No response stream available");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith("data: ")) continue;
+        const payload = trimmed.slice(6);
+        if (payload === "[DONE]") return;
+        try {
+          const json = JSON.parse(payload);
+          const token = json.choices?.[0]?.delta?.content;
+          if (token) yield token;
+        } catch { /* skip malformed SSE chunks */ }
+      }
+    }
   }
 
   async getModels(): Promise<string[]> {
