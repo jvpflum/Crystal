@@ -14,7 +14,7 @@ export function useGlobalShortcut(shortcut: string, callback: () => void) {
           }
         });
         isRegistered = true;
-        console.log(`Global shortcut registered: ${shortcut}`);
+        if (import.meta.env.DEV) console.log(`Global shortcut registered: ${shortcut}`);
       } catch (error) {
         console.error(`Failed to register global shortcut: ${error}`);
       }

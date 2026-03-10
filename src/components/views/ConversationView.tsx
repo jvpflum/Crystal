@@ -6,7 +6,7 @@ import rehypeHighlight from "rehype-highlight";
 import { agentService, AgentStep, ActionButton } from "@/lib/agent";
 import { invoke } from "@tauri-apps/api/core";
 import { Message, openclawClient } from "@/lib/openclaw";
-import { useAppStore } from "@/stores/appStore";
+import { useAppStore, type AppView } from "@/stores/appStore";
 import { voiceService } from "@/lib/voice";
 
 /* ── Conversation types ── */
@@ -377,7 +377,7 @@ export function ConversationView() {
   const handleActionButton = useCallback(async (btn: ActionButton) => {
     switch (btn.action) {
       case "navigate":
-        if (btn.args?.view) setView(btn.args.view as any);
+        if (btn.args?.view) setView(btn.args.view as AppView);
         break;
       case "enable_plugin":
         if (btn.args?.id) {
@@ -396,7 +396,7 @@ export function ConversationView() {
         }
         break;
       case "power_up":
-        setView("marketplace" as any);
+        setView("marketplace");
         break;
       case "new_chat":
         handleNewChat();

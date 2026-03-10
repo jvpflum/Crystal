@@ -315,6 +315,11 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
                 ? "Select your default model from Ollama:"
                 : "No Ollama models detected. Pull one to get started."}
             </p>
+            {models.length === 0 && (
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", margin: 0 }}>
+                You can skip this step and set up a model later in Settings.
+              </p>
+            )}
             {models.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 180, overflowY: "auto" }}>
                 {models.map((m) => (
@@ -396,7 +401,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
               <button
                 style={{
                   ...primaryBtn,
-                  opacity: !selectedModel && models.length > 0 ? 0.5 : 1,
+                  opacity: 1,
                 }}
                 onClick={async () => {
                   if (selectedModel) {
@@ -451,12 +456,20 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
                 </p>
               </div>
               {gatewayUp === false && !startingGateway && (
-                <button
-                  style={{ ...primaryBtn, padding: "8px 16px", fontSize: 12 }}
-                  onClick={startGateway}
-                >
-                  <Rocket size={14} /> Start
-                </button>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    style={{ ...primaryBtn, padding: "8px 16px", fontSize: 12 }}
+                    onClick={startGateway}
+                  >
+                    <Rocket size={14} /> Start
+                  </button>
+                  <button
+                    style={{ ...secondaryBtn, padding: "8px 16px", fontSize: 12 }}
+                    onClick={() => setStep(4)}
+                  >
+                    Skip
+                  </button>
+                </div>
               )}
               {startingGateway && (
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>

@@ -13,9 +13,6 @@ src-tauri/gen/schemas/
 bin/
 models/
 
-# Stray directories created at runtime
-%USERPROFILE%/
-
 # Secrets and config
 .env
 .env.*

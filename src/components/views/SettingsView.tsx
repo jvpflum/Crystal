@@ -163,8 +163,8 @@ export function SettingsView() {
   const [gatewayPort] = useState("18789");
   const [gatewayLatency, setGatewayLatency] = useState<number | null>(null);
 
-  const [temperature, setTemperature] = useState(0.7);
-  const [maxTokens, setMaxTokens] = useState("4096");
+  const [temperature, setTemperature] = useState(() => parseFloat(localStorage.getItem("crystal_ai_temperature") || "0.7"));
+  const [maxTokens, setMaxTokens] = useState(() => localStorage.getItem("crystal_ai_max_tokens") || "1024");
   const [contextWindow, setContextWindow] = useState("32768");
   const [systemPrompt, setSystemPrompt] = useState(
     "You are Crystal, an intelligent AI assistant powered by OpenClaw."
@@ -355,6 +355,8 @@ export function SettingsView() {
       systemPrompt,
       contextLength: parseInt(contextWindow) || 32768,
     });
+    localStorage.setItem("crystal_ai_temperature", temperature.toString());
+    localStorage.setItem("crystal_ai_max_tokens", maxTokens);
   };
 
   const checkDaemonStatus = async () => {
@@ -842,6 +844,7 @@ export function SettingsView() {
                   step="0.05"
                   value={temperature}
                   onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                  onMouseUp={saveAISettings}
                   style={{
                     width: 100,
                     height: 4,
@@ -862,6 +865,7 @@ export function SettingsView() {
                 type="text"
                 value={maxTokens}
                 onChange={(e) => setMaxTokens(e.target.value)}
+                onBlur={saveAISettings}
                 style={{ ...INPUT, width: 80, textAlign: "right" }}
               />
             </div>

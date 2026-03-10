@@ -102,7 +102,7 @@ export function Navigation() {
         cursor: "pointer", transition: "all 0.15s",
       }}
         title="Command Palette (Ctrl+K)"
-        onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))}
+        onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }))}
         onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--accent)"; }}
         onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
       >

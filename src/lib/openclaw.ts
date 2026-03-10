@@ -429,7 +429,7 @@ class OpenClawClient {
       if (this.model === "auto") await this.autoDetectModel();
       if (this.model === "auto") return;
 
-      console.log(`[Crystal] Warming up model: ${this.model}`);
+      if (import.meta.env.DEV) console.log(`[Crystal] Warming up model: ${this.model}`);
       const resp = await fetch(`${this.nativeUrl}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -444,7 +444,7 @@ class OpenClawClient {
       if (resp.ok) {
         this.modelWarmedUp = true;
         this.llmConnected = true;
-        console.log(`[Crystal] Model warm — loaded in VRAM, keep_alive=-1`);
+        if (import.meta.env.DEV) console.log(`[Crystal] Model warm — loaded in VRAM, keep_alive=-1`);
       }
     } catch (e) {
       console.warn("[Crystal] Warm-up failed (Ollama may not be running):", e);
@@ -572,7 +572,7 @@ class OpenClawClient {
         const preferred = ["qwen2.5:14b", "qwen2.5:7b", "llama3.1:8b", "mistral:7b"];
         const match = preferred.find(p => models.some(m => m.startsWith(p)));
         this.model = match || models[0];
-        console.log(`[Crystal] Auto-detected model: ${this.model}`);
+        if (import.meta.env.DEV) console.log(`[Crystal] Auto-detected model: ${this.model}`);
       }
     } catch { /* keep "auto" and let LLM call fail with clear error */ }
   }
