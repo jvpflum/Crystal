@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Mic, Loader2, Trash2, Terminal, ChevronDown, ChevronRight, Copy, Check, Bot, User, Plus, X, PanelLeftClose, PanelLeft, MessageSquare, Zap, Settings2, Shield, Puzzle, Stethoscope, Play, Search, RefreshCw, Download, Globe, Cpu, Brain, ArrowDown } from "lucide-react";
+import { Send, Mic, Loader2, Trash2, Terminal, ChevronDown, ChevronRight, Copy, Check, Bot, User, Plus, X, PanelLeftClose, PanelLeft, MessageSquare, Zap, Settings2, Shield, Puzzle, Stethoscope, Play, Search, RefreshCw, Download, Globe, Cpu, Brain, ArrowDown, Volume2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -7,6 +7,7 @@ import { agentService, AgentStep, ActionButton } from "@/lib/agent";
 import { invoke } from "@tauri-apps/api/core";
 import { Message, openclawClient } from "@/lib/openclaw";
 import { useAppStore } from "@/stores/appStore";
+import { voiceService } from "@/lib/voice";
 
 /* ── Conversation types ── */
 
@@ -126,6 +127,7 @@ export function ConversationView() {
   const [toolSteps, setToolSteps] = useState<AgentStep[]>([]);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [micFlashRed, setMicFlashRed] = useState(false);
+  const [responseMeta, setResponseMeta] = useState<Record<string, { tokens: number; durationMs: number }>>({});
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -138,6 +140,7 @@ export function ConversationView() {
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
   const [slashIndex, setSlashIndex] = useState(0);
+  const voiceTriggeredRef = useRef(false);
 
   const gatewayConnected = useAppStore(s => s.gatewayConnected);
   const setView = useAppStore(s => s.setView);
@@ -199,6 +202,7 @@ export function ConversationView() {
     const handler = (e: Event) => {
       const text = (e as CustomEvent).detail;
       if (text && !isLoading) {
+        voiceTriggeredRef.current = true;
         setInput(text);
         setTimeout(() => {
           const btn = document.querySelector("[data-send-btn]") as HTMLButtonElement;
@@ -301,9 +305,12 @@ export function ConversationView() {
     try {
       let accumulated = "";
       let lastFlush = 0;
+      let tokenCount = 0;
+      const streamStart = Date.now();
       const FLUSH_INTERVAL = 40;
       for await (const token of agentService.streamChat(text)) {
         accumulated += token;
+        tokenCount++;
         const now = Date.now();
         if (now - lastFlush >= FLUSH_INTERVAL) {
           lastFlush = now;
@@ -315,13 +322,32 @@ export function ConversationView() {
           }));
         }
       }
+      const streamDuration = Date.now() - streamStart;
+      setResponseMeta(prev => ({ ...prev, [msgId]: { tokens: tokenCount, durationMs: streamDuration } }));
       const finalContent = accumulated;
       updateConversation(activeId, c => ({
         ...c,
         messages: c.messages.map(m => m.id === msgId ? { ...m, content: finalContent } : m),
         updatedAt: Date.now(),
       }));
+
+      if (voiceTriggeredRef.current && finalContent) {
+        voiceTriggeredRef.current = false;
+        const plainText = finalContent
+          .replace(/```[\s\S]*?```/g, "")
+          .replace(/\*\*([^*]+)\*\*/g, "$1")
+          .replace(/\*([^*]+)\*/g, "$1")
+          .replace(/_([^_]+)_/g, "$1")
+          .replace(/#+\s/g, "")
+          .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+          .replace(/<[^>]+>/g, "")
+          .trim();
+        if (plainText.length > 0 && plainText.length < 500) {
+          voiceService.speak(plainText).catch(() => {});
+        }
+      }
     } catch (err) {
+      voiceTriggeredRef.current = false;
       updateConversation(activeId, c => ({
         ...c,
         messages: c.messages.map(m =>
@@ -644,7 +670,7 @@ export function ConversationView() {
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
             {messages.map((msg, i) => (
-              <MessageBubble key={msg.id} message={msg} isLatest={i === messages.length - 1 && msg.role === "assistant"} />
+              <MessageBubble key={msg.id} message={msg} isLatest={i === messages.length - 1 && msg.role === "assistant"} meta={responseMeta[msg.id]} />
             ))}
 
             {messages.length === 1 && messages[0].id === "welcome" && !isLoading && (
@@ -931,14 +957,33 @@ function StatusPill({ connected, label }: { connected: boolean; label: string })
 }
 
 /* ── Message bubble ── */
-function MessageBubble({ message, isLatest }: { message: Message; isLatest: boolean }) {
+function MessageBubble({ message, isLatest, meta }: { message: Message; isLatest: boolean; meta?: { tokens: number; durationMs: number } }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+
+  const handleSpeak = async () => {
+    if (speaking) return;
+    setSpeaking(true);
+    const plainText = message.content
+      .replace(/```[\s\S]*?```/g, "")
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/\*([^*]+)\*/g, "$1")
+      .replace(/_([^_]+)_/g, "$1")
+      .replace(/#+\s/g, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/<[^>]+>/g, "")
+      .trim();
+    try {
+      await voiceService.speak(plainText);
+    } catch {}
+    setSpeaking(false);
   };
 
   return (
@@ -983,23 +1028,41 @@ function MessageBubble({ message, isLatest }: { message: Message; isLatest: bool
           if (btn) btn.style.opacity = "0";
         }}
       >
-        {/* Copy button */}
+        {/* Action buttons */}
         {!isUser && message.id !== "welcome" && (
-          <button
+          <div
             data-copy
-            onClick={handleCopy}
             style={{
-              position: "absolute", top: 6, right: 6, padding: 4, borderRadius: 5,
-              background: "rgba(255,255,255,0.08)", border: "none", cursor: "pointer",
-              opacity: 0, transition: "opacity 0.15s", display: "flex", alignItems: "center",
-              zIndex: 2,
+              position: "absolute", top: 6, right: 6, display: "flex", gap: 2,
+              opacity: 0, transition: "opacity 0.15s", zIndex: 2,
             }}
           >
-            {copied
-              ? <Check style={{ width: 11, height: 11, color: "var(--success)" }} />
-              : <Copy style={{ width: 11, height: 11, color: "var(--text-secondary)" }} />
-            }
-          </button>
+            <button
+              onClick={handleSpeak}
+              title="Read aloud"
+              style={{
+                padding: 4, borderRadius: 5,
+                background: speaking ? "var(--accent-bg)" : "rgba(255,255,255,0.08)",
+                border: "none", cursor: "pointer", display: "flex", alignItems: "center",
+              }}
+            >
+              <Volume2 style={{ width: 11, height: 11, color: speaking ? "var(--accent)" : "var(--text-secondary)" }} />
+            </button>
+            <button
+              onClick={handleCopy}
+              title="Copy"
+              style={{
+                padding: 4, borderRadius: 5,
+                background: "rgba(255,255,255,0.08)", border: "none", cursor: "pointer",
+                display: "flex", alignItems: "center",
+              }}
+            >
+              {copied
+                ? <Check style={{ width: 11, height: 11, color: "var(--success)" }} />
+                : <Copy style={{ width: 11, height: 11, color: "var(--text-secondary)" }} />
+              }
+            </button>
+          </div>
         )}
 
         {isUser ? (
@@ -1043,12 +1106,19 @@ function MessageBubble({ message, isLatest }: { message: Message; isLatest: bool
           </div>
         )}
 
-        {/* Timestamp */}
+        {/* Timestamp + performance meta */}
         <div style={{
           fontSize: 9, color: isUser ? "rgba(255,255,255,0.5)" : "var(--text-muted)",
           marginTop: 4, textAlign: isUser ? "right" : "left",
+          display: "flex", gap: 8, justifyContent: isUser ? "flex-end" : "flex-start",
         }}>
-          {message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          <span>{message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+          {meta && meta.durationMs > 0 && (
+            <span style={{ fontVariantNumeric: "tabular-nums" }}>
+              {(meta.durationMs / 1000).toFixed(1)}s
+              {meta.tokens > 0 && ` · ${Math.round(meta.tokens / (meta.durationMs / 1000))} tok/s`}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -1080,6 +1150,13 @@ function CopyButton({ text }: { text: string }) {
 
 /* ── Thinking indicator ── */
 function ThinkingIndicator({ hasTools }: { hasTools: boolean }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const start = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   return (
     <div style={{
       display: "flex", gap: 10, alignItems: "flex-start",
@@ -1108,6 +1185,11 @@ function ThinkingIndicator({ hasTools }: { hasTools: boolean }) {
         <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 500 }}>
           {hasTools ? "Working..." : "Thinking..."}
         </span>
+        {elapsed > 0 && (
+          <span style={{ fontSize: 10, color: "var(--text-muted)", fontVariantNumeric: "tabular-nums" }}>
+            {elapsed}s
+          </span>
+        )}
       </div>
     </div>
   );

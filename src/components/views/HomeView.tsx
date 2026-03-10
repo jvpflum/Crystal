@@ -229,7 +229,7 @@ export function HomeView() {
         <StatusCard
           icon={Bot}
           label="LLM"
-          value={llmConnected ? data.llmModel : "Offline"}
+          value={llmConnected ? (openclawClient.getModel() !== "auto" ? openclawClient.getModel() : data.llmModel) : "Offline"}
           color={llmConnected ? "var(--accent)" : "var(--error)"}
           onClick={() => setView("models")}
         />
