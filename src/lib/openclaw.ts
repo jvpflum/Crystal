@@ -223,7 +223,7 @@ class OpenClawClient {
       const memoryPrompt = escapeShellArg(
         "Review today's conversation history and extract the most important facts, decisions, preferences, and context. " +
         "Write a concise summary as bullet points. Determine today's date and save it to " +
-        "~/.openclaw/workspace/memory/daily-YYYY-MM-DD.md (replacing YYYY-MM-DD with the actual current date) using the write_file tool. " +
+        "~/.openclaw/workspace/memory/YYYY-MM-DD.md (replacing YYYY-MM-DD with the actual current date) using the write_file tool. " +
         "Focus on: user preferences, project decisions, technical discoveries, action items, and anything the user would want remembered long-term. " +
         "Keep entries factual and concise."
       );
@@ -242,9 +242,9 @@ class OpenClawClient {
   async captureDailyMemory(conversationSummary: string): Promise<void> {
     if (!conversationSummary.trim()) return;
     try {
-      const dir = await this.getMemoryDir();
+      const dir = await this.getDailyMemoryDir();
       const date = new Date().toISOString().split("T")[0];
-      const dailyPath = `${dir}\\daily-${date}.md`;
+      const dailyPath = `${dir}\\${date}.md`;
       const timestamp = new Date().toLocaleString();
 
       let existing = "";
@@ -385,11 +385,20 @@ class OpenClawClient {
   getActivityLog(): ActivityEntry[] { return [...this.messageLog]; }
   clearActivityLog() { this.messageLog.length = 0; }
 
-  /* ── Memory (file-based via Tauri, stored in workspace/memory/) ── */
+  /* ── Memory (file-based via Tauri) ── */
+  /* OpenClaw layout:
+   *   ~/.openclaw/workspace/MEMORY.md          — curated long-term memory
+   *   ~/.openclaw/workspace/memory/YYYY-MM-DD.md — daily session logs
+   */
 
-  private async getMemoryDir(): Promise<string> {
+  private async getWorkspaceDir(): Promise<string> {
     const home = await this.getOpenClawDir();
-    const dir = `${home}\\workspace\\memory`;
+    return `${home}\\workspace`;
+  }
+
+  private async getDailyMemoryDir(): Promise<string> {
+    const ws = await this.getWorkspaceDir();
+    const dir = `${ws}\\memory`;
     try {
       await invoke("execute_command", { command: `New-Item -ItemType Directory -Force -Path "${dir}"`, cwd: null });
     } catch { /* exists */ }
@@ -398,8 +407,8 @@ class OpenClawClient {
 
   async getMemory(): Promise<MemoryEntry[]> {
     try {
-      const dir = await this.getMemoryDir();
-      const content = await invoke<string>("read_file", { path: `${dir}\\MEMORY.md` });
+      const ws = await this.getWorkspaceDir();
+      const content = await invoke<string>("read_file", { path: `${ws}\\MEMORY.md` });
       return this.parseMemoryMd(content, "curated");
     } catch { return []; }
   }
@@ -407,15 +416,15 @@ class OpenClawClient {
   async getDailyMemory(date?: string): Promise<MemoryEntry[]> {
     const d = date || new Date().toISOString().split("T")[0];
     try {
-      const dir = await this.getMemoryDir();
-      const content = await invoke<string>("read_file", { path: `${dir}\\daily-${d}.md` });
+      const dir = await this.getDailyMemoryDir();
+      const content = await invoke<string>("read_file", { path: `${dir}\\${d}.md` });
       return this.parseMemoryMd(content, "daily");
     } catch { return []; }
   }
 
   async addMemory(content: string): Promise<void> {
-    const dir = await this.getMemoryDir();
-    const curatedPath = `${dir}\\MEMORY.md`;
+    const ws = await this.getWorkspaceDir();
+    const curatedPath = `${ws}\\MEMORY.md`;
     let curatedExisting = "";
     try { curatedExisting = await invoke<string>("read_file", { path: curatedPath }); } catch { /* new file */ }
     const timestamp = new Date().toLocaleString();
@@ -426,7 +435,8 @@ class OpenClawClient {
     await invoke("write_file", { path: curatedPath, content: curatedUpdated });
 
     const date = new Date().toISOString().split("T")[0];
-    const dailyPath = `${dir}\\daily-${date}.md`;
+    const dir = await this.getDailyMemoryDir();
+    const dailyPath = `${dir}\\${date}.md`;
     let dailyExisting = "";
     try { dailyExisting = await invoke<string>("read_file", { path: dailyPath }); } catch { /* new file */ }
     const dailyUpdated = dailyExisting
@@ -438,8 +448,8 @@ class OpenClawClient {
   }
 
   async deleteMemory(entryId: string): Promise<void> {
-    const dir = await this.getMemoryDir();
-    const curatedPath = `${dir}\\MEMORY.md`;
+    const ws = await this.getWorkspaceDir();
+    const curatedPath = `${ws}\\MEMORY.md`;
     try {
       const content = await invoke<string>("read_file", { path: curatedPath });
       const sections = content.split(/^(?=## )/m);
@@ -633,7 +643,7 @@ class OpenClawClient {
       });
       if (result.code === 0 && result.stdout.trim()) {
         const data = JSON.parse(result.stdout);
-        return Array.isArray(data) ? data : [];
+        return Array.isArray(data) ? data : (data.agents ?? data.items ?? []);
       }
     } catch { /* ignore */ }
     return [];

@@ -119,7 +119,7 @@ export function HomeView() {
             || "—",
           osLabel: status?.os?.label ?? "—",
           activeSessions: sessions?.count ?? sessions?.sessions?.length ?? 0,
-          readySkills: skills?.skills?.filter((s: { eligible: boolean }) => s.eligible).length ?? 0,
+          readySkills: (skills?.skills?.filter((s: { eligible: boolean }) => s.eligible) ?? []).length,
           tokenPercentUsed: firstSession?.tokenUsage?.percentUsed ?? 0,
           memoryChunks: status?.memory?.totalChunks ?? status?.memory?.chunks ?? 0,
           securityCritical: status?.securityAudit?.summary?.critical ?? 0,

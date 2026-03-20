@@ -289,7 +289,7 @@ export function ConversationView() {
       { cmd: "/debug reset", label: "Debug Reset", description: "Reset all debug overrides" },
       { cmd: "/subagents list", label: "Subagents List", description: "List active sub-agents" },
       { cmd: "/subagents kill all", label: "Subagents Kill All", description: "Kill all sub-agents" },
-      { cmd: "/acp status", label: "ACP Status", description: "Show ACP session status" },
+      { cmd: "/acp status", label: "ACP Status", description: "Show ACP session status (also in Sub-Agents view)" },
       { cmd: "/approve allow-once", label: "Approve Once", description: "Approve exec once" },
       { cmd: "/approve allow-always", label: "Approve Always", description: "Approve exec always" },
       { cmd: "/approve deny", label: "Approve Deny", description: "Deny exec approval" },

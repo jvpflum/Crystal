@@ -80,7 +80,7 @@ export const useDataStore = create<DataState>((set, get) => ({
         const result = await runCommand("openclaw agents list --json");
         if (result.code === 0 && result.stdout.trim()) {
           const data = JSON.parse(result.stdout);
-          const arr = Array.isArray(data) ? data : [];
+          const arr = Array.isArray(data) ? data : (data.agents ?? data.items ?? []);
           set({ agents: { data: arr, fetchedAt: Date.now() } });
           return arr;
         }

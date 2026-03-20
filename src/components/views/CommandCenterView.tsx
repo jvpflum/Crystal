@@ -110,11 +110,11 @@ function parseCronJob(raw: Record<string, unknown>): CronJob {
     scheduleStr = sched;
     scheduleKind = sched.trim().split(/\s+/).length === 5 ? "cron" : "unknown";
   } else if (sched && typeof sched === "object") {
-    if (sched.cron) {
-      scheduleStr = String(sched.cron);
+    if (sched.cron || (sched.kind === "cron" && sched.expr)) {
+      scheduleStr = String(sched.cron || sched.expr);
       scheduleKind = "cron";
     } else if (sched.kind === "every") {
-      everyMs = Number(sched.everyMs) || 0;
+      everyMs = Number(sched.everyMs || sched.intervalMs || sched.ms) || 0;
       scheduleStr = `every ${Math.round(everyMs / 60000)}m`;
       scheduleKind = "every";
     } else if (sched.kind === "at") {

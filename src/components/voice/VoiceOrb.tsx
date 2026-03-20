@@ -38,7 +38,7 @@ export function VoiceOrb() {
   useEffect(() => {
     if (transcript && transcript !== lastTranscript.current && voiceState === "idle") {
       lastTranscript.current = transcript;
-      window.dispatchEvent(new CustomEvent("crystal:navigate", { detail: "chat" }));
+      window.dispatchEvent(new CustomEvent("crystal:navigate", { detail: "conversation" }));
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent("crystal:voice-message", { detail: transcript }));
       }, 300);

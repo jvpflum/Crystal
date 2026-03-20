@@ -115,8 +115,8 @@ export function MemoryView() {
       const home = await invoke<{ stdout: string }>("execute_command", {
         command: "echo $env:USERPROFILE\\.openclaw", cwd: null,
       });
-      const dir = home.stdout.trim().replace(/\r?\n/g, "") + "\\workspace\\memory";
-      const content = await invoke<string>("read_file", { path: `${dir}\\MEMORY.md` });
+      const wsDir = home.stdout.trim().replace(/\r?\n/g, "") + "\\workspace";
+      const content = await invoke<string>("read_file", { path: `${wsDir}\\MEMORY.md` });
       setEditContent(content);
     } catch {
       setEditContent("");
@@ -135,8 +135,8 @@ export function MemoryView() {
       const home = await invoke<{ stdout: string }>("execute_command", {
         command: "echo $env:USERPROFILE\\.openclaw", cwd: null,
       });
-      const dir = home.stdout.trim().replace(/\r?\n/g, "") + "\\workspace\\memory";
-      await invoke("write_file", { path: `${dir}\\MEMORY.md`, content: editContent });
+      const wsDir = home.stdout.trim().replace(/\r?\n/g, "") + "\\workspace";
+      await invoke("write_file", { path: `${wsDir}\\MEMORY.md`, content: editContent });
       await openclawClient.reindexMemory();
       await loadMemory();
       await loadStatus();
@@ -284,7 +284,7 @@ export function MemoryView() {
                     Save & Reindex
                   </button>
                   <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
-                    Saves to ~/.openclaw/workspace/memory/MEMORY.md
+                    Saves to ~/.openclaw/workspace/MEMORY.md
                   </span>
                 </div>
               </>

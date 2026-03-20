@@ -28,7 +28,6 @@ export type AppView =
   | "devices"
   | "subagents"
   | "webhooks"
-  | "acp"
   | "voicecall";
 
 export type VoiceState =

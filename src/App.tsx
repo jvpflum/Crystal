@@ -42,7 +42,6 @@ const DirectoryView = lazy(() => import("@/components/views/DirectoryView").then
 const DevicesView = lazy(() => import("@/components/views/DevicesView").then(m => ({ default: m.DevicesView })));
 const SubagentsView = lazy(() => import("@/components/views/SubagentsView").then(m => ({ default: m.SubagentsView })));
 const WebhooksView = lazy(() => import("@/components/views/WebhooksView").then(m => ({ default: m.WebhooksView })));
-const AcpView = lazy(() => import("@/components/views/AcpView").then(m => ({ default: m.AcpView })));
 const VoiceCallView = lazy(() => import("@/components/views/VoiceCallView").then(m => ({ default: m.VoiceCallView })));
 
 function ViewSlot({ id, active, children }: { id: string; active: boolean; children: React.ReactNode }) {
@@ -104,14 +103,16 @@ function App() {
     openclawClient.onStatusChange((s) => setGatewayConnected(s === "connected"));
     openclawClient.connectGateway().then(connected => {
       setGatewayConnected(connected);
-    });
+    }).catch(() => setGatewayConnected(false));
 
     let attempts = 0;
     const tryReconnect = async () => {
-      if (!openclawClient.isGatewayConnected()) {
-        const ok = await openclawClient.connectGateway();
-        setGatewayConnected(ok);
-      }
+      try {
+        if (!openclawClient.isGatewayConnected()) {
+          const ok = await openclawClient.connectGateway();
+          setGatewayConnected(ok);
+        }
+      } catch { setGatewayConnected(false); }
       attempts++;
       const delay = attempts < 6 ? 5_000 : 15_000;
       reconnectTimer = setTimeout(tryReconnect, delay);
@@ -170,7 +171,6 @@ function App() {
                   <ViewSlot id="devices" active={currentView === "devices"}><DevicesView /></ViewSlot>
                   <ViewSlot id="subagents" active={currentView === "subagents"}><SubagentsView /></ViewSlot>
                   <ViewSlot id="webhooks" active={currentView === "webhooks"}><WebhooksView /></ViewSlot>
-                  <ViewSlot id="acp" active={currentView === "acp"}><AcpView /></ViewSlot>
                   <ViewSlot id="voicecall" active={currentView === "voicecall"}><VoiceCallView /></ViewSlot>
                 </Suspense>
               </ErrorBoundary>

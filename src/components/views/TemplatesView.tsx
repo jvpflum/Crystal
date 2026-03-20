@@ -215,7 +215,7 @@ export function TemplatesView() {
   const loadAgents = useCallback(async () => {
     try {
       const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw agents --json", cwd: null,
+        command: "openclaw agents list --json", cwd: null,
       });
       if (result.code === 0 && result.stdout) {
         const data = JSON.parse(result.stdout);

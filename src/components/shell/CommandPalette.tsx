@@ -5,7 +5,7 @@ import {
   Home, MessageSquare, Building2, Bot, Store, Cpu, Radio, Brain,
   Clock, Anchor, Wrench, Shield, Stethoscope, Activity, Settings,
   Trash2, HeartPulse, ShieldCheck, Thermometer, RotateCcw, Search,
-  Network, Globe, FolderOpen, Mail, Users, GitBranch, Terminal,
+  Network, Globe, FolderOpen, Mail, Users, GitBranch,
   Smartphone, Webhook, Phone,
 } from "lucide-react";
 
@@ -47,8 +47,7 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
     { id: "workspace",    icon: FolderOpen,    label: "Workspace", description: "File workspace explorer",    category: "Navigation", action: () => setView("workspace" as AppView) },
     { id: "messaging",    icon: Mail,          label: "Messaging", description: "Messaging & notifications",  category: "Navigation", action: () => setView("messaging" as AppView) },
     { id: "directory",    icon: Users,         label: "Directory", description: "Contact directory",           category: "Navigation", action: () => setView("directory" as AppView) },
-    { id: "subagents",    icon: GitBranch,     label: "Sub-Agents", description: "Manage sub-agents",         category: "Navigation", action: () => setView("subagents" as AppView) },
-    { id: "acp",          icon: Terminal,      label: "ACP",       description: "Agent Communication Protocol", category: "Navigation", action: () => setView("acp" as AppView) },
+    { id: "subagents",    icon: GitBranch,     label: "Sub-Agents", description: "Manage sub-agents & ACP sessions",         category: "Navigation", action: () => setView("subagents" as AppView) },
     { id: "devices",      icon: Smartphone,    label: "Devices",   description: "Connected devices",           category: "Navigation", action: () => setView("devices" as AppView) },
     { id: "webhooks",     icon: Webhook,       label: "Webhooks",  description: "Webhook endpoints",           category: "Navigation", action: () => setView("webhooks" as AppView) },
     { id: "voicecall",    icon: Phone,         label: "Voice Calls", description: "Voice call interface",      category: "Navigation", action: () => setView("voicecall" as AppView) },

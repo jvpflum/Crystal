@@ -1,179 +1,231 @@
 <p align="center">
-  <img src="public/icon.png" width="140" alt="Crystal" />
+  <img src="public/icon.png" width="150" alt="Crystal" />
 </p>
 
 <h1 align="center">Crystal</h1>
 
 <p align="center">
   <strong>The most complete desktop frontend for <a href="https://github.com/nichochar/open-claw">OpenClaw</a>.</strong><br/>
-  A voice-first AI assistant that runs entirely on your hardware — no cloud, no subscriptions, no data leaving your machine.
+  A native AI assistant with 28 views, 60+ slash commands, NVIDIA-accelerated voice, multi-provider LLM support, and a full agent workspace — all in a single desktop app.
 </p>
 
 <p align="center">
-  <a href="#-features-at-a-glance"><img src="https://img.shields.io/badge/18-Built--In%20Views-blue?style=flat-square" /></a>
-  <a href="#-pc-optimizer"><img src="https://img.shields.io/badge/12-PC%20Optimizer%20Tools-green?style=flat-square" /></a>
+  <a href="#-features"><img src="https://img.shields.io/badge/28-Views-6366f1?style=flat-square" /></a>
+  <a href="#-ai-chat"><img src="https://img.shields.io/badge/60+-Slash%20Commands-3b82f6?style=flat-square" /></a>
+  <a href="#-voice-engine"><img src="https://img.shields.io/badge/6-Voice%20Providers-10b981?style=flat-square" /></a>
+  <a href="#-multi-provider-llm"><img src="https://img.shields.io/badge/7-LLM%20Providers-f59e0b?style=flat-square" /></a>
   <a href="#-tech-stack"><img src="https://img.shields.io/badge/Tauri-2.0-24c8db?style=flat-square&logo=tauri" /></a>
-  <a href="#-requirements"><img src="https://img.shields.io/badge/GPU-NVIDIA%20RTX-76b900?style=flat-square&logo=nvidia" /></a>
+  <a href="#-voice-engine"><img src="https://img.shields.io/badge/NVIDIA-RTX%20Voice-76b900?style=flat-square&logo=nvidia" /></a>
+  <a href="#-themes"><img src="https://img.shields.io/badge/6-Themes-ec4899?style=flat-square" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" /></a>
 </p>
+
+<p align="center">
+  <a href="#-whats-new">What's New</a> · <a href="#-features">Features</a> · <a href="#-quick-start">Quick Start</a> · <a href="#-tech-stack">Tech Stack</a> · <a href="#-contributing">Contributing</a>
+</p>
+
+---
+
+## What's New
+
+### March 2026
+
+- **Multi-Provider LLM Support** — Crystal is no longer local-only. Connect to Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, or Mistral. Manage API keys from Settings and switch providers on the fly.
+- **NVIDIA RTX Voice Engine** — GPU-accelerated speech with Nemotron/Parakeet STT (port 8090) and Magpie TTS (port 8091), with automatic fallback to Whisper and Kokoro.
+- **Software Factory** — Launch and manage Claude Code and Cortex coding agents. Create projects, run objectives, stream live logs, and cancel runs — all from a dedicated view.
+- **ClawHub** — A built-in skill registry. Search, install, update, publish, and sync OpenClaw skills directly from the Marketplace.
+- **Agent Workspace** — Edit 9 agent identity files (AGENTS.md, SOUL.md, IDENTITY.md, USER.md, TOOLS.md, MEMORY.md, BOOT.md, BOOTSTRAP.md, HEARTBEAT.md) with presets and standing orders.
+- **28 Views** — Added Workspace, Messaging, Directory, Sub-Agents (with integrated ACP), Devices, Webhooks, Voice Calls, and more.
+- **60+ Slash Commands** — Full command coverage: navigation, model switching, thinking levels, session export, debug tools, sub-agent management, approval workflows, and more.
+- **Image Generation** — Ask Crystal to generate images via the `openai-image-gen` skill (DALL·E).
+- **Voice Calls** — Notify/converse voice call modes with expose (serve/funnel/off) and call history.
+- **DNS Configuration** — Custom domain support from Settings.
+- **Comprehensive OpenClaw Integration** — Every feature in Crystal now runs through OpenClaw. CLI commands, gateway API, and agent protocol unified across all 28 views.
 
 ---
 
 ## What is Crystal?
 
-Crystal takes [OpenClaw](https://github.com/nichochar/open-claw) — an open-source autonomous AI agent framework — and wraps it in a polished desktop app with a real GUI. Instead of juggling CLI commands and config files, you get a native Windows application where everything is one click away: managing models, installing skills, automating workflows, monitoring your GPU, optimizing your PC, and talking to your AI through voice.
+Crystal wraps [OpenClaw](https://github.com/nichochar/open-claw) — an open-source autonomous AI agent framework — in a native desktop application with a real GUI. Instead of terminal commands and config files, you get a polished Windows app where everything is one click (or one voice command) away.
 
-**Crystal vs. raw OpenClaw CLI:**
+### Crystal vs. OpenClaw CLI
 
 | | OpenClaw CLI | Crystal |
 |---|---|---|
-| Interface | Terminal only | Full desktop GUI with 18 views |
+| Interface | Terminal | Native desktop GUI with 28 views |
 | Setup | Manual config files | One-click onboarding wizard |
-| Server management | Start services manually | Auto-starts Ollama, gateway, voice servers |
-| Model management | `ollama pull/rm` commands | Visual model browser with VRAM charts |
-| Skills & plugins | `npx openclaw skills list` | Toggle switches, one-click Power Up |
+| LLM Providers | Manual configuration | 7 providers with visual API key management |
+| Server management | Start services manually | Auto-starts Ollama, gateway, and voice servers |
+| Model management | `ollama pull/rm` | Visual model browser with VRAM charts |
+| Skills & plugins | `npx openclaw skills list` | Toggle switches, ClawHub, one-click Power Up |
+| Voice | Separate setup | 6 built-in voice providers with NVIDIA RTX acceleration |
 | System monitoring | None | Live GPU, CPU, RAM, disk dashboards |
-| PC maintenance | None | 12 one-click optimizer tools |
-| Voice | Separate setup | Built-in wake word + STT + TTS |
-| Themes | None | 5 polished themes |
+| Coding agents | Separate tools | Built-in Factory with Claude Code & Cortex |
+| Agent identity | Edit files manually | Visual workspace editor with presets |
+| Themes | None | 6 polished themes |
 
 ---
 
 ## Why Crystal?
 
-- **100% Local.** Your conversations, files, and system data never leave your machine. Run any open-weight model on your own GPU.
-- **No Subscriptions.** No API keys, no cloud bills. You own the hardware, you own the AI.
-- **Self-Contained.** Crystal auto-starts Ollama, the OpenClaw gateway, and voice servers on launch. Open the app and go.
-- **Actually Useful.** This isn't a chatbot wrapper. Crystal can create files, run commands, manage your system, automate workflows, and monitor your hardware — all through natural language.
+- **Local-First, Cloud-Optional.** Run everything on your own GPU with Ollama, or connect to OpenAI, Anthropic, Google, Groq, OpenRouter, or Mistral when you need it. Your data stays on your machine unless you choose otherwise.
+- **Zero Configuration.** Crystal auto-starts Ollama, the OpenClaw gateway, and all voice servers on launch. The onboarding wizard handles the rest.
+- **Actually Useful.** Crystal isn't a chatbot wrapper. It creates files, runs shell commands, manages your system, automates workflows, generates images, controls a browser, monitors hardware, and manages distributed agent nodes — through natural language or voice.
+- **NVIDIA-Accelerated Voice.** GPU-powered speech recognition (Nemotron/Parakeet) and synthesis (Magpie) with automatic fallback to Whisper, Kokoro, or browser APIs.
 
 ---
 
-## Features at a Glance
+## Features
 
-### AI Chat with Tool Use
-Full-featured conversation interface with Markdown rendering, syntax-highlighted code blocks, copy buttons, and a typewriter effect for responses. The AI can execute 7 built-in tools:
+### AI Chat
 
-| Tool | What It Does |
+Full-featured conversation interface with multi-conversation sidebar, Markdown rendering, syntax-highlighted code blocks, streaming typewriter responses, live TPS counter, and thinking level control.
+
+**6 Built-In Tools:**
+
+| Tool | Description |
 |------|-------------|
-| `shell` | Execute any shell command on your machine |
+| `shell` | Execute any shell command |
 | `read_file` | Read file contents from any path |
-| `write_file` | Create or overwrite files (with verification) |
+| `write_file` | Create or overwrite files |
 | `list_directory` | Browse directory contents |
-| `web_search` | Search DuckDuckGo (top 5 results) |
+| `web_search` | Search the web (top 5 results) |
 | `web_fetch` | Fetch and read any URL |
-| `crystal_action` | Navigate views, enable plugins, run app commands |
 
-The agent runs a multi-step tool loop (up to 5 iterations per message), so it can reason, act, observe, and act again — like a real assistant.
+**60+ Slash Commands** — type `/` to access navigation, model switching, thinking levels (`/think high`, `/fast on`), session export, debug tools, sub-agent management, approval workflows, and more.
 
-**21 Slash Commands** — type `/` in the chat to jump to any view, start a new conversation, clear history, trigger Power Up, or open the command palette.
+**Interactive Action Buttons** — The AI renders clickable buttons in responses (navigate views, enable plugins, run commands, copy text) so you can act on suggestions instantly.
 
-**Interactive Action Buttons** — the AI can render clickable buttons in its responses (navigate to views, enable plugins, run commands, copy text) so you can act on suggestions instantly.
+**File Attachments** — Drag-and-drop or paste images, audio, video, documents (txt, md, code, pdf), up to 25 MB.
 
-**8 Starter Suggestions** — new conversations show quick-start chips: "Set up everything", "What can you do?", "Create a file", "Check security", "Show my skills", "Pull a model", and more.
+**Image Generation** — Ask Crystal to create images and it routes to DALL·E via the `openai-image-gen` skill.
 
 ---
 
 ### Dashboard
 
-The home screen gives you a bird's-eye view of your entire system:
+Bird's-eye view of your entire system on one screen:
 
-- **Status Cards** — Gateway connection status with latency, active LLM model, OS info
+- **Status Cards** — Gateway connection with latency, active LLM model, OS info
 - **Stats Row** — Active sessions, ready skills, token usage, memory chunks
 - **Quick Actions** — Morning Briefing, Heartbeat, Security Scan, Health Check
-- **Power Up** — One-click button that runs OpenClaw setup, enables all plugins, fixes security issues, and reindexes memory
+- **Power Up** — One-click setup: enable all plugins/skills, fix security issues, reindex memory
 - **Security Summary** — Critical and warning counts from the latest audit
-- **System Monitor** — Live CPU, RAM, storage, and uptime (polled every 15s)
-- **GPU Monitor** — Real-time NVIDIA GPU stats (utilization gauge, VRAM bar, temperature, power draw)
+- **System Monitor** — Live CPU, RAM, storage, uptime (polled every 15s)
+- **GPU Monitor** — Real-time NVIDIA GPU stats: utilization gauge, VRAM bar, temperature, power draw
 
 ---
 
-### PC Optimizer
+### Voice Engine
 
-12 one-click system maintenance tools built right into the dashboard:
+Crystal ships with a multi-provider voice architecture that automatically selects the best available engine.
 
-| Tool | What It Does |
-|------|-------------|
-| **Max Performance** | Switches Windows power plan to Ultimate/High Performance |
-| **Balanced Power** | Switches back to Balanced power plan |
-| **Flush DNS** | Clears the DNS resolver cache |
-| **Clear Temp Files** | Deletes temp files and reports how many MB were freed |
-| **Clear Prefetch** | Cleans Windows prefetch data |
-| **Memory Cleanup** | Forces .NET garbage collection to free managed memory |
-| **Startup Apps** | Lists all startup programs so you can see what's slowing boot |
-| **Reset Network** | Resets TCP/IP stack, Winsock, flushes DNS, releases/renews IP |
-| **Disk Cleanup** | Removes Windows Update downloads, CBS logs, and browser cache |
-| **Quick Scan** | Runs a Windows Defender quick scan |
-| **Disable Visual FX** | Turns off Windows animations and effects for maximum performance |
-| **GPU Reset** | Restarts the NVIDIA display driver without rebooting |
+**Speech-to-Text (3 providers):**
 
----
+| Provider | Engine | Details |
+|----------|--------|---------|
+| **NVIDIA Nemotron** | Parakeet ASR | GPU-accelerated, port 8090, lowest latency |
+| **Whisper** | OpenAI Whisper | Local, configurable model (tiny → large-v3) |
+| **Browser** | Web Speech API | Zero-setup fallback |
 
-### GPU Monitor
+**Text-to-Speech (3 providers):**
 
-Real-time NVIDIA GPU dashboard (via `nvidia-smi`, polled every 5s):
+| Provider | Engine | Details |
+|----------|--------|---------|
+| **NVIDIA Magpie** | Magpie TTS | GPU-accelerated, port 8091, natural voice |
+| **Kokoro** | Kokoro TTS | Local, port 8081 |
+| **Browser** | Web Speech API | Zero-setup fallback |
 
-- GPU name (auto-formatted, e.g. "RTX 5090")
-- GPU utilization — circular progress gauge with percentage
-- VRAM usage — used/total GB with color-coded progress bar (blue → yellow → red as usage climbs)
-- Temperature — color-coded (green under 60°C, yellow under 80°C, red above)
-- Power draw — current watts vs. power limit with progress bar
-- Health indicator dot (green = healthy, red = error)
+**Voice Orb** — Animated button with state-aware gradients and ring animations across 9 states: idle, listening, processing, thinking, transcribing, awaiting confirmation, executing, speaking, and error.
+
+**Voice Calls** — Dedicated VoiceCall view with notify/converse modes, expose controls (serve/funnel/off), and call history.
 
 ---
 
-### Model Management
+### Multi-Provider LLM
 
-Three-tab model browser:
+Crystal supports 7 LLM providers. Manage API keys visually in Settings and switch models on the fly.
 
-- **OpenClaw Models** — All models registered with OpenClaw, grouped by provider. Set any model as default. Scan for new models. Auth status check.
-- **Ollama Library** — Browse locally installed Ollama models. Pull new models by name. View model details (size, ID, modified date). Delete models. Visual size comparison bar chart.
-- **Running Models** — Live view of currently loaded models with VRAM usage per model, processor type, and VRAM distribution chart. Auto-refreshes every 5s.
+| Provider | Type |
+|----------|------|
+| **Ollama** | Local (default) |
+| **OpenAI** | Cloud API |
+| **Anthropic** | Cloud API |
+| **Google** | Cloud API |
+| **OpenRouter** | Cloud API (multi-model) |
+| **Groq** | Cloud API (fast inference) |
+| **Mistral** | Cloud API |
 
----
-
-### Skills & Plugins Marketplace
-
-Three-tab marketplace for extending Crystal's capabilities:
-
-- **Skills** — Browse all 51+ OpenClaw skills. See which are ready (enabled + deps met) vs. available (missing deps). Toggle enable/disable with a switch. Expand any skill to see source, bundled status, homepage link, and missing dependency badges.
-- **Plugins** — Browse OpenClaw plugins with version info and origin. Toggle enable/disable. Run `openclaw plugins doctor` for diagnostics.
-- **Power Up** — One-click setup that enables every disabled plugin and skill, runs security audit with auto-fix, and reindexes memory. Shows per-step progress with expandable output.
+AI configuration includes temperature (0–2), max tokens, context window, system prompt editing, and thinking level control (auto, minimal, medium, high).
 
 ---
 
-### Workflow Templates
+### Software Factory
 
-Pre-built and custom automation workflows:
+Launch and manage coding agents from a dedicated view:
 
-**7 Built-in Workflows:**
+| Agent | Description |
+|-------|-------------|
+| **Claude Code** | Anthropic's coding agent |
+| **Cortex** | OpenClaw's built-in coding agent |
 
-| Workflow | Steps | Description |
-|----------|-------|-------------|
-| Morning Briefing | 3 | Weather, calendar summary, top news |
-| Code Review | 4 | Structure analysis, issue detection, security check, summary |
-| Research Topic | 4 | Overview, pros/cons, source gathering, synthesis |
-| System Health | 4 | Doctor check, security audit, service status, report |
-| Daily Digest | 3 | Messages, emails, compiled digest |
-| Write Email | 2 | Draft and polish |
-| Explain Code | 2 | Explanation and improvement suggestions |
+Create projects with a working directory, run objectives, stream live logs, and cancel active runs.
 
-- **Custom Workflows** — Create your own with arbitrary steps. Steps support `{{INPUT}}` template variables for parameterized automation.
-- **Workflow Runner** — Progress bar, per-step expandable results, completion summary, copy-all button.
+---
+
+### Agent Workspace
+
+Edit 9 agent identity and behavior files with a visual editor:
+
+| File | Purpose |
+|------|---------|
+| `AGENTS.md` | Agent definitions and routing |
+| `SOUL.md` | Core personality and values |
+| `IDENTITY.md` | Name, role, capabilities |
+| `USER.md` | User preferences and context |
+| `TOOLS.md` | Available tools and permissions |
+| `MEMORY.md` | Curated long-term memory |
+| `BOOT.md` | Startup instructions |
+| `BOOTSTRAP.md` | First-run initialization |
+| `HEARTBEAT.md` | Recurring autonomous behavior |
+
+Includes presets and standing orders with program, authority, trigger, approval gate, and escalation configuration.
+
+---
+
+### ClawHub & Marketplace
+
+Four-tab marketplace for extending Crystal:
+
+- **Skills** — Browse 51+ OpenClaw skills. Filter by status (All, Ready, No API Key). Toggle enable/disable. View source, dependencies, and homepage links. macOS-only skills auto-hidden on Windows.
+- **Plugins** — Browse and toggle OpenClaw plugins. Run diagnostics with `openclaw plugins doctor`.
+- **Power Up** — One-click setup: enables every disabled plugin and skill, runs security audit with auto-fix, reindexes memory. Per-step progress with expandable output.
+- **ClawHub** — Search and install skills from the registry. Publish your own skills (slug, name, version, tags, path, changelog). Sync installed skills with dry-run preview.
+
+---
+
+### Command Center
+
+Unified hub for workflows, scheduling, and automation:
+
+- **Calendar** — Visual schedule overview
+- **Workflows** — 7 built-in templates (Morning Briefing, Code Review, Research Topic, System Health, Daily Digest, Write Email, Explain Code) plus custom workflow builder with `{{INPUT}}` template variables
+- **Cron Jobs** — Schedule recurring AI tasks with cron expressions. 6 quick templates, interactive syntax reference, per-job run/enable/disable/remove
+- **Heartbeat** — Configure autonomous agent behavior
 
 ---
 
 ### Channel Integrations
 
-Connect Crystal to 12 messaging platforms:
+Connect Crystal to 11 messaging platforms:
 
 | Channel | Type |
 |---------|------|
 | WhatsApp | Web bridge |
 | Telegram | Bot API |
 | Discord | Bot with voice, threads, reactions |
-| Slack | Workspace bot with channel access |
+| Slack | Workspace bot |
 | Signal | End-to-end encrypted |
-| iMessage | macOS integration |
 | Google Chat | Workspace integration |
 | Email | IMAP/SMTP monitoring |
 | Matrix | Federated messaging |
@@ -185,70 +237,92 @@ Per-channel: add/remove, login/logout, view capabilities, configure tokens, reso
 
 ---
 
-### Scheduled Tasks (Cron)
+### GPU & System Monitoring
 
-Schedule recurring AI tasks with cron expressions:
+**GPU Monitor** (via `nvidia-smi`, polled every 5s):
+- GPU name (auto-formatted, e.g. "RTX 5090")
+- Utilization — circular progress gauge
+- VRAM — used/total GB with color-coded bar (blue → yellow → red)
+- Temperature — color-coded (green < 60°C, yellow < 80°C, red above)
+- Power draw — watts vs. power limit
+- Health indicator
 
-**6 Quick Templates:**
-- Morning Briefing (daily 8 AM)
-- Security Scan (weekly Sunday 2 AM)
-- Disk Cleanup (weekly Saturday 3 AM)
-- Email Digest (weekdays 6 PM)
-- Daily Summary (daily 11 PM)
-- Health Check (every 30 minutes)
-
-Interactive cron syntax reference with 8 examples (click to auto-fill). Per-job: run now, enable/disable, remove.
+**System Monitor** (polled every 15s):
+- CPU usage, RAM usage, disk usage, uptime
 
 ---
 
 ### Security
 
 - **Security Audit** — Standard and deep scan modes with pass/warn/fail scoring
-- **Auto Fix** — One-click fix for detected security issues
-- **Tool Permissions** — View allowed/denied tool policies
+- **Auto Fix** — One-click remediation for detected issues
+- **Tool Permissions** — View and manage allowed/denied tool policies
 - **Gateway Auth** — Authentication status and configuration
 - **Secrets Management** — Reload secrets from vault
-- **Approval Rules** — View auto/manual execution approval policies
-- **Memory Reindex** — Rebuild the memory index with stats display
-
----
-
-### Browser Automation
-
-Control a headless browser through OpenClaw's `browser-use` skill:
-
-- Start/stop browser instance
-- Navigate to URLs or open in new tabs
-- View all open tabs with search/filter
-- Capture screenshots
-- Status display (PID, URL, running state)
-- Auth token auto-loaded from config
+- **Approval Rules** — Auto/manual execution approval policies
+- **Memory Reindex** — Rebuild the memory index
 
 ---
 
 ### Agent Management
 
 - List, create, and delete OpenClaw agents
-- Set agent identity (name + emoji)
-- Test agents with a hello prompt
+- Dispatch tasks to agents with session tracking
 - View model, workspace, and routes per agent
-- Manage phone/channel bindings per agent
+- **Sub-Agents & ACP** — Unified view for spawning, steering, and managing sub-agents and ACP sessions (Codex, Claude Code, Gemini CLI)
 
 ---
 
 ### Memory
 
-- **Curated Memory** — View and add entries to `MEMORY.md`
-- **Daily Memory** — Browse daily memory logs
+- **Curated Memory** — View, add, and delete entries in `MEMORY.md`
+- **Daily Memory** — Browse daily memory logs with automatic cron capture (11 PM daily)
 - **Semantic Search** — Search across all memory entries
-- Refresh and add new memory entries
+- **Reindex** — Rebuild the memory index with stats
+
+---
+
+### Multi-Node Orchestration
+
+Manage distributed OpenClaw nodes:
+- List nodes with status indicators (running/stopped/idle)
+- Run or invoke individual nodes with custom prompts
+- Broadcast messages to all nodes
+- Notify nodes of events
+
+---
+
+### Browser Automation
+
+Control a headless browser through OpenClaw's `browser-use` skill:
+- Start/stop browser instances
+- Navigate URLs, open tabs
+- View and filter all open tabs
+- Capture screenshots
+- Auth token auto-loaded from config
+
+---
+
+### Webhooks
+
+- Create and manage webhook endpoints
+- View incoming webhook events
+- Configure webhook routing and handlers
+
+---
+
+### Messaging & Directory
+
+- **Messaging** — Unified messaging view across connected channels
+- **Directory** — Contact directory with search and channel resolution
+- **Devices** — Connected device management
 
 ---
 
 ### Activity & Logs
 
 - **Activity Feed** — Real-time event stream from the OpenClaw gateway. Filter by type (Chat, Tool Call, Tool Result, Error, Heartbeat). Color-coded entries.
-- **Gateway Logs** — Raw log viewer with auto-refresh, search with match highlighting, log level coloring (ERROR/WARN/INFO/DEBUG), line numbers, copy-all.
+- **Gateway Logs** — Raw log viewer with auto-refresh, search highlighting, log level coloring (ERROR/WARN/INFO/DEBUG), line numbers, copy-all.
 
 ---
 
@@ -262,115 +336,83 @@ Event-driven lifecycle hooks for the OpenClaw agent:
 
 ---
 
-### Multi-Node Orchestration
+### Doctor / Diagnostics
 
-Manage distributed OpenClaw nodes:
-- List nodes with status indicators (running/stopped/idle)
-- Run or invoke individual nodes with custom prompts
-- Broadcast messages to all nodes
+| Command | Description |
+|---------|-------------|
+| Doctor | Basic system check |
+| Deep Scan | Comprehensive diagnostic |
+| Auto Fix | Automatic remediation |
+| Status | Overall system status |
+| Gateway Health | Connectivity check |
+| Config Validate | Configuration validation |
+
+Terminal-style output with color-coded results and summary cards (Passed / Warnings / Failed).
 
 ---
 
 ### Sessions
 
 - Browse all active agent sessions sorted by recency
-- Per-session: agent ID, model provider, model name
+- Per-session: agent ID, model provider, model name, description
 - Token usage stats (input, output, total)
 - Context window usage bar (color-coded at 60%/85%)
-- Cleanup old sessions
+- Per-session delete and bulk cleanup
 
 ---
 
-### Doctor / Diagnostics
+## Themes
 
-6 diagnostic commands:
+6 built-in themes with visual preview swatches:
 
-| Command | Description |
-|---------|-------------|
-| Doctor | Basic system check |
-| Deep Scan | Comprehensive diagnostic scan |
-| Auto Fix | Automatically fix detected issues |
-| Status | Overall system status report |
-| Gateway Health | Gateway connectivity check |
-| Config Validate | Validate configuration file |
-
-Terminal-style output with color-coded results and summary cards (Passed/Warnings/Failed).
-
----
-
-### Voice
-
-- **Wake Word** — Say "Hey Crystal" to activate
-- **Speech-to-Text** — Local Whisper server (configurable: tiny, base, small, medium, large-v3)
-- **Text-to-Speech** — Local Kokoro TTS engine
-- **Voice Orb** — Animated 80px button with state-aware gradients and ring animations (idle → listening → processing → speaking)
-- Falls back gracefully when voice servers are offline
-
----
-
-### Settings
-
-- **Themes** — 5 built-in themes with visual preview swatches
-- **Gateway** — Status, latency ping, auth token (show/copy), start/restart
-- **LLM Backend** — Switch between Ollama and LM Studio, model picker, connection test
-- **Voice** — Whisper and TTS status, model selector, test connections
-- **AI Config** — Temperature (0–2), max tokens, editable system prompt
-- **Security** — Run audit, tool permissions, auth status
-- **Updates** — Version display, update channel selector (stable/beta/dev)
-- **OpenClaw Config** — Raw JSON editor for `~/.openclaw/openclaw.json`
-- **Gateway Service** — Daemon install/uninstall/restart/stop with log output
-- **Config CLI** — Get/set/unset individual config values
-- **About** — Crystal version, OpenClaw version, runtime info, links
-
----
-
-### Themes
-
-| Theme | Style | Accent Color |
-|-------|-------|-------------|
+| Theme | Style | Accent |
+|-------|-------|--------|
 | **Midnight** | Deep dark | Blue |
 | **SoCal** | Warm sunset | Orange |
 | **Arctic** | Clean light | Sky blue |
-| **Ember** | Dark with warm glow | Red |
+| **Ember** | Dark warm glow | Red |
 | **Slate** | Soft light | Indigo |
+| **NVIDIA** | Dark with green | NVIDIA Green |
 
 ---
 
-### Onboarding
-
-First-run wizard with 5 steps:
-
-1. **Welcome** — Introduction with Crystal branding
-2. **Prerequisites** — Auto-checks Node.js, Ollama, OpenClaw, NVIDIA GPU
-3. **LLM Setup** — Pick from installed Ollama models or pull a new one
-4. **Gateway** — Verify/start the OpenClaw gateway on port 18789
-5. **Launch** — Summary of all checks + selected model + gateway status
-
----
-
-### Keyboard Shortcuts
+## Keyboard Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl + Space` | Toggle Crystal window (global hotkey) |
+| `Ctrl + Space` | Toggle Crystal window (global) |
 | `Ctrl + K` | Command palette |
 | `Ctrl + N` | New conversation |
+| `Ctrl + ,` | Settings |
+| `Ctrl + Shift + D` | Doctor |
+| `Ctrl + Shift + S` | Security |
 | `Ctrl + 1–9` | Switch between views |
-| `Ctrl + ,` | Open Settings |
 | `/` | Slash command menu (in chat) |
 | `Enter` | Send message |
 | `Shift + Enter` | New line in message |
 
 ---
 
-### Performance
+## Onboarding
 
-Crystal is optimized to feel instant:
+First-run wizard with 5 steps:
 
-- **Lazy-loaded views** — All 18 views use `React.lazy()` + `Suspense`. Only the active tab's code is loaded.
+1. **Welcome** — Introduction with Crystal branding
+2. **Prerequisites** — Auto-checks Node.js, Ollama, OpenClaw, NVIDIA GPU
+3. **LLM Setup** — Pick from installed models or pull a new one
+4. **Gateway** — Verify/start the OpenClaw gateway on port 18789
+5. **Launch** — Summary of checks, selected model, and gateway status
+
+---
+
+## Performance
+
+Crystal is engineered to feel instant:
+
+- **Lazy-loaded views** — All 28 views use `React.lazy()` + `Suspense`. Only the active view's code is loaded.
 - **CLI response caching** — Shared cache with TTL deduplicates OpenClaw CLI calls across views.
-- **Visibility-aware polling** — GPU monitor, system monitor, and model poller pause when their tab is hidden. Zero background processes when you're on a different tab.
-- **Vendor bundle splitting** — React, markdown rendering, and animation libraries are cached as separate chunks.
+- **Visibility-aware polling** — GPU monitor, system monitor, and model poller pause when hidden. Zero background work on inactive tabs.
+- **Vendor bundle splitting** — React, markdown rendering, and animation libraries cached as separate chunks.
 - **Fine-grained state subscriptions** — Zustand selectors prevent unnecessary re-renders across all components.
 
 ---
@@ -379,13 +421,15 @@ Crystal is optimized to feel instant:
 
 | Layer | Technology |
 |-------|-----------|
-| Desktop Runtime | [Tauri 2.0](https://v2.tauri.app/) (lightweight, ~3MB runtime) |
-| Frontend | React 19, TypeScript, Zustand, Tailwind CSS |
-| Backend | Rust (tokio, reqwest, serde) |
+| Desktop Runtime | [Tauri 2.0](https://v2.tauri.app/) (~3 MB runtime) |
+| Frontend | React 19, TypeScript, Tailwind CSS 4, Zustand |
+| Backend | Rust (Tokio, Reqwest, Serde) |
 | AI Agent | [OpenClaw](https://github.com/nichochar/open-claw) |
-| LLM Inference | [Ollama](https://ollama.com/) (local) or LM Studio |
-| Voice STT | Whisper (local, via Python server) |
-| Voice TTS | Kokoro TTS (local, via Python server) |
+| LLM (Local) | [Ollama](https://ollama.com/) |
+| LLM (Cloud) | OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral |
+| Voice STT | NVIDIA Nemotron, Whisper, Web Speech API |
+| Voice TTS | NVIDIA Magpie, Kokoro, Web Speech API |
+| Image Gen | OpenAI DALL·E (via OpenClaw skill) |
 | Icons | Lucide React |
 | Markdown | react-markdown + remark-gfm + rehype-highlight |
 | Animations | Framer Motion |
@@ -397,12 +441,14 @@ Crystal is optimized to feel instant:
 | Requirement | Details |
 |-------------|---------|
 | **OS** | Windows 10/11 (macOS/Linux planned) |
-| **GPU** | NVIDIA RTX with 16GB+ VRAM (RTX 4070 Ti or better recommended) |
+| **GPU** | NVIDIA RTX with 16 GB+ VRAM recommended (for local LLM + voice) |
 | **Node.js** | v18+ |
 | **Package Manager** | pnpm |
 | **Rust** | Latest stable toolchain |
 | **Ollama** | Installed with at least one model pulled |
-| **Python** | 3.10+ *(optional, for voice features)* |
+| **Python** | 3.10+ *(optional, for Whisper/Kokoro voice servers)* |
+
+> **Cloud-only mode:** If you don't have an NVIDIA GPU, you can still use Crystal with cloud LLM providers and browser-based voice. Set your API keys in Settings and you're good to go.
 
 ---
 
@@ -411,12 +457,11 @@ Crystal is optimized to feel instant:
 ### 1. Install prerequisites
 
 ```bash
-# Install Ollama: https://ollama.com/download
-# Install Node.js: https://nodejs.org
-# Install Rust: https://rustup.rs
-# Install pnpm: npm install -g pnpm
+# Ollama: https://ollama.com/download
+# Node.js: https://nodejs.org
+# Rust:    https://rustup.rs
+# pnpm:    npm install -g pnpm
 
-# Pull a model
 ollama pull qwen2.5:32b
 ```
 
@@ -434,7 +479,7 @@ pnpm install
 pnpm tauri dev
 ```
 
-Crystal auto-starts Ollama and the OpenClaw gateway on launch. The onboarding wizard walks you through the rest.
+Crystal auto-starts Ollama, the OpenClaw gateway, and voice servers on launch. The onboarding wizard walks you through everything else.
 
 ### 4. Voice setup *(optional)*
 
@@ -442,7 +487,11 @@ Crystal auto-starts Ollama and the OpenClaw gateway on launch. The onboarding wi
 pip install -r scripts/requirements.txt
 ```
 
-Crystal auto-launches Whisper STT and TTS servers on startup when Python is available.
+Crystal auto-launches Whisper STT and Kokoro TTS servers on startup when Python is available. NVIDIA Nemotron/Magpie servers start automatically if an RTX GPU is detected.
+
+### 5. Cloud LLM setup *(optional)*
+
+Open **Settings → API Keys** and add keys for any providers you want to use (OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral).
 
 ---
 
@@ -450,39 +499,72 @@ Crystal auto-launches Whisper STT and TTS servers on startup when Python is avai
 
 ```
 Crystal/
-├── src/                             # React frontend
+├── src/                              # React frontend
 │   ├── components/
-│   │   ├── shell/                   # TitleBar, Navigation, CommandPalette, Onboarding, Toast
-│   │   ├── views/                   # 18 feature views
-│   │   ├── voice/                   # VoiceOrb
-│   │   └── widgets/                 # GpuMonitor
-│   ├── hooks/                       # useOpenClaw, useVoice, useStorage, useKeyboardShortcuts
+│   │   ├── shell/                    # TitleBar, Navigation, CommandPalette, Onboarding, Toast
+│   │   ├── views/                    # 28 feature views
+│   │   ├── voice/                    # VoiceOrb, TranscriptPanel, ConfirmationCard, EventLog
+│   │   ├── factory/                  # DirectoryBrowser, FileTree, FileViewer, RunWorkspace
+│   │   └── widgets/                  # GpuMonitor
+│   ├── hooks/                        # useOpenClaw, useVoice, useStorage, useKeyboardShortcuts
 │   ├── lib/
-│   │   ├── agent.ts                 # AI agent brain (system prompt, tool loop, action handler)
-│   │   ├── openclaw.ts              # OpenClaw client (gateway, LLM, memory, channels, config)
-│   │   ├── tools.ts                 # Tool implementations (shell, files, web, actions)
-│   │   ├── cache.ts                 # CLI response cache with TTL + in-flight deduplication
-│   │   ├── voice.ts                 # Voice service (Whisper STT, TTS)
-│   │   ├── templates.ts             # Built-in workflow definitions
-│   │   └── marketplace.ts           # Skill/plugin catalog
+│   │   ├── agent.ts                  # AI agent (system prompt, tool loop, action buttons, image gen)
+│   │   ├── openclaw.ts               # OpenClaw client (gateway, LLM, memory, channels, config)
+│   │   ├── tools.ts                  # Tool implementations (shell, files, web)
+│   │   ├── cache.ts                  # CLI response cache with TTL + deduplication
+│   │   ├── factory.ts                # Factory agent runner (Claude Code, Cortex)
+│   │   ├── voice.ts                  # Voice service orchestration
+│   │   ├── voice/                    # Voice provider architecture
+│   │   │   ├── providers/            # NVIDIA Nemotron, Whisper, Kokoro, Magpie, Browser
+│   │   │   ├── bridge/               # Speech bridge
+│   │   │   ├── state-machine.ts      # 9-state voice FSM
+│   │   │   ├── intent-router.ts      # Voice intent classification
+│   │   │   ├── conversation-agent.ts # Voice conversation handler
+│   │   │   └── session-store.ts      # Voice session persistence
+│   │   ├── templates.ts              # Built-in workflow definitions
+│   │   ├── marketplace.ts            # Skill/plugin catalog
+│   │   └── storage.ts                # Local storage abstraction
 │   └── stores/
-│       ├── appStore.ts              # App state (view, voice, gateway)
-│       └── themeStore.ts            # Theme definitions and persistence
-├── src-tauri/                       # Rust backend
+│       ├── appStore.ts               # App state (view, voice, gateway, thinking level)
+│       ├── themeStore.ts             # 6 themes with CSS variable mapping
+│       ├── dataStore.ts              # Data caching layer
+│       └── factoryStore.ts           # Factory project/run state
+├── src-tauri/                        # Rust backend
 │   ├── src/
-│   │   ├── lib.rs                   # Tauri commands, server lifecycle, file ops, system tray
-│   │   └── main.rs                  # Entry point
-│   ├── icons/                       # App icons (all sizes + .ico + .icns)
-│   └── tauri.conf.json              # Tauri configuration
-├── scripts/                         # Voice server scripts
-│   ├── whisper_server.py            # Whisper STT server
-│   ├── tts_server.py                # Kokoro TTS server
-│   ├── requirements.txt             # Python dependencies
-│   ├── setup.ps1                    # Full setup script
-│   └── start-all.ps1               # Manual service launcher
-└── public/                          # Static assets
-    └── icon.png                     # Crystal lobster icon
+│   │   ├── lib.rs                    # 13 Tauri commands, server lifecycle, system tray
+│   │   └── main.rs                   # Entry point
+│   ├── icons/                        # App icons (all sizes + .ico + .icns)
+│   └── tauri.conf.json               # Tauri configuration
+├── scripts/                          # Voice server scripts
+│   ├── whisper_server.py             # Whisper STT server
+│   ├── tts_server.py                 # Kokoro TTS server
+│   ├── requirements.txt              # Python dependencies
+│   ├── setup.ps1                     # Full setup script
+│   └── start-all.ps1                 # Manual service launcher
+└── public/                           # Static assets
+    └── icon.png                      # Crystal icon
 ```
+
+---
+
+## By the Numbers
+
+| | Count |
+|---|---|
+| Views | 28 |
+| Slash commands | 60+ |
+| Voice providers | 6 (3 STT + 3 TTS) |
+| LLM providers | 7 |
+| Themes | 6 |
+| Tools | 6 |
+| Channel integrations | 11 |
+| Workspace files | 9 |
+| Workflow templates | 7 |
+| Cron templates | 6 |
+| Diagnostic commands | 6 |
+| Keyboard shortcuts | 10 |
+| Tauri commands | 13 |
+| OpenClaw skills | 51+ |
 
 ---
 
@@ -491,7 +573,7 @@ Crystal/
 Contributions are welcome. Please open an issue first to discuss changes.
 
 ```bash
-# Development mode with hot reload
+# Development with hot reload
 pnpm tauri dev
 
 # Production build
@@ -507,5 +589,5 @@ MIT
 ---
 
 <p align="center">
-  <sub>Built with Tauri, React, Rust, and OpenClaw.<br/>Runs on your hardware, not ours.</sub>
+  <sub>Built with Tauri, React, Rust, and OpenClaw.<br/>Local-first. Cloud-optional. Yours to own.</sub>
 </p>
