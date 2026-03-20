@@ -23,6 +23,7 @@ export function SessionsView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cleaning, setCleaning] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const loadSessions = useCallback(async () => {
     setLoading(true);
@@ -63,6 +64,18 @@ export function SessionsView() {
     setCleaning(false);
   };
 
+  const deleteSession = async (sessionId: string) => {
+    setDeleting(sessionId);
+    try {
+      await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: `openclaw sessions rm ${sessionId}`,
+        cwd: null,
+      });
+      setSessions(prev => prev.filter(s => s.sessionId !== sessionId));
+    } catch { /* ignore */ }
+    setDeleting(null);
+  };
+
   const formatAge = (ts: number) => {
     const diff = Date.now() - ts;
     const mins = Math.floor(diff / 60_000);
@@ -91,6 +104,9 @@ export function SessionsView() {
             <h2 style={{ color: "var(--text)", fontSize: 15, fontWeight: 600, margin: 0 }}>Sessions</h2>
             <p style={{ margin: "2px 0 0", fontSize: 10, color: "var(--text-muted)" }}>
               {sessions.length} active &middot; {formatTokens(totalTokensUsed)} tokens used
+            </p>
+            <p style={{ margin: "2px 0 0", fontSize: 9, color: "rgba(255,255,255,0.25)", maxWidth: 320 }}>
+              Each chat and agent task creates a backend session. Cleanup old ones to free context.
             </p>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
@@ -156,6 +172,8 @@ export function SessionsView() {
                 session={session}
                 formatAge={formatAge}
                 formatTokens={formatTokens}
+                onDelete={() => deleteSession(session.sessionId)}
+                isDeleting={deleting === session.sessionId}
               />
             ))}
           </div>
@@ -165,10 +183,12 @@ export function SessionsView() {
   );
 }
 
-function SessionCard({ session, formatAge, formatTokens }: {
+function SessionCard({ session, formatAge, formatTokens, onDelete, isDeleting }: {
   session: Session;
   formatAge: (ts: number) => string;
   formatTokens: (n: number) => string;
+  onDelete: () => void;
+  isDeleting: boolean;
 }) {
   const usageRatio = session.contextTokens > 0
     ? Math.min(session.totalTokens / session.contextTokens, 1)
@@ -206,11 +226,32 @@ function SessionCard({ session, formatAge, formatTokens }: {
             </span>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-          <Clock style={{ width: 10, height: 10, color: "rgba(255,255,255,0.3)" }} />
-          <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)" }}>
-            {formatAge(session.updatedAt)}
-          </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <Clock style={{ width: 10, height: 10, color: "rgba(255,255,255,0.3)" }} />
+            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)" }}>
+              {formatAge(session.updatedAt)}
+            </span>
+          </div>
+          <button
+            onClick={onDelete}
+            disabled={isDeleting}
+            title="End this session"
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 22, height: 22, borderRadius: 5, border: "none",
+              cursor: isDeleting ? "wait" : "pointer",
+              background: "rgba(248,113,113,0.08)",
+              color: "rgba(248,113,113,0.7)",
+              opacity: isDeleting ? 0.4 : 1,
+              transition: "all 0.15s",
+            }}
+          >
+            {isDeleting
+              ? <Loader2 style={{ width: 10, height: 10 }} className="animate-spin" />
+              : <Trash2 style={{ width: 10, height: 10 }} />
+            }
+          </button>
         </div>
       </div>
 
