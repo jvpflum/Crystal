@@ -21,7 +21,15 @@ export type AppView =
   | "hooks"
   | "doctor"
   | "nodes"
-  | "browser";
+  | "browser"
+  | "workspace"
+  | "messaging"
+  | "directory"
+  | "devices"
+  | "subagents"
+  | "webhooks"
+  | "acp"
+  | "voicecall";
 
 export type VoiceState =
   | "idle"

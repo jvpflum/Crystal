@@ -5,7 +5,8 @@ import {
   Home, MessageSquare, Building2, Bot, Store, Cpu, Radio, Brain,
   Clock, Anchor, Wrench, Shield, Stethoscope, Activity, Settings,
   Trash2, HeartPulse, ShieldCheck, Thermometer, RotateCcw, Search,
-  Network, Globe,
+  Network, Globe, FolderOpen, Mail, Users, GitBranch, Terminal,
+  Smartphone, Webhook, Phone,
 } from "lucide-react";
 
 interface CommandItem {
@@ -43,6 +44,14 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
     { id: "settings",     icon: Settings,      label: "Settings",  description: "App preferences",             category: "Navigation", action: () => setView("settings" as AppView) },
     { id: "nodes",        icon: Network,       label: "Nodes",     description: "Manage OpenClaw nodes",       category: "Navigation", action: () => setView("nodes" as AppView) },
     { id: "browser",      icon: Globe,         label: "Browser",   description: "Browser automation",          category: "Navigation", action: () => setView("browser" as AppView) },
+    { id: "workspace",    icon: FolderOpen,    label: "Workspace", description: "File workspace explorer",    category: "Navigation", action: () => setView("workspace" as AppView) },
+    { id: "messaging",    icon: Mail,          label: "Messaging", description: "Messaging & notifications",  category: "Navigation", action: () => setView("messaging" as AppView) },
+    { id: "directory",    icon: Users,         label: "Directory", description: "Contact directory",           category: "Navigation", action: () => setView("directory" as AppView) },
+    { id: "subagents",    icon: GitBranch,     label: "Sub-Agents", description: "Manage sub-agents",         category: "Navigation", action: () => setView("subagents" as AppView) },
+    { id: "acp",          icon: Terminal,      label: "ACP",       description: "Agent Communication Protocol", category: "Navigation", action: () => setView("acp" as AppView) },
+    { id: "devices",      icon: Smartphone,    label: "Devices",   description: "Connected devices",           category: "Navigation", action: () => setView("devices" as AppView) },
+    { id: "webhooks",     icon: Webhook,       label: "Webhooks",  description: "Webhook endpoints",           category: "Navigation", action: () => setView("webhooks" as AppView) },
+    { id: "voicecall",    icon: Phone,         label: "Voice Calls", description: "Voice call interface",      category: "Navigation", action: () => setView("voicecall" as AppView) },
     { id: "clear-chat",   icon: Trash2,        label: "Clear chat",      description: "Clear current conversation",  category: "Actions", action: () => { setView("conversation" as AppView); } },
     { id: "heartbeat",    icon: HeartPulse,     label: "Heartbeat",       description: "Send heartbeat ping",         category: "Actions", action: () => invoke("execute_command", { command: "openclaw system heartbeat", cwd: null }).catch(console.error) },
     { id: "sec-audit",    icon: ShieldCheck,   label: "Security audit",  description: "Run a full security audit",   category: "Actions", action: () => setView("security" as AppView) },

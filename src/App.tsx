@@ -36,6 +36,14 @@ const NodesView = lazy(() => import("@/components/views/NodesView").then(m => ({
 const BrowserView = lazy(() => import("@/components/views/BrowserView").then(m => ({ default: m.BrowserView })));
 const OfficeView = lazy(() => import("@/components/views/OfficeView").then(m => ({ default: m.OfficeView })));
 const FactoryView = lazy(() => import("@/components/views/FactoryView").then(m => ({ default: m.FactoryView })));
+const WorkspaceView = lazy(() => import("@/components/views/WorkspaceView").then(m => ({ default: m.WorkspaceView })));
+const MessagingView = lazy(() => import("@/components/views/MessagingView").then(m => ({ default: m.MessagingView })));
+const DirectoryView = lazy(() => import("@/components/views/DirectoryView").then(m => ({ default: m.DirectoryView })));
+const DevicesView = lazy(() => import("@/components/views/DevicesView").then(m => ({ default: m.DevicesView })));
+const SubagentsView = lazy(() => import("@/components/views/SubagentsView").then(m => ({ default: m.SubagentsView })));
+const WebhooksView = lazy(() => import("@/components/views/WebhooksView").then(m => ({ default: m.WebhooksView })));
+const AcpView = lazy(() => import("@/components/views/AcpView").then(m => ({ default: m.AcpView })));
+const VoiceCallView = lazy(() => import("@/components/views/VoiceCallView").then(m => ({ default: m.VoiceCallView })));
 
 function ViewSlot({ id, active, children }: { id: string; active: boolean; children: React.ReactNode }) {
   const mountedRef = useRef(false);
@@ -156,6 +164,14 @@ function App() {
                   <ViewSlot id="browser" active={currentView === "browser"}><BrowserView /></ViewSlot>
                   <ViewSlot id="office" active={currentView === "office"}><OfficeView /></ViewSlot>
                   <ViewSlot id="factory" active={currentView === "factory"}><FactoryView /></ViewSlot>
+                  <ViewSlot id="workspace" active={currentView === "workspace"}><WorkspaceView /></ViewSlot>
+                  <ViewSlot id="messaging" active={currentView === "messaging"}><MessagingView /></ViewSlot>
+                  <ViewSlot id="directory" active={currentView === "directory"}><DirectoryView /></ViewSlot>
+                  <ViewSlot id="devices" active={currentView === "devices"}><DevicesView /></ViewSlot>
+                  <ViewSlot id="subagents" active={currentView === "subagents"}><SubagentsView /></ViewSlot>
+                  <ViewSlot id="webhooks" active={currentView === "webhooks"}><WebhooksView /></ViewSlot>
+                  <ViewSlot id="acp" active={currentView === "acp"}><AcpView /></ViewSlot>
+                  <ViewSlot id="voicecall" active={currentView === "voicecall"}><VoiceCallView /></ViewSlot>
                 </Suspense>
               </ErrorBoundary>
             </main>

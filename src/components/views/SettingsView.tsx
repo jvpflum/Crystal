@@ -144,6 +144,15 @@ export function SettingsView() {
   const [configValue, setConfigValue] = useState("");
   const [configOutput, setConfigOutput] = useState("");
 
+  const [dnsExpanded, setDnsExpanded] = useState(false);
+  const [dnsConfig, setDnsConfig] = useState<Record<string, unknown> | null>(null);
+  const [dnsLoading, setDnsLoading] = useState(false);
+  const [dnsStatusOutput, setDnsStatusOutput] = useState<string | null>(null);
+  const [dnsStatusLoading, setDnsStatusLoading] = useState(false);
+  const [dnsDomain, setDnsDomain] = useState("");
+  const [dnsSaving, setDnsSaving] = useState(false);
+  const [dnsSaveResult, setDnsSaveResult] = useState<string | null>(null);
+
   /* OpenClaw Configuration panel state */
   const [ocExpanded, setOcExpanded] = useState<Record<string, boolean>>({});
   const [ocValidating, setOcValidating] = useState(false);
@@ -373,6 +382,54 @@ export function SettingsView() {
     } catch { setConfigOutput("Failed to unset config value"); }
   };
 
+  /* ── DNS helpers ── */
+
+  const loadDnsConfig = async () => {
+    setDnsLoading(true);
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: "openclaw config get dns --json", cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        const data = JSON.parse(result.stdout);
+        setDnsConfig(data);
+        if (data.domain) setDnsDomain(String(data.domain));
+      }
+    } catch { /* ignore */ }
+    setDnsLoading(false);
+  };
+
+  const checkDnsStatus = async () => {
+    setDnsStatusLoading(true);
+    setDnsStatusOutput(null);
+    try {
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: "openclaw dns status", cwd: null,
+      });
+      setDnsStatusOutput(result.code === 0 ? (result.stdout.trim() || "DNS status OK") : (result.stderr?.trim() || result.stdout?.trim() || "DNS status check failed"));
+    } catch {
+      setDnsStatusOutput("DNS status command failed");
+    }
+    setDnsStatusLoading(false);
+  };
+
+  const saveDnsDomain = async () => {
+    if (!dnsDomain.trim()) return;
+    setDnsSaving(true);
+    setDnsSaveResult(null);
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `openclaw config set dns.domain "${dnsDomain.trim()}"`, cwd: null,
+      });
+      setDnsSaveResult(result.code === 0 ? "Domain saved" : "Failed to save domain");
+      if (result.code === 0) await loadDnsConfig();
+    } catch {
+      setDnsSaveResult("Failed to save domain");
+    }
+    setDnsSaving(false);
+    setTimeout(() => setDnsSaveResult(null), 3000);
+  };
+
   /* ── OpenClaw Configuration helpers ── */
 
   const runConfigValidate = async () => {
@@ -568,6 +625,67 @@ export function SettingsView() {
               <button onClick={stopDaemon} disabled={daemonBusy} style={BTN_GHOST}>Stop</button>
             </div>
             {daemonOutput && <pre style={{ margin: 0, padding: "8px 14px", fontSize: 10, ...MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 80, overflowY: "auto", borderTop: "1px solid var(--border)" }}>{daemonOutput}</pre>}
+          </div>
+        </Section>
+
+        {/* ───────── DNS ───────── */}
+        <Section title="DNS">
+          <div style={{ ...CARD, marginBottom: 8 }}>
+            <button onClick={() => { setDnsExpanded(!dnsExpanded); if (!dnsExpanded && !dnsConfig) loadDnsConfig(); }} style={{ ...ROW, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d={dnsExpanded ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} /></svg>
+                <span style={{ ...LABEL, margin: 0 }}>DNS Configuration</span>
+              </div>
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Domain & DNS settings</span>
+            </button>
+            {dnsExpanded && (
+              <div style={{ padding: "0 14px 12px" }}>
+                {dnsLoading ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 0" }}>
+                    <IconRefresh spin /> <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading...</span>
+                  </div>
+                ) : dnsConfig ? (
+                  <>
+                    {Object.entries(dnsConfig).map(([key, val]) => (
+                      <div key={key} style={{ ...ROW, padding: "8px 0" }}>
+                        <span style={LABEL}>{key}</span>
+                        <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{typeof val === "object" ? JSON.stringify(val) : String(val ?? "—")}</span>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <div style={{ padding: "8px 0", fontSize: 11, color: "var(--text-muted)" }}>No DNS config loaded yet.</div>
+                )}
+
+                <div style={{ marginTop: 8 }}>
+                  <span style={{ ...LABEL, display: "block", marginBottom: 4 }}>Domain</span>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input type="text" value={dnsDomain} onChange={e => setDnsDomain(e.target.value)} placeholder="example.com" style={{ ...INPUT, flex: 1 }} />
+                    <button onClick={saveDnsDomain} disabled={dnsSaving || !dnsDomain.trim()} style={BTN_PRIMARY}>
+                      {dnsSaving ? <IconRefresh spin /> : null} {dnsSaving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                  {dnsSaveResult && (
+                    <span style={{ fontSize: 10, color: dnsSaveResult.includes("Failed") ? "var(--error)" : "var(--success)", marginTop: 4, display: "inline-block" }}>
+                      {dnsSaveResult}
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                  <button onClick={checkDnsStatus} disabled={dnsStatusLoading} style={BTN_PRIMARY}>
+                    {dnsStatusLoading ? <IconRefresh spin /> : null} {dnsStatusLoading ? "Checking..." : "DNS Status"}
+                  </button>
+                  <button onClick={loadDnsConfig} style={BTN_GHOST}><IconRefresh /> Refresh</button>
+                </div>
+
+                {dnsStatusOutput && (
+                  <pre style={{ marginTop: 8, fontSize: 10, ...MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 120, overflowY: "auto", padding: "8px 10px", background: "var(--bg-elevated)", borderRadius: 6, border: "1px solid var(--border)" }}>
+                    {dnsStatusOutput}
+                  </pre>
+                )}
+              </div>
+            )}
           </div>
         </Section>
 

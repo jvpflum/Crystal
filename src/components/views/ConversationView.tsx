@@ -261,6 +261,68 @@ export function ConversationView() {
         }, 10);
       },
     })),
+    // Commands that auto-send
+    ...([
+      { cmd: "/think high", label: "Think High", description: "Set thinking level to high" },
+      { cmd: "/think medium", label: "Think Medium", description: "Set thinking level to medium" },
+      { cmd: "/think low", label: "Think Low", description: "Set thinking level to low" },
+      { cmd: "/fast on", label: "Fast On", description: "Enable fast mode (skip reasoning)" },
+      { cmd: "/fast off", label: "Fast Off", description: "Disable fast mode" },
+      { cmd: "/model", label: "Model Picker", description: "Show model picker / switch model" },
+      { cmd: "/model list", label: "Model List", description: "List available models" },
+      { cmd: "/model status", label: "Model Status", description: "Show model auth and endpoint status" },
+      { cmd: "/queue", label: "Queue", description: "Show current queue settings" },
+      { cmd: "/elevated on", label: "Elevated On", description: "Enable elevated execution mode" },
+      { cmd: "/elevated off", label: "Elevated Off", description: "Disable elevated mode" },
+      { cmd: "/export-session", label: "Export Session", description: "Export session to HTML file" },
+      { cmd: "/usage tokens", label: "Usage Tokens", description: "Show per-response token counts" },
+      { cmd: "/usage cost", label: "Usage Cost", description: "Show local cost summary" },
+      { cmd: "/usage off", label: "Usage Off", description: "Hide usage info" },
+      { cmd: "/tts on", label: "TTS On", description: "Enable text-to-speech for responses" },
+      { cmd: "/tts off", label: "TTS Off", description: "Disable text-to-speech" },
+      { cmd: "/verbose on", label: "Verbose On", description: "Enable verbose output (debugging)" },
+      { cmd: "/verbose off", label: "Verbose Off", description: "Disable verbose output" },
+      { cmd: "/config show", label: "Config Show", description: "Show current config" },
+      { cmd: "/mcp show", label: "MCP Show", description: "Show MCP server config" },
+      { cmd: "/plugins list", label: "Plugins List", description: "List discovered plugins" },
+      { cmd: "/debug show", label: "Debug Show", description: "Show debug overrides" },
+      { cmd: "/debug reset", label: "Debug Reset", description: "Reset all debug overrides" },
+      { cmd: "/subagents list", label: "Subagents List", description: "List active sub-agents" },
+      { cmd: "/subagents kill all", label: "Subagents Kill All", description: "Kill all sub-agents" },
+      { cmd: "/acp status", label: "ACP Status", description: "Show ACP session status" },
+      { cmd: "/approve allow-once", label: "Approve Once", description: "Approve exec once" },
+      { cmd: "/approve allow-always", label: "Approve Always", description: "Approve exec always" },
+      { cmd: "/approve deny", label: "Approve Deny", description: "Deny exec approval" },
+      { cmd: "/allowlist", label: "Allowlist", description: "Show allowlist entries" },
+      { cmd: "/whoami", label: "Who Am I", description: "Show sender identity" },
+      { cmd: "/kill all", label: "Kill All", description: "Kill all running sub-agents" },
+    ] as { cmd: string; label: string; description: string }[]).map(item => ({
+      cmd: item.cmd,
+      label: item.label,
+      description: item.description,
+      action: () => {
+        setTimeout(() => {
+          setInput(item.cmd);
+          setTimeout(() => {
+            const btn = document.querySelector("[data-send-btn]") as HTMLButtonElement;
+            btn?.click();
+          }, 50);
+        }, 10);
+      },
+    })),
+    // Commands that need user input appended (set prefix, do NOT auto-send)
+    ...([
+      { cmd: "/btw", label: "BTW", description: "Ask a side question without changing context" },
+      { cmd: "/bash", label: "Bash", description: "Run a host shell command" },
+    ] as { cmd: string; label: string; description: string }[]).map(item => ({
+      cmd: item.cmd,
+      label: item.label,
+      description: item.description,
+      action: () => {
+        setInput(item.cmd + " ");
+        inputRef.current?.focus();
+      },
+    })),
   ];
 
   const filteredSlashCommands = slashCommands.filter(c =>

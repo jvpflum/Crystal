@@ -3,14 +3,14 @@ import {
   Search, Loader2, CheckCircle, AlertTriangle, ExternalLink,
   RefreshCw, Package, ShieldAlert, Plug, Zap, Stethoscope,
   ChevronDown, ChevronUp, Check, X,
-  Play, Square,
+  Play, Square, Download, Upload, RotateCw, Globe, Tag,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { cachedCommand } from "@/lib/cache";
 
 // ─── Types ──────────────────────────────────────────────────────
 
-type TabId = "skills" | "plugins" | "powerup";
+type TabId = "skills" | "plugins" | "powerup" | "clawhub";
 
 interface SkillMissing {
   bins: string[];
@@ -83,6 +83,7 @@ export function MarketplaceView() {
     { id: "skills", label: "Skills", icon: <Package style={{ width: 12, height: 12 }} /> },
     { id: "plugins", label: "Plugins", icon: <Plug style={{ width: 12, height: 12 }} /> },
     { id: "powerup", label: "Power Up", icon: <Zap style={{ width: 12, height: 12 }} /> },
+    { id: "clawhub", label: "ClawHub", icon: <Globe style={{ width: 12, height: 12 }} /> },
   ];
 
   return (
@@ -119,6 +120,7 @@ export function MarketplaceView() {
         {activeTab === "skills" && <SkillsTab />}
         {activeTab === "plugins" && <PluginsTab />}
         {activeTab === "powerup" && <PowerUpTab />}
+        {activeTab === "clawhub" && <ClawHubTab />}
       </div>
     </div>
   );
@@ -1112,6 +1114,454 @@ function PowerUpStepCard({ step }: { step: PowerUpStep }) {
           </pre>
         </div>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TAB 4: ClawHub
+// ═══════════════════════════════════════════════════════════════
+
+interface ClawHubSkill {
+  name: string;
+  slug: string;
+  version: string;
+  tags: string[];
+  description: string;
+}
+
+function parseClawHubLine(line: string): ClawHubSkill | null {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith("─") || trimmed.startsWith("=") || trimmed.toLowerCase().startsWith("name")) return null;
+  const parts = trimmed.split(/\s{2,}|\t+/);
+  if (parts.length < 3) return null;
+  return {
+    name: parts[0] || trimmed,
+    slug: parts[1] || parts[0] || trimmed,
+    version: parts[2] || "0.0.0",
+    tags: parts[3] ? parts[3].split(",").map(t => t.trim()) : [],
+    description: parts.slice(4).join(" ") || parts[0] || "",
+  };
+}
+
+function ClawHubTab() {
+  const [subTab, setSubTab] = useState<"search" | "installed" | "publish" | "sync">("search");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<ClawHubSkill[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [installedSkills, setInstalledSkills] = useState<ClawHubSkill[]>([]);
+  const [loadingInstalled, setLoadingInstalled] = useState(false);
+  const [actionInProgress, setActionInProgress] = useState<Set<string>>(new Set());
+  const [actionOutput, setActionOutput] = useState<string | null>(null);
+
+  const [publishExpanded, setPublishExpanded] = useState(false);
+  const [pubSlug, setPubSlug] = useState("");
+  const [pubName, setPubName] = useState("");
+  const [pubVersion, setPubVersion] = useState("");
+  const [pubChangelog, setPubChangelog] = useState("");
+  const [pubTags, setPubTags] = useState("");
+  const [pubPath, setPubPath] = useState(".");
+  const [publishing, setPublishing] = useState(false);
+
+  const [syncPreview, setSyncPreview] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const doSearch = async () => {
+    if (!searchQuery.trim()) return;
+    setSearching(true);
+    setActionOutput(null);
+    try {
+      const result = await runCommand(`clawhub search "${searchQuery}" --limit 20`);
+      if (result.code === 0 && result.stdout.trim()) {
+        const lines = result.stdout.trim().split("\n");
+        const parsed = lines.map(parseClawHubLine).filter(Boolean) as ClawHubSkill[];
+        setSearchResults(parsed.length > 0 ? parsed : [{ name: "raw output", slug: "", version: "", tags: [], description: result.stdout.trim().slice(0, 200) }]);
+      } else {
+        setSearchResults([]);
+        setActionOutput(result.stderr || "No results found.");
+      }
+    } catch (e) {
+      setActionOutput(e instanceof Error ? e.message : "Search failed");
+    }
+    setSearching(false);
+  };
+
+  const loadInstalled = useCallback(async () => {
+    setLoadingInstalled(true);
+    try {
+      const result = await runCommand("clawhub list");
+      if (result.code === 0 && result.stdout.trim()) {
+        const lines = result.stdout.trim().split("\n");
+        const parsed = lines.map(parseClawHubLine).filter(Boolean) as ClawHubSkill[];
+        setInstalledSkills(parsed);
+      } else {
+        setInstalledSkills([]);
+      }
+    } catch { setInstalledSkills([]); }
+    setLoadingInstalled(false);
+  }, []);
+
+  useEffect(() => { if (subTab === "installed") loadInstalled(); }, [subTab, loadInstalled]);
+
+  const installSkill = async (slug: string) => {
+    setActionInProgress(s => new Set(s).add(slug));
+    setActionOutput(null);
+    try {
+      const result = await runCommand(`clawhub install ${slug} --force`);
+      setActionOutput(result.code === 0 ? (result.stdout.trim() || `Installed ${slug}`) : (result.stderr || result.stdout || "Install failed"));
+    } catch (e) { setActionOutput(e instanceof Error ? e.message : "Install failed"); }
+    setActionInProgress(s => { const n = new Set(s); n.delete(slug); return n; });
+  };
+
+  const updateSkill = async (slug: string) => {
+    setActionInProgress(s => new Set(s).add(slug));
+    setActionOutput(null);
+    try {
+      const result = await runCommand(`clawhub update ${slug}`);
+      setActionOutput(result.code === 0 ? (result.stdout.trim() || `Updated ${slug}`) : (result.stderr || result.stdout || "Update failed"));
+    } catch (e) { setActionOutput(e instanceof Error ? e.message : "Update failed"); }
+    setActionInProgress(s => { const n = new Set(s); n.delete(slug); return n; });
+  };
+
+  const updateAll = async () => {
+    setActionInProgress(s => new Set(s).add("__all__"));
+    setActionOutput(null);
+    try {
+      const result = await runCommand("clawhub update --all");
+      setActionOutput(result.code === 0 ? (result.stdout.trim() || "All skills updated") : (result.stderr || result.stdout || "Update all failed"));
+    } catch (e) { setActionOutput(e instanceof Error ? e.message : "Update all failed"); }
+    setActionInProgress(s => { const n = new Set(s); n.delete("__all__"); return n; });
+    await loadInstalled();
+  };
+
+  const doPublish = async () => {
+    if (!pubSlug.trim()) return;
+    setPublishing(true);
+    setActionOutput(null);
+    try {
+      let cmd = `clawhub publish ${pubPath} --slug ${pubSlug}`;
+      if (pubName.trim()) cmd += ` --name "${pubName}"`;
+      if (pubVersion.trim()) cmd += ` --version ${pubVersion}`;
+      if (pubChangelog.trim()) cmd += ` --changelog "${pubChangelog}"`;
+      if (pubTags.trim()) cmd += ` --tags ${pubTags}`;
+      const result = await runCommand(cmd);
+      setActionOutput(result.code === 0 ? (result.stdout.trim() || "Published successfully") : (result.stderr || result.stdout || "Publish failed"));
+    } catch (e) { setActionOutput(e instanceof Error ? e.message : "Publish failed"); }
+    setPublishing(false);
+  };
+
+  const doSyncPreview = async () => {
+    setSyncing(true);
+    setSyncPreview(null);
+    try {
+      const result = await runCommand("clawhub sync --all --dry-run");
+      setSyncPreview(result.code === 0 ? (result.stdout.trim() || "Nothing to sync.") : (result.stderr || result.stdout || "Sync preview failed"));
+    } catch (e) { setSyncPreview(e instanceof Error ? e.message : "Sync preview failed"); }
+    setSyncing(false);
+  };
+
+  const doSyncConfirm = async () => {
+    setSyncing(true);
+    setActionOutput(null);
+    try {
+      const result = await runCommand("clawhub sync --all");
+      setActionOutput(result.code === 0 ? (result.stdout.trim() || "Sync complete") : (result.stderr || result.stdout || "Sync failed"));
+      setSyncPreview(null);
+    } catch (e) { setActionOutput(e instanceof Error ? e.message : "Sync failed"); }
+    setSyncing(false);
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%", padding: "7px 12px", borderRadius: 8,
+    background: "var(--bg-elevated)", border: "1px solid var(--border)",
+    color: "var(--text)", fontSize: 12, outline: "none",
+    boxSizing: "border-box",
+  };
+
+  const btnPrimary: React.CSSProperties = {
+    display: "flex", alignItems: "center", gap: 4, padding: "5px 12px",
+    borderRadius: 6, border: "none", fontSize: 10, fontWeight: 500, cursor: "pointer",
+    background: "var(--accent-bg)", color: "var(--accent-hover)",
+  };
+
+  const btnGhost: React.CSSProperties = {
+    display: "flex", alignItems: "center", gap: 4, padding: "5px 12px",
+    borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
+    background: "var(--border)", color: "var(--text-muted)",
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      <div style={{ padding: "14px 20px 10px", flexShrink: 0 }}>
+        <h2 style={{ color: "var(--text)", fontSize: 15, fontWeight: 600, margin: 0 }}>
+          <Globe style={{ width: 14, height: 14, display: "inline", verticalAlign: "middle", marginRight: 6, color: "var(--accent)" }} />
+          ClawHub
+        </h2>
+        <p style={{ margin: "2px 0 0", fontSize: 10, color: "var(--text-muted)" }}>
+          Skill registry — search, install, update & publish
+        </p>
+        <div style={{ display: "flex", gap: 4, marginTop: 8, flexWrap: "wrap" }}>
+          {([
+            { id: "search", label: "Search", icon: <Search style={{ width: 9, height: 9 }} /> },
+            { id: "installed", label: "Installed", icon: <Package style={{ width: 9, height: 9 }} /> },
+            { id: "publish", label: "Publish", icon: <Upload style={{ width: 9, height: 9 }} /> },
+            { id: "sync", label: "Sync", icon: <RotateCw style={{ width: 9, height: 9 }} /> },
+          ] as { id: typeof subTab; label: string; icon: React.ReactNode }[]).map(t => (
+            <button
+              key={t.id}
+              onClick={() => setSubTab(t.id)}
+              style={{
+                padding: "4px 12px", borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
+                background: subTab === t.id ? "rgba(59,130,246,0.18)" : "var(--border)",
+                color: subTab === t.id ? "var(--accent)" : "var(--text-muted)",
+                fontWeight: subTab === t.id ? 600 : 400,
+                display: "flex", alignItems: "center", gap: 4,
+              }}
+            >
+              {t.icon} {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "0 20px 16px" }}>
+        {/* Action output */}
+        {actionOutput && (
+          <div style={{
+            background: "var(--bg-elevated)", border: "1px solid var(--border)",
+            borderRadius: 8, padding: "8px 12px", marginBottom: 10, marginTop: 4,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ fontSize: 9, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1 }}>Output</span>
+              <button onClick={() => setActionOutput(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}>
+                <X style={{ width: 12, height: 12 }} />
+              </button>
+            </div>
+            <pre style={{ fontSize: 10, color: "var(--text-secondary)", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "monospace", maxHeight: 150, overflowY: "auto" }}>
+              {actionOutput}
+            </pre>
+          </div>
+        )}
+
+        {/* ── Search sub-tab ── */}
+        {subTab === "search" && (
+          <>
+            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+              <div style={{ position: "relative", flex: 1 }}>
+                <Search style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", width: 14, height: 14, color: "var(--text-muted)" }} />
+                <input
+                  type="text" placeholder="Search ClawHub skills..."
+                  value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") doSearch(); }}
+                  style={{ ...inputStyle, paddingLeft: 32 }}
+                />
+              </div>
+              <button onClick={doSearch} disabled={searching} style={btnPrimary}>
+                {searching ? <Loader2 style={{ width: 10, height: 10, animation: "mpSpin 1s linear infinite" }} /> : <Search style={{ width: 10, height: 10 }} />}
+                Search
+              </button>
+            </div>
+            {searching ? (
+              <LoadingSpinner />
+            ) : searchResults.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+                <SectionHeader title="Search Results" count={searchResults.length} color="var(--accent)" />
+                {searchResults.map((skill, i) => (
+                  <div key={`${skill.slug}-${i}`} style={{
+                    background: "var(--bg-elevated)", border: "1px solid var(--border)",
+                    borderRadius: 10, padding: "10px 12px",
+                    display: "flex", alignItems: "flex-start", gap: 10,
+                  }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--border)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <Globe style={{ width: 16, height: 16, color: "var(--accent)" }} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 13, color: "var(--text)", fontWeight: 500 }}>{skill.name}</span>
+                        {skill.slug && <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "var(--border)", color: "var(--text-muted)", fontFamily: "monospace" }}>{skill.slug}</span>}
+                        {skill.version && <span style={{ fontSize: 9, color: "var(--text-muted)" }}>v{skill.version}</span>}
+                      </div>
+                      <p style={{ margin: "3px 0 0", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.4 }}>{skill.description}</p>
+                      {skill.tags.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 4 }}>
+                          {skill.tags.map(tag => (
+                            <span key={tag} style={{ fontSize: 8, padding: "1px 5px", borderRadius: 4, background: "rgba(59,130,246,0.08)", color: "var(--accent)" }}>
+                              <Tag style={{ width: 7, height: 7, display: "inline", verticalAlign: "middle", marginRight: 2 }} />{tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {skill.slug && (
+                      <button
+                        onClick={() => installSkill(skill.slug)}
+                        disabled={actionInProgress.has(skill.slug)}
+                        style={{ ...btnPrimary, flexShrink: 0, opacity: actionInProgress.has(skill.slug) ? 0.5 : 1 }}
+                      >
+                        {actionInProgress.has(skill.slug) ? <Loader2 style={{ width: 10, height: 10, animation: "mpSpin 1s linear infinite" }} /> : <Download style={{ width: 10, height: 10 }} />}
+                        Install
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </>
+        )}
+
+        {/* ── Installed sub-tab ── */}
+        {subTab === "installed" && (
+          <>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4, marginBottom: 8 }}>
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{installedSkills.length} installed</span>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={updateAll} disabled={actionInProgress.has("__all__")} style={btnPrimary}>
+                  {actionInProgress.has("__all__") ? <Loader2 style={{ width: 10, height: 10, animation: "mpSpin 1s linear infinite" }} /> : <RotateCw style={{ width: 10, height: 10 }} />}
+                  Update All
+                </button>
+                <button onClick={loadInstalled} disabled={loadingInstalled} style={btnGhost}>
+                  <RefreshCw style={{ width: 10, height: 10 }} /> Refresh
+                </button>
+              </div>
+            </div>
+            {loadingInstalled ? <LoadingSpinner /> : installedSkills.length === 0 ? (
+              <EmptyState icon={<Package style={{ width: 28, height: 28, color: "var(--text-muted)" }} />} message="No ClawHub skills installed" />
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {installedSkills.map((skill, i) => (
+                  <div key={`${skill.slug}-${i}`} style={{
+                    background: "var(--bg-elevated)", border: "1px solid var(--border)",
+                    borderRadius: 10, padding: "10px 12px",
+                    display: "flex", alignItems: "center", gap: 10,
+                  }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--border)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <Package style={{ width: 16, height: 16, color: "var(--success)" }} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontSize: 13, color: "var(--text)", fontWeight: 500 }}>{skill.name}</span>
+                        <StatusBadge label={`v${skill.version}`} color="var(--text-muted)" />
+                      </div>
+                      <p style={{ margin: "2px 0 0", fontSize: 11, color: "var(--text-secondary)" }}>{skill.description || skill.slug}</p>
+                    </div>
+                    <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                      <button
+                        onClick={() => updateSkill(skill.slug)}
+                        disabled={actionInProgress.has(skill.slug)}
+                        style={{ ...btnPrimary, opacity: actionInProgress.has(skill.slug) ? 0.5 : 1 }}
+                      >
+                        {actionInProgress.has(skill.slug) ? <Loader2 style={{ width: 10, height: 10, animation: "mpSpin 1s linear infinite" }} /> : <RotateCw style={{ width: 10, height: 10 }} />}
+                        Update
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── Publish sub-tab ── */}
+        {subTab === "publish" && (
+          <div style={{ marginTop: 4 }}>
+            <div style={{
+              background: "var(--bg-elevated)", border: "1px solid var(--border)",
+              borderRadius: 10, overflow: "hidden",
+            }}>
+              <button onClick={() => setPublishExpanded(!publishExpanded)} style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "10px 14px", width: "100%", background: "transparent", border: "none",
+                cursor: "pointer", color: "var(--text)",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Upload style={{ width: 14, height: 14, color: "var(--accent)" }} />
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>Publish a Skill</span>
+                </div>
+                {publishExpanded ? <ChevronUp style={{ width: 14, height: 14, color: "var(--text-muted)" }} /> : <ChevronDown style={{ width: 14, height: 14, color: "var(--text-muted)" }} />}
+              </button>
+              {publishExpanded && (
+                <div style={{ padding: "0 14px 14px", display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Slug *</label>
+                      <input type="text" value={pubSlug} onChange={e => setPubSlug(e.target.value)} placeholder="my-skill" style={inputStyle} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Name</label>
+                      <input type="text" value={pubName} onChange={e => setPubName(e.target.value)} placeholder="My Skill" style={inputStyle} />
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Version</label>
+                      <input type="text" value={pubVersion} onChange={e => setPubVersion(e.target.value)} placeholder="1.0.0" style={inputStyle} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Tags (comma sep)</label>
+                      <input type="text" value={pubTags} onChange={e => setPubTags(e.target.value)} placeholder="util,automation" style={inputStyle} />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Path</label>
+                    <input type="text" value={pubPath} onChange={e => setPubPath(e.target.value)} placeholder="." style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Changelog</label>
+                    <textarea value={pubChangelog} onChange={e => setPubChangelog(e.target.value)} placeholder="What changed..." rows={3}
+                      style={{ ...inputStyle, resize: "vertical", fontFamily: "monospace", fontSize: 11, lineHeight: 1.5 }}
+                    />
+                  </div>
+                  <button onClick={doPublish} disabled={publishing || !pubSlug.trim()} style={{ ...btnPrimary, alignSelf: "flex-start", padding: "6px 16px", opacity: publishing ? 0.5 : 1 }}>
+                    {publishing ? <Loader2 style={{ width: 10, height: 10, animation: "mpSpin 1s linear infinite" }} /> : <Upload style={{ width: 10, height: 10 }} />}
+                    Publish
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Sync sub-tab ── */}
+        {subTab === "sync" && (
+          <div style={{ marginTop: 4 }}>
+            <div style={{
+              background: "var(--bg-elevated)", border: "1px solid var(--border)",
+              borderRadius: 10, padding: "14px",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <RotateCw style={{ width: 14, height: 14, color: "var(--accent)" }} />
+                <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>Sync Skills</span>
+              </div>
+              <p style={{ fontSize: 11, color: "var(--text-secondary)", margin: "0 0 12px", lineHeight: 1.5 }}>
+                Synchronize all ClawHub skills with the registry. Preview changes first, then confirm.
+              </p>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={doSyncPreview} disabled={syncing} style={btnPrimary}>
+                  {syncing && !syncPreview ? <Loader2 style={{ width: 10, height: 10, animation: "mpSpin 1s linear infinite" }} /> : <Search style={{ width: 10, height: 10 }} />}
+                  Preview (Dry Run)
+                </button>
+                {syncPreview && (
+                  <button onClick={doSyncConfirm} disabled={syncing} style={{ ...btnPrimary, background: "rgba(74,222,128,0.15)", color: "var(--success)" }}>
+                    {syncing ? <Loader2 style={{ width: 10, height: 10, animation: "mpSpin 1s linear infinite" }} /> : <Check style={{ width: 10, height: 10 }} />}
+                    Confirm Sync
+                  </button>
+                )}
+              </div>
+              {syncPreview && (
+                <pre style={{
+                  marginTop: 10, padding: "10px 12px", borderRadius: 8,
+                  background: "var(--bg-surface)", border: "1px solid var(--border)",
+                  fontSize: 10, color: "var(--text-secondary)", margin: "10px 0 0",
+                  whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "monospace",
+                  maxHeight: 200, overflowY: "auto",
+                }}>
+                  {syncPreview}
+                </pre>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

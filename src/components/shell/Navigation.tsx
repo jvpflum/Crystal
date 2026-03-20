@@ -16,6 +16,14 @@ import {
   Shield,
   Stethoscope,
   Command,
+  FolderOpen,
+  Mail,
+  Users,
+  GitBranch,
+  Terminal,
+  Smartphone,
+  Webhook,
+  Phone,
 } from "lucide-react";
 import { useAppStore, AppView } from "@/stores/appStore";
 
@@ -31,11 +39,19 @@ const navItems: { id: AppView; icon: React.ElementType; label: string; group: "m
   { id: "channels",       icon: Radio,           label: "Channels", group: "openclaw" },
   { id: "memory",         icon: Brain,           label: "Memory",   group: "openclaw" },
   { id: "hooks",          icon: Anchor,          label: "Hooks",    group: "openclaw" },
+  { id: "workspace",      icon: FolderOpen,      label: "Workspace", group: "openclaw" },
+  { id: "messaging",      icon: Mail,            label: "Messaging", group: "openclaw" },
+  { id: "directory",      icon: Users,           label: "Directory", group: "openclaw" },
+  { id: "subagents",      icon: GitBranch,       label: "Sub-Agents", group: "openclaw" },
+  { id: "acp",            icon: Terminal,        label: "ACP",       group: "openclaw" },
   { id: "tools",        icon: Wrench,        label: "Tools",     group: "system" },
   { id: "security",     icon: Shield,        label: "Security",  group: "system" },
   { id: "doctor",       icon: Stethoscope,   label: "Doctor",    group: "system" },
   { id: "activity",     icon: Activity,      label: "Activity",  group: "system" },
   { id: "settings",     icon: Settings,      label: "Settings",  group: "system" },
+  { id: "devices",       icon: Smartphone,    label: "Devices",   group: "system" },
+  { id: "webhooks",      icon: Webhook,       label: "Webhooks",  group: "system" },
+  { id: "voicecall",     icon: Phone,         label: "Voice",     group: "system" },
 ];
 
 export function Navigation() {
