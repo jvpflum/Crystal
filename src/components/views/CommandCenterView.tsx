@@ -260,29 +260,6 @@ function CalendarTab() {
     try {
       const raw = await getCronJobs(force);
       const cronJobs = raw.map(parseCronJob);
-
-      try {
-        const hbResult = await invoke<{ stdout: string; code: number }>("execute_command", {
-          command: "openclaw heartbeat status --json", cwd: null,
-        });
-        if (hbResult.code === 0 && hbResult.stdout.trim()) {
-          const parsed = JSON.parse(hbResult.stdout);
-          const hb = parsed.heartbeat ?? parsed;
-          if (hb.enabled) {
-            const mins = hb.intervalMinutes ?? hb.interval ?? 30;
-            cronJobs.push({
-              id: "__heartbeat__",
-              name: "Heartbeat",
-              schedule: `*/${mins} * * * *`,
-              message: hb.message || "Autonomous heartbeat monitoring",
-              agent: "main",
-              enabled: true,
-              scheduleKind: "cron",
-            });
-          }
-        }
-      } catch { /* heartbeat status optional */ }
-
       setJobs(cronJobs);
       setError(null);
     } catch (e) {
@@ -441,7 +418,7 @@ function CalendarTab() {
                     onMouseLeave={e => { e.currentTarget.style.background = isToday ? "rgba(59,130,246,0.03)" : "transparent"; }}
                   >
                     {dayJobs.map(j => {
-                      const isHeartbeat = j.id === "__heartbeat__";
+                      const isHeartbeat = j.name?.toLowerCase().includes("heartbeat") ?? false;
                       return (
                         <div key={j.id} style={{
                           fontSize: 9, padding: "2px 4px", borderRadius: 4,
@@ -925,29 +902,6 @@ function ScheduledTab() {
     try {
       const raw = await getCronJobs(force);
       const cronJobs = raw.map(parseCronJob);
-
-      try {
-        const hbResult = await invoke<{ stdout: string; code: number }>("execute_command", {
-          command: "openclaw heartbeat status --json", cwd: null,
-        });
-        if (hbResult.code === 0 && hbResult.stdout.trim()) {
-          const parsed = JSON.parse(hbResult.stdout);
-          const hb = parsed.heartbeat ?? parsed;
-          if (hb.enabled) {
-            const mins = hb.intervalMinutes ?? hb.interval ?? 30;
-            cronJobs.push({
-              id: "__heartbeat__",
-              name: "Heartbeat",
-              schedule: `*/${mins} * * * *`,
-              message: hb.message || "Autonomous heartbeat monitoring",
-              agent: "main",
-              enabled: true,
-              scheduleKind: "cron",
-            });
-          }
-        }
-      } catch { /* heartbeat status optional */ }
-
       setJobs(cronJobs);
       setError(null);
     } catch (e) {
@@ -1056,7 +1010,7 @@ function ScheduledTab() {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
             {jobs.map(job => {
-              const isHb = job.id === "__heartbeat__";
+              const isHb = job.name?.toLowerCase().includes("heartbeat") ?? false;
               return (
                 <div key={job.id} style={{
                   padding: "10px 14px", borderRadius: 10,
@@ -1151,14 +1105,19 @@ const HEARTBEAT_PRESETS = [
 ];
 
 interface HeartbeatStatus {
-  enabled?: boolean;
-  intervalMinutes?: number;
+  enabled: boolean;
+  cronJobId: string | null;
+  intervalMinutes: number;
   lastRun?: string;
-  message?: string;
+  message: string;
 }
 
+const HEARTBEAT_JOB_NAME = "crystal-heartbeat";
+
 function HeartbeatTab() {
-  const [status, setStatus] = useState<HeartbeatStatus | null>(null);
+  const [status, setStatus] = useState<HeartbeatStatus>({
+    enabled: false, cronJobId: null, intervalMinutes: 30, message: "",
+  });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
@@ -1167,59 +1126,136 @@ function HeartbeatTab() {
   const invalidate = useDataStore(s => s.invalidate);
 
   const fetchStatus = useCallback(async () => {
+    let enabled = false;
+    let cronJobId: string | null = null;
+    let jobInterval = 30;
+    let jobMessage = "";
+    let lastRun: string | undefined;
+
     try {
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "openclaw heartbeat status --json", cwd: null,
+      const hbResult = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: "openclaw system heartbeat last --json", cwd: null,
       });
-      if (result.code === 0 && result.stdout.trim()) {
+      if (hbResult.code === 0 && hbResult.stdout.trim()) {
         try {
-          const parsed = JSON.parse(result.stdout);
-          const hb = parsed.heartbeat ?? parsed;
-          setStatus({
-            enabled: hb.enabled ?? false,
-            intervalMinutes: hb.intervalMinutes ?? hb.interval ?? 30,
-            lastRun: hb.lastRun ?? hb.last_run,
-            message: hb.message ?? "",
-          });
-          setIntervalMinutes(hb.intervalMinutes ?? hb.interval ?? 30);
-          setPrompt(hb.message ?? "");
-        } catch {
-          setStatus({ enabled: false });
-        }
-      } else {
-        setStatus({ enabled: false });
+          const parsed = JSON.parse(hbResult.stdout);
+          lastRun = parsed.timestamp ?? parsed.ts ?? parsed.lastRun;
+        } catch { /* ignore parse errors */ }
       }
-    } catch {
-      setStatus({ enabled: false });
-    } finally {
-      setLoading(false);
-    }
+    } catch { /* heartbeat last may not be available */ }
+
+    try {
+      const cronResult = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: "openclaw cron list --json --all", cwd: null,
+      });
+      if (cronResult.code === 0 && cronResult.stdout.trim()) {
+        const parsed = JSON.parse(cronResult.stdout);
+        const jobs = Array.isArray(parsed) ? parsed : parsed.jobs ?? [];
+        const hbJob = jobs.find((j: Record<string, unknown>) =>
+          j.name === HEARTBEAT_JOB_NAME ||
+          (typeof j.name === "string" && j.name.toLowerCase().includes("heartbeat"))
+        );
+        if (hbJob) {
+          cronJobId = String(hbJob.id ?? "");
+          enabled = hbJob.enabled !== false && hbJob.disabled !== true;
+          jobMessage = String(hbJob.message ?? hbJob.agentMessage ?? "");
+          const sched = String(hbJob.schedule ?? hbJob.every ?? "");
+          const everyMatch = sched.match(/^(\d+)\s*m/i);
+          if (everyMatch) {
+            jobInterval = parseInt(everyMatch[1], 10);
+          } else if (typeof hbJob.intervalMinutes === "number") {
+            jobInterval = hbJob.intervalMinutes;
+          } else {
+            const cronMatch = String(hbJob.cron ?? hbJob.schedule ?? "").match(/^\*\/(\d+)/);
+            if (cronMatch) jobInterval = parseInt(cronMatch[1], 10);
+          }
+        }
+      }
+    } catch { /* cron list may fail if gateway is down */ }
+
+    setStatus({ enabled, cronJobId, intervalMinutes: jobInterval, lastRun, message: jobMessage });
+    setIntervalMinutes(jobInterval);
+    setPrompt(jobMessage);
+    setLoading(false);
   }, []);
 
   useEffect(() => { fetchStatus(); }, [fetchStatus]);
 
+  const ensureCronJob = async (minutes: number, message: string, enable: boolean): Promise<string | null> => {
+    const escaped = message.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    if (status.cronJobId) {
+      const parts = [
+        `openclaw cron edit ${status.cronJobId}`,
+        `--every ${minutes}m`,
+        `--message "${escaped}"`,
+        `--name ${HEARTBEAT_JOB_NAME}`,
+        enable ? "--enable" : "--disable",
+      ];
+      await invoke("execute_command", { command: parts.join(" "), cwd: null });
+      return status.cronJobId;
+    } else {
+      const parts = [
+        "openclaw cron add",
+        `--every ${minutes}m`,
+        `--message "${escaped}"`,
+        `--name ${HEARTBEAT_JOB_NAME}`,
+        "--json",
+        enable ? "" : "--disabled",
+      ].filter(Boolean);
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: parts.join(" "), cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        try {
+          const parsed = JSON.parse(result.stdout);
+          return String(parsed.id ?? parsed.jobId ?? "");
+        } catch { /* ignore */ }
+      }
+      return null;
+    }
+  };
+
   const toggleHeartbeat = async () => {
-    const enabled = status?.enabled ?? false;
+    const wasEnabled = status.enabled;
+    setStatus(prev => ({ ...prev, enabled: !wasEnabled }));
     setBusy("toggle");
     try {
-      await invoke("execute_command", {
-        command: enabled ? "openclaw heartbeat disable" : "openclaw heartbeat enable",
-        cwd: null,
-      });
+      if (wasEnabled) {
+        if (status.cronJobId) {
+          await invoke("execute_command", {
+            command: `openclaw cron edit ${status.cronJobId} --disable`, cwd: null,
+          });
+        }
+        await invoke("execute_command", {
+          command: "openclaw system heartbeat disable", cwd: null,
+        });
+      } else {
+        const msg = prompt.trim() || "Check on system health, summarize any important changes or notifications.";
+        const jobId = await ensureCronJob(intervalMinutes, msg, true);
+        if (jobId) setStatus(prev => ({ ...prev, cronJobId: jobId }));
+        await invoke("execute_command", {
+          command: "openclaw system heartbeat enable", cwd: null,
+        });
+      }
       invalidate("cronJobs");
-      await fetchStatus();
+    } catch {
+      setStatus(prev => ({ ...prev, enabled: wasEnabled }));
     } finally { setBusy(null); }
   };
 
-  const setHeartbeatInterval = async (minutes: number) => {
+  const setHeartbeatIntervalAction = async (minutes: number) => {
+    if (minutes === intervalMinutes) return;
+    setIntervalMinutes(minutes);
+    if (!status.cronJobId) return;
     setBusy("interval");
     try {
       await invoke("execute_command", {
-        command: `openclaw heartbeat interval ${minutes}`, cwd: null,
+        command: `openclaw cron edit ${status.cronJobId} --every ${minutes}m`, cwd: null,
       });
-      setIntervalMinutes(minutes);
+      setStatus(prev => ({ ...prev, intervalMinutes: minutes }));
       invalidate("cronJobs");
-      await fetchStatus();
+    } catch {
+      setIntervalMinutes(status.intervalMinutes);
     } finally { setBusy(null); }
   };
 
@@ -1227,27 +1263,34 @@ function HeartbeatTab() {
     if (!prompt.trim()) return;
     setBusy("save");
     try {
-      const escaped = prompt.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-      await invoke("execute_command", {
-        command: `openclaw heartbeat set --message "${escaped}"`, cwd: null,
-      });
-      await fetchStatus();
+      const jobId = await ensureCronJob(intervalMinutes, prompt.trim(), status.enabled);
+      if (jobId) setStatus(prev => ({ ...prev, cronJobId: jobId, message: prompt.trim() }));
+      invalidate("cronJobs");
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } finally { setBusy(null); }
+    } catch { /* ignore */ }
+    finally { setBusy(null); }
   };
 
   const triggerNow = async () => {
     setBusy("trigger");
     try {
-      await invoke("execute_command", {
-        command: "openclaw system heartbeat", cwd: null,
-      });
-      await fetchStatus();
-    } finally { setBusy(null); }
+      if (status.cronJobId) {
+        await invoke("execute_command", {
+          command: `openclaw cron run ${status.cronJobId}`, cwd: null,
+        });
+      } else {
+        const msg = prompt.trim() || "Check on system health, summarize any important changes or notifications.";
+        const escaped = msg.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        await invoke("execute_command", {
+          command: `openclaw agent --agent main --message "${escaped}"`, cwd: null,
+        });
+      }
+    } catch { /* ignore */ }
+    finally { setBusy(null); }
   };
 
-  const isEnabled = status?.enabled ?? false;
+  const isEnabled = status.enabled;
 
   if (loading) {
     return (
@@ -1257,8 +1300,6 @@ function HeartbeatTab() {
       </div>
     );
   }
-
-  const cronEquivalent = `*/${intervalMinutes} * * * *`;
 
   return (
     <div style={{ height: "100%", overflow: "auto", padding: "20px 24px" }}>
@@ -1285,10 +1326,15 @@ function HeartbeatTab() {
               <>
                 <span style={{ color: "#a855f7", fontWeight: 600 }}>Active</span>
                 {" "}&middot; Every {intervalMinutes} min
-                {status?.lastRun ? <> &middot; Last: {status.lastRun}</> : ""}
+                {status.lastRun ? <> &middot; Last: {status.lastRun}</> : ""}
               </>
             ) : "Disabled — enable to start autonomous monitoring"}
           </p>
+          {status.cronJobId && (
+            <p style={{ margin: "2px 0 0", fontSize: 9, color: "rgba(168,85,247,0.4)", fontFamily: "monospace" }}>
+              cron job: {status.cronJobId.slice(0, 12)}
+            </p>
+          )}
         </div>
         <button onClick={triggerNow} disabled={busy === "trigger"}
           style={{
@@ -1326,7 +1372,7 @@ function HeartbeatTab() {
         <Clock style={{ width: 14, height: 14, color: "var(--text-muted)", flexShrink: 0 }} />
         <div style={{ flex: 1 }}>
           <span style={{ fontSize: 12, color: "var(--text)" }}>
-            Scheduled as: <code style={{ fontSize: 11, color: "#a855f7", background: "rgba(168,85,247,0.1)", padding: "2px 6px", borderRadius: 4 }}>{cronEquivalent}</code>
+            Scheduled as: <code style={{ fontSize: 11, color: "#a855f7", background: "rgba(168,85,247,0.1)", padding: "2px 6px", borderRadius: 4 }}>every {intervalMinutes}m</code>
           </span>
           <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 8 }}>
             Runs every {intervalMinutes} minute{intervalMinutes > 1 ? "s" : ""} — visible on the Calendar tab
@@ -1340,20 +1386,24 @@ function HeartbeatTab() {
           <div>
             <label style={labelStyle}>Interval</label>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {HEARTBEAT_INTERVALS.map(({ label, minutes }) => (
-                <button key={minutes} onClick={() => setHeartbeatInterval(minutes)}
-                  disabled={busy === "interval"}
-                  style={{
-                    padding: "6px 14px", borderRadius: 8, fontSize: 11, cursor: "pointer",
-                    border: intervalMinutes === minutes ? "1px solid #a855f7" : "1px solid var(--border)",
-                    background: intervalMinutes === minutes ? "rgba(168,85,247,0.12)" : "var(--bg-elevated)",
-                    color: intervalMinutes === minutes ? "#a855f7" : "var(--text-secondary)",
-                    fontWeight: intervalMinutes === minutes ? 600 : 400,
-                    opacity: busy === "interval" ? 0.6 : 1,
-                  }}>
-                  {label}
-                </button>
-              ))}
+              {HEARTBEAT_INTERVALS.map(({ label, minutes }) => {
+                const active = intervalMinutes === minutes;
+                return (
+                  <button key={minutes} onClick={() => setHeartbeatIntervalAction(minutes)}
+                    style={{
+                      padding: "6px 14px", borderRadius: 8, fontSize: 11,
+                      cursor: "pointer",
+                      border: active ? "1px solid #a855f7" : "1px solid var(--border)",
+                      background: active ? "rgba(168,85,247,0.15)" : "var(--bg-elevated)",
+                      color: active ? "#c084fc" : "var(--text-secondary)",
+                      fontWeight: active ? 600 : 400,
+                      transition: "all 0.12s ease",
+                      transform: active ? "scale(1.04)" : "scale(1)",
+                    }}>
+                    {label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
