@@ -53,7 +53,7 @@ export function AgentsView() {
     setError(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw agents list --json",
+        command: "openclaw agents list --json",
         cwd: null,
       });
       if (result.code !== 0) {
@@ -77,7 +77,7 @@ export function AgentsView() {
   const loadBindings = useCallback(async () => {
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw agents bindings --json",
+        command: "openclaw agents bindings --json",
         cwd: null,
       });
       if (result.code === 0) {
@@ -105,7 +105,7 @@ export function AgentsView() {
     setAdding(true);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `npx openclaw agents add ${newAgentId.trim()}`,
+        command: `openclaw agents add ${newAgentId.trim()}`,
         cwd: null,
       });
       if (result.code !== 0) {
@@ -125,7 +125,7 @@ export function AgentsView() {
     setDeleting(true);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `npx openclaw agents delete ${id}`,
+        command: `openclaw agents delete ${id}`,
         cwd: null,
       });
       if (result.code !== 0) {
@@ -144,7 +144,7 @@ export function AgentsView() {
   const saveIdentity = async (id: string) => {
     setSavingIdentity(true);
     try {
-      let cmd = `npx openclaw agents set-identity ${id}`;
+      let cmd = `openclaw agents set-identity ${id}`;
       if (identityName.trim()) cmd += ` --name "${escapeShellArg(identityName.trim())}"`;
       if (identityEmoji.trim()) cmd += ` --emoji "${escapeShellArg(identityEmoji.trim())}"`;
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
@@ -168,7 +168,7 @@ export function AgentsView() {
     setTestResult(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `npx openclaw agent --agent ${id} --message "Hello, who are you?"`,
+        command: `openclaw agent --agent ${id} --message "Hello, who are you?"`,
         cwd: null,
       });
       setTestResult(result.code === 0 ? result.stdout : (result.stderr || "Test failed"));
@@ -184,7 +184,7 @@ export function AgentsView() {
     try {
       const flag = bindType === "phone" ? `--phone "${escapeShellArg(bindValue.trim())}"` : `--channel "${escapeShellArg(bindValue.trim())}"`;
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `npx openclaw agents bind ${agentId} ${flag}`,
+        command: `openclaw agents bind ${agentId} ${flag}`,
         cwd: null,
       });
       if (result.code !== 0) {
@@ -205,7 +205,7 @@ export function AgentsView() {
     try {
       const flag = type === "phone" ? `--phone ${value}` : `--channel ${value}`;
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `npx openclaw agents unbind ${agentId} ${flag}`,
+        command: `openclaw agents unbind ${agentId} ${flag}`,
         cwd: null,
       });
       if (result.code === 0) {

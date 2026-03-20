@@ -62,7 +62,7 @@ export function BrowserView() {
     const token = await getToken();
     const tokenFlag = token ? ` --token "${token}"` : "";
     return invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-      command: `npx openclaw browser ${subcommand}${tokenFlag}`,
+      command: `openclaw browser ${subcommand}${tokenFlag}`,
       cwd: null,
     });
   }, [getToken]);

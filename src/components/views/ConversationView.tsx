@@ -97,7 +97,7 @@ const STARTER_SUGGESTIONS = [
   { emoji: "📁", label: "Create a file", text: "Create a text file on my desktop called notes.txt with today's date" },
   { emoji: "🛡️", label: "Check security", text: "Run a security audit and fix any issues" },
   { emoji: "🧩", label: "Show my skills", text: "What skills do I have available? Which ones are ready to use?" },
-  { emoji: "🤖", label: "Pull a model", text: "What Ollama models do I have? Show me what's running" },
+  { emoji: "🤖", label: "Check models", text: "What models do I have configured? Show me what's available" },
   { emoji: "🌤️", label: "Get weather", text: "What's the weather like today?" },
   { emoji: "💻", label: "System info", text: "Show me my system specs — GPU, CPU, RAM" },
 ];
@@ -144,14 +144,19 @@ export function ConversationView() {
 
   const gatewayConnected = useAppStore(s => s.gatewayConnected);
   const setView = useAppStore(s => s.setView);
-  const backend = openclawClient.getBackend();
-  const model = openclawClient.getModel();
+  const modelKey = openclawClient.getModel();
+  const model = openclawClient.getModelDisplayName(modelKey);
+  const [liveTps, setLiveTps] = useState(0);
+
+  useEffect(() => {
+    return openclawClient.onTps(tps => setLiveTps(Math.round(tps)));
+  }, []);
 
   const slashCommands: SlashCommand[] = [
     { cmd: "/home", label: "Home", description: "Go to dashboard", action: () => setView("home") },
     { cmd: "/skills", label: "Skills", description: "Browse 51 OpenClaw skills", action: () => setView("marketplace") },
     { cmd: "/plugins", label: "Plugins", description: "Manage plugins", action: () => setView("marketplace") },
-    { cmd: "/models", label: "Models", description: "Manage Ollama models", action: () => setView("models") },
+    { cmd: "/models", label: "Models", description: "Manage OpenClaw models", action: () => setView("models") },
     { cmd: "/settings", label: "Settings", description: "App & gateway settings", action: () => setView("settings") },
     { cmd: "/security", label: "Security", description: "Run security audit", action: () => setView("security") },
     { cmd: "/doctor", label: "Doctor", description: "System diagnostics", action: () => setView("doctor") },
@@ -166,6 +171,7 @@ export function ConversationView() {
     { cmd: "/activity", label: "Activity", description: "Gateway event log", action: () => setView("activity") },
     { cmd: "/templates", label: "Templates", description: "Workflow builder", action: () => setView("templates") },
     { cmd: "/powerup", label: "Power Up", description: "Enable everything", action: () => setView("marketplace") },
+    { cmd: "/office", label: "Office", description: "Sub-agent workspace", action: () => setView("office") },
     { cmd: "/new", label: "New Chat", description: "Start a fresh conversation", action: () => handleNewChat() },
     { cmd: "/clear", label: "Clear", description: "Clear current chat", action: () => clearConversation() },
     { cmd: "/search", label: "Search", description: "Open command palette (Ctrl+K)", action: () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true })) },
@@ -352,7 +358,7 @@ export function ConversationView() {
         ...c,
         messages: c.messages.map(m =>
           m.id === msgId
-            ? { ...m, content: `**Error:** ${err instanceof Error ? err.message : "Unknown error"}\n\nMake sure Ollama is running.` }
+            ? { ...m, content: `**Error:** ${err instanceof Error ? err.message : "Unknown error"}\n\nMake sure the OpenClaw gateway is running.` }
             : m
         ),
         updatedAt: Date.now(),
@@ -382,7 +388,7 @@ export function ConversationView() {
       case "enable_plugin":
         if (btn.args?.id) {
           await invoke("execute_command", {
-            command: `npx openclaw plugins enable ${btn.args.id}`,
+            command: `openclaw plugins enable ${btn.args.id}`,
             cwd: null,
           });
         }
@@ -642,10 +648,21 @@ export function ConversationView() {
             <h2 style={{ color: "var(--text)", fontSize: 14, fontWeight: 600, margin: 0 }}>
               {activeConversation?.title || "Chat"}
             </h2>
-            <StatusPill connected={gatewayConnected} label={gatewayConnected ? "OpenClaw" : backend} />
+            <StatusPill connected={gatewayConnected} label="OpenClaw" />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>{model}</span>
+            {liveTps > 0 && (
+              <span style={{
+                fontSize: 9, padding: "2px 7px", borderRadius: 6,
+                background: liveTps > 40 ? "rgba(74,222,128,0.1)" : liveTps > 15 ? "rgba(59,130,246,0.1)" : "rgba(251,191,36,0.1)",
+                color: liveTps > 40 ? "var(--success)" : liveTps > 15 ? "var(--accent)" : "var(--warning)",
+                fontFamily: "'JetBrains Mono', monospace", fontWeight: 600,
+                fontVariantNumeric: "tabular-nums",
+              }}>
+                {liveTps} tok/s
+              </span>
+            )}
             <button onClick={clearConversation} title="Clear chat" style={{
               background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 4,
               display: "flex", alignItems: "center",

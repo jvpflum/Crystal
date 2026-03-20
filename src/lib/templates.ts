@@ -356,9 +356,7 @@ class TemplateService {
           ? `Context:\n${context}\n\nTask: ${prompt}`
           : prompt;
 
-        const response = await openclawClient.chat([
-          { id: "1", role: "user", content: fullPrompt, timestamp: new Date() },
-        ]);
+        const response = await openclawClient.openclawChat(fullPrompt);
         return response;
       }
 

@@ -226,7 +226,7 @@ function GatewayLogsTab() {
     setError(null);
     try {
       const result = await invoke<string>("execute_command", {
-        command: "npx openclaw logs --limit 100 --plain --no-color",
+        command: "openclaw logs --limit 100 --plain --no-color",
       });
       const raw = typeof result === "string" ? result : (result as { stdout?: string })?.stdout || "";
       const lines = raw.split("\n").filter((l: string) => l.trim());

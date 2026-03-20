@@ -3,6 +3,7 @@ import { create } from "zustand";
 export type AppView =
   | "home"
   | "conversation"
+  | "office"
   | "agents"
   | "marketplace"
   | "models"

@@ -63,7 +63,7 @@ export function HooksView() {
     setError(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw hooks list --json",
+        command: "openclaw hooks list --json",
         cwd: null,
       });
       if (result.stdout.trim()) {
@@ -93,7 +93,7 @@ export function HooksView() {
     setDetailLoading(true);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `npx openclaw hooks info ${name}`,
+        command: `openclaw hooks info ${name}`,
         cwd: null,
       });
       if (result.stdout.trim()) {
@@ -113,8 +113,8 @@ export function HooksView() {
     setToggling(name);
     try {
       const cmd = currentlyEnabled
-        ? `npx openclaw hooks disable ${name}`
-        : `npx openclaw hooks enable ${name}`;
+        ? `openclaw hooks disable ${name}`
+        : `openclaw hooks enable ${name}`;
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
         command: cmd,
         cwd: null,
@@ -135,7 +135,7 @@ export function HooksView() {
     setError(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `npx openclaw hooks install ${installSpec.trim()}`,
+        command: `openclaw hooks install ${installSpec.trim()}`,
         cwd: null,
       });
       if (result.code !== 0 && result.stderr) {
@@ -156,7 +156,7 @@ export function HooksView() {
     setError(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw hooks update",
+        command: "openclaw hooks update",
         cwd: null,
       });
       if (result.code !== 0 && result.stderr) {
@@ -173,7 +173,7 @@ export function HooksView() {
     setCheckingEligibility(true);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw hooks check --json",
+        command: "openclaw hooks check --json",
         cwd: null,
       });
       if (result.stdout.trim()) {

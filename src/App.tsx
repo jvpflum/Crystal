@@ -17,6 +17,7 @@ import "./index.css";
 
 const HomeView = lazy(() => import("@/components/views/HomeView").then(m => ({ default: m.HomeView })));
 const ConversationView = lazy(() => import("@/components/views/ConversationView").then(m => ({ default: m.ConversationView })));
+const OfficeView = lazy(() => import("@/components/views/OfficeView").then(m => ({ default: m.OfficeView })));
 const AgentsView = lazy(() => import("@/components/views/AgentsView").then(m => ({ default: m.AgentsView })));
 const MarketplaceView = lazy(() => import("@/components/views/MarketplaceView").then(m => ({ default: m.MarketplaceView })));
 const ModelsView = lazy(() => import("@/components/views/ModelsView").then(m => ({ default: m.ModelsView })));
@@ -94,17 +95,6 @@ function App() {
     openclawClient.connectGateway().then(connected => {
       setGatewayConnected(connected);
     });
-    if (openclawClient.getModel() === "auto") {
-      openclawClient.checkConnection().then(ok => {
-        if (ok) {
-          openclawClient.getModels().then(models => {
-            if (models.length > 0) {
-              openclawClient.setModel(models[0]);
-            }
-          });
-        }
-      });
-    }
   }, [setGatewayConnected]);
 
   if (!isInitialized) {
@@ -132,6 +122,7 @@ function App() {
                 <Suspense fallback={<ViewFallback />}>
                   <ViewSlot id="home" active={currentView === "home"}><HomeView /></ViewSlot>
                   <ViewSlot id="conversation" active={currentView === "conversation"}><ConversationView /></ViewSlot>
+                  <ViewSlot id="office" active={currentView === "office"}><OfficeView /></ViewSlot>
                   <ViewSlot id="agents" active={currentView === "agents"}><AgentsView /></ViewSlot>
                   <ViewSlot id="marketplace" active={currentView === "marketplace"}><MarketplaceView /></ViewSlot>
                   <ViewSlot id="models" active={currentView === "models"}><ModelsView /></ViewSlot>

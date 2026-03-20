@@ -56,8 +56,8 @@ export function SecurityView() {
     setError(null);
     try {
       const cmd = deep
-        ? "npx openclaw security audit --deep --json"
-        : "npx openclaw security audit --json";
+        ? "openclaw security audit --deep --json"
+        : "openclaw security audit --json";
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
         command: cmd,
         cwd: null,
@@ -95,7 +95,7 @@ export function SecurityView() {
   const loadConfig = useCallback(async () => {
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw config get --json",
+        command: "openclaw config get --json",
         cwd: null,
       });
       if (result.code === 0 && result.stdout.trim()) {
@@ -115,7 +115,7 @@ export function SecurityView() {
     setSecretsStatus(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw secrets reload",
+        command: "openclaw secrets reload",
         cwd: null,
       });
       setSecretsStatus(result.code === 0 ? "Secrets reloaded successfully" : (result.stderr || "Reload failed"));
@@ -129,7 +129,7 @@ export function SecurityView() {
     setApprovalsLoading(true);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw approvals list --json",
+        command: "openclaw approvals list --json",
         cwd: null,
       });
       if (result.stdout.trim()) {
@@ -152,7 +152,7 @@ export function SecurityView() {
     setMemoryReindexStatus(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw memory reindex",
+        command: "openclaw memory reindex",
         cwd: null,
       });
       setMemoryReindexStatus(result.code === 0 ? "Reindex completed" : (result.stderr || "Reindex failed"));
@@ -166,7 +166,7 @@ export function SecurityView() {
     setMemoryStatsLoading(true);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw memory status --json",
+        command: "openclaw memory status --json",
         cwd: null,
       });
       if (result.stdout.trim()) {
@@ -189,7 +189,7 @@ export function SecurityView() {
     setFixing(true);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw security audit --fix",
+        command: "openclaw security audit --fix",
         cwd: null,
       });
       if (result.code !== 0 && result.stderr) {

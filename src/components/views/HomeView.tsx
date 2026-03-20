@@ -92,10 +92,10 @@ export function HomeView() {
     (async () => {
       try {
         const [statusR, modelsR, skillsR, sessionsR] = await Promise.all([
-          cachedCommand("npx openclaw status --json", { ttl: 60_000 }),
-          cachedCommand("npx openclaw models list --json", { ttl: 60_000 }),
-          cachedCommand("npx openclaw skills list --json", { ttl: 60_000 }),
-          cachedCommand("npx openclaw sessions --json", { ttl: 60_000 }),
+          cachedCommand("openclaw status --json", { ttl: 60_000 }),
+          cachedCommand("openclaw models list --json", { ttl: 60_000 }),
+          cachedCommand("openclaw skills list --json", { ttl: 60_000 }),
+          cachedCommand("openclaw sessions --json", { ttl: 60_000 }),
         ]);
 
         if (cancelled) return;
@@ -157,7 +157,7 @@ export function HomeView() {
       color: "var(--warning)",
       action: () => runAction("briefing", async () => {
         const r = await invoke<{ stdout: string }>("execute_command", {
-          command: 'npx openclaw chat send "Give me a morning briefing: today\'s date, top priorities, and any alerts." --json',
+          command: 'openclaw chat send "Give me a morning briefing: today\'s date, top priorities, and any alerts." --json',
           cwd: null,
         });
         const parsed = safeParse(r.stdout);
@@ -185,7 +185,6 @@ export function HomeView() {
     },
   ];
 
-  const llmConnected = openclawClient.isConnected();
   const gwConnected = data.gateway.connected || gatewayConnected;
 
   return (
@@ -229,8 +228,8 @@ export function HomeView() {
         <StatusCard
           icon={Bot}
           label="LLM"
-          value={llmConnected ? (openclawClient.getModel() !== "auto" ? openclawClient.getModel() : data.llmModel) : "Offline"}
-          color={llmConnected ? "var(--accent)" : "var(--error)"}
+          value={data.llmModel !== "—" ? data.llmModel : openclawClient.getModel()}
+          color={gwConnected ? "var(--accent)" : "var(--error)"}
           onClick={() => setView("models")}
         />
         <StatusCard
@@ -618,7 +617,7 @@ function HeartbeatCard() {
   const fetchStatus = useCallback(async () => {
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw heartbeat status --json",
+        command: "openclaw heartbeat status --json",
         cwd: null,
       });
       const parsed = safeParse(result.stdout);
@@ -650,7 +649,7 @@ function HeartbeatCard() {
     setBusy("toggle");
     try {
       await invoke("execute_command", {
-        command: enabled ? "npx openclaw heartbeat disable" : "npx openclaw heartbeat enable",
+        command: enabled ? "openclaw heartbeat disable" : "openclaw heartbeat enable",
         cwd: null,
       });
       await fetchStatus();
@@ -665,7 +664,7 @@ function HeartbeatCard() {
     setBusy("interval");
     try {
       await invoke("execute_command", {
-        command: `npx openclaw heartbeat interval ${minutes}`,
+        command: `openclaw heartbeat interval ${minutes}`,
         cwd: null,
       });
       setIntervalMinutes(minutes);
@@ -683,7 +682,7 @@ function HeartbeatCard() {
     try {
       const escaped = prompt.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       await invoke("execute_command", {
-        command: `npx openclaw heartbeat set --message "${escaped}"`,
+        command: `openclaw heartbeat set --message "${escaped}"`,
         cwd: null,
       });
       await fetchStatus();

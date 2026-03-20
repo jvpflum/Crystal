@@ -29,7 +29,7 @@ export function SessionsView() {
     setError(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw sessions --json",
+        command: "openclaw sessions --json",
         cwd: null,
       });
       if (result.code !== 0) {
@@ -55,7 +55,7 @@ export function SessionsView() {
     setCleaning(true);
     try {
       await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw sessions cleanup",
+        command: "openclaw sessions cleanup",
         cwd: null,
       });
       await loadSessions();

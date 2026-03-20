@@ -98,7 +98,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
 
   const [prereqs, setPrereqs] = useState<PrereqResult[]>([
     { label: "Node.js", ok: false, detail: "", loading: true },
-    { label: "Ollama", ok: false, detail: "", loading: true },
+    { label: "Model Server", ok: false, detail: "", loading: true },
     { label: "OpenClaw", ok: false, detail: "", loading: true },
     { label: "NVIDIA GPU", ok: false, detail: "", loading: true },
   ]);
@@ -116,7 +116,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
     const cmds = [
       { cmd: "node --version", idx: 0 },
       { cmd: "ollama --version", idx: 1 },
-      { cmd: "npx openclaw --version", idx: 2 },
+      { cmd: "openclaw --version", idx: 2 },
       { cmd: "nvidia-smi --query-gpu=name --format=csv,noheader", idx: 3 },
     ];
 
@@ -181,7 +181,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
         setGatewayUp(true);
         return;
       }
-      const out = await runCmd("npx openclaw health");
+      const out = await runCmd("openclaw health");
       setGatewayUp(out.length > 0 && !out.toLowerCase().includes("error"));
     } catch {
       setGatewayUp(false);
@@ -308,12 +308,12 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
         return (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <h2 style={{ fontSize: 18, fontWeight: 700, color: "white", margin: 0 }}>
-              LLM Setup
+              OpenClaw Model
             </h2>
             <p style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", margin: 0 }}>
               {models.length > 0
-                ? "Select your default model from Ollama:"
-                : "No Ollama models detected. Pull one to get started."}
+                ? "Select your default model for OpenClaw:"
+                : "No local models detected. Pull one to get started."}
             </p>
             {models.length === 0 && (
               <p style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", margin: 0 }}>
@@ -406,7 +406,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
                 onClick={async () => {
                   if (selectedModel) {
                     openclawClient.setModel(selectedModel);
-                    runCmd(`npx openclaw models set ollama/${selectedModel}`).catch(() => {});
+                    runCmd(`openclaw models set ollama/${selectedModel}`).catch(() => {});
                   }
                   setStep(3);
                 }}
@@ -483,9 +483,9 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
             </div>
 
             <p style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", margin: 0, lineHeight: 1.6 }}>
-              The OpenClaw gateway connects Crystal to your local LLM (Ollama) for AI responses.
-              Without it, Crystal will talk directly to Ollama's API.
-              You can always manage the gateway from Settings.
+              The OpenClaw gateway powers all of Crystal's AI capabilities.
+              It must be running for Crystal to function.
+              You can manage the gateway from Settings.
             </p>
 
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>

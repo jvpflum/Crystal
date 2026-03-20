@@ -300,7 +300,7 @@ function SkillsTab() {
     setError(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw skills list --json",
+        command: "openclaw skills list --json",
         cwd: null,
       });
       if (result.code !== 0) {
@@ -337,7 +337,7 @@ function SkillsTab() {
     setTogglingSkills((s) => new Set(s).add(skill.name));
     try {
       const action = skill.disabled ? "enable" : "disable";
-      const result = await runCommand(`npx openclaw skills ${action} ${skill.name}`);
+      const result = await runCommand(`openclaw skills ${action} ${skill.name}`);
       if (result.code !== 0) {
         window.alert(`Failed to ${action} ${skill.name}: ${result.stderr || result.stdout}`);
       }
@@ -355,7 +355,7 @@ function SkillsTab() {
   const refreshCheck = async () => {
     setLoading(true);
     try {
-      await runCommand("npx openclaw skills check --json");
+      await runCommand("openclaw skills check --json");
       await loadSkills();
     } catch {
       setLoading(false);
@@ -598,7 +598,7 @@ function PluginsTab() {
     setError(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw plugins list --json",
+        command: "openclaw plugins list --json",
         cwd: null,
       });
       if (result.code !== 0) {
@@ -620,7 +620,7 @@ function PluginsTab() {
     setTogglingPlugins((s) => new Set(s).add(plugin.id));
     try {
       const action = plugin.enabled ? "disable" : "enable";
-      const result = await runCommand(`npx openclaw plugins ${action} ${plugin.id}`);
+      const result = await runCommand(`openclaw plugins ${action} ${plugin.id}`);
       if (result.code !== 0) {
         setError(`Failed to ${action} ${plugin.name}: ${result.stderr || result.stdout}`);
       }
@@ -639,7 +639,7 @@ function PluginsTab() {
     setDoctorRunning(true);
     setDoctorOutput(null);
     try {
-      const result = await runCommand("npx openclaw plugins doctor");
+      const result = await runCommand("openclaw plugins doctor");
       setDoctorOutput(result.stdout || result.stderr || "Doctor completed.");
     } catch (e) {
       setDoctorOutput(e instanceof Error ? e.message : "Doctor failed");
@@ -805,8 +805,8 @@ function PowerUpTab() {
     setLoading(true);
     try {
       const [skillsResult, pluginsResult] = await Promise.all([
-        cachedCommand("npx openclaw skills list --json", { ttl: 30_000 }),
-        cachedCommand("npx openclaw plugins list --json", { ttl: 30_000 }),
+        cachedCommand("openclaw skills list --json", { ttl: 30_000 }),
+        cachedCommand("openclaw plugins list --json", { ttl: 30_000 }),
       ]);
       if (skillsResult.code === 0) {
         const sd = parseJsonOutput<{ skills: Skill[] }>(skillsResult.stdout);
@@ -830,14 +830,14 @@ function PowerUpTab() {
     s.push({
       id: "setup",
       label: "Run OpenClaw setup",
-      command: "npx openclaw setup --non-interactive --mode local --accept-risk",
+      command: "openclaw setup --non-interactive --mode local --accept-risk",
       status: "pending",
     });
     for (const p of disabledPlugins) {
       s.push({
         id: `plugin-${p.id}`,
         label: `Enable plugin: ${p.name}`,
-        command: `npx openclaw plugins enable ${p.id}`,
+        command: `openclaw plugins enable ${p.id}`,
         status: "pending",
       });
     }
@@ -845,20 +845,20 @@ function PowerUpTab() {
       s.push({
         id: `skill-${sk.name}`,
         label: `Enable skill: ${sk.name}`,
-        command: `npx openclaw skills enable ${sk.name}`,
+        command: `openclaw skills enable ${sk.name}`,
         status: "pending",
       });
     }
     s.push({
       id: "security",
       label: "Security audit & fix",
-      command: "npx openclaw security audit --fix",
+      command: "openclaw security audit --fix",
       status: "pending",
     });
     s.push({
       id: "reindex",
       label: "Reindex memory",
-      command: "npx openclaw memory reindex",
+      command: "openclaw memory reindex",
       status: "pending",
     });
     return s;

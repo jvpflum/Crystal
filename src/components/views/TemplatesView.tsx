@@ -222,21 +222,35 @@ export function TemplatesView() {
     const allExpanded = new Set(workflow.steps.map((s) => s.id));
     setExpandedResults(allExpanded);
 
+    const collectedResults: StepResult[] = [];
+
     for (let i = 0; i < workflow.steps.length; i++) {
       setCurrentStep(i);
       const step = workflow.steps[i];
-      const msg = step.message.replace(/\{\{INPUT\}\}/g, userInput.trim());
+      let msg = step.message.replace(/\{\{INPUT\}\}/g, userInput.trim());
+
+      if (i > 0 && collectedResults.length > 0) {
+        const prevContext = collectedResults
+          .map((r, idx) => `[Step ${idx + 1} result]: ${r.output}`)
+          .join("\n\n");
+        msg = `Context from previous steps:\n${prevContext}\n\nNow do: ${msg}`;
+      }
+
       try {
         const escaped = escapeShellArg(msg);
-        const command = `npx openclaw agent --agent main --message "${escaped}"`;
+        const command = `openclaw agent --agent main --message "${escaped}"`;
         const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
           command,
           cwd: null,
         });
         const output = result.stdout?.trim() || result.stderr?.trim() || "(no output)";
-        setStepResults((prev) => [...prev, { stepId: step.id, output, success: result.code === 0 }]);
+        const stepResult: StepResult = { stepId: step.id, output, success: result.code === 0 };
+        collectedResults.push(stepResult);
+        setStepResults((prev) => [...prev, stepResult]);
       } catch (e) {
-        setStepResults((prev) => [...prev, { stepId: step.id, output: String(e), success: false }]);
+        const stepResult: StepResult = { stepId: step.id, output: String(e), success: false };
+        collectedResults.push(stepResult);
+        setStepResults((prev) => [...prev, stepResult]);
       }
 
       setTimeout(() => {

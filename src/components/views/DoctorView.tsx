@@ -38,14 +38,14 @@ const LINE_COLORS: Record<ReturnType<typeof classifyLine>, string> = {
 };
 
 const COMMANDS: Record<CommandId, { cmd: string; label: string }> = {
-  doctor:         { cmd: "npx openclaw doctor",                  label: "Doctor" },
-  deep:           { cmd: "npx openclaw doctor --deep --yes",       label: "Deep Scan" },
-  fix:            { cmd: "npx openclaw doctor --fix",              label: "Auto Fix" },
-  "full-fix":     { cmd: "npx openclaw doctor --deep --yes --fix", label: "Deep Fix (Auto)" },
-  status:         { cmd: "npx openclaw status",                    label: "Status" },
-  health:         { cmd: "npx openclaw health",                     label: "Gateway Health" },
-  validate:       { cmd: "npx openclaw config validate",            label: "Config Validate" },
-  "memory-reindex": { cmd: "npx openclaw memory index --all",       label: "Reindex Memory" },
+  doctor:         { cmd: "openclaw doctor",                  label: "Doctor" },
+  deep:           { cmd: "openclaw doctor --deep --yes",       label: "Deep Scan" },
+  fix:            { cmd: "openclaw doctor --fix",              label: "Auto Fix" },
+  "full-fix":     { cmd: "openclaw doctor --deep --yes --fix", label: "Deep Fix (Auto)" },
+  status:         { cmd: "openclaw status",                    label: "Status" },
+  health:         { cmd: "openclaw health",                     label: "Gateway Health" },
+  validate:       { cmd: "openclaw config validate",            label: "Config Validate" },
+  "memory-reindex": { cmd: "openclaw memory index --all",       label: "Reindex Memory" },
 };
 
 export function DoctorView() {

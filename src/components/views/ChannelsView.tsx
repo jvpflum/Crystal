@@ -199,7 +199,7 @@ async function runCli(command: string): Promise<string> {
 
 async function fetchChannels(): Promise<Channel[]> {
   try {
-    const raw = await runCli("npx openclaw channels list --json");
+    const raw = await runCli("openclaw channels list --json");
     return JSON.parse(raw);
   } catch {
     return [];
@@ -208,7 +208,7 @@ async function fetchChannels(): Promise<Channel[]> {
 
 async function fetchStatus(): Promise<Record<string, string>> {
   try {
-    const raw = await runCli("npx openclaw channels status --json");
+    const raw = await runCli("openclaw channels status --json");
     return JSON.parse(raw);
   } catch {
     return {};
@@ -217,7 +217,7 @@ async function fetchStatus(): Promise<Record<string, string>> {
 
 async function fetchCapabilities(name: string): Promise<string[]> {
   try {
-    const raw = await runCli("npx openclaw channels capabilities --json");
+    const raw = await runCli("openclaw channels capabilities --json");
     const data = JSON.parse(raw);
     return data[name] ?? data ?? [];
   } catch {
@@ -304,14 +304,14 @@ export function ChannelsView() {
 
   const handleLogin = async (name: string) => {
     setActionLoading(name);
-    try { await runCli(`npx openclaw channels login --channel ${name}`); } catch { /* */ }
+    try { await runCli(`openclaw channels login --channel ${name}`); } catch { /* */ }
     await loadAll();
     setActionLoading(null);
   };
 
   const handleLogout = async (name: string) => {
     setActionLoading(name);
-    try { await runCli(`npx openclaw channels logout --channel ${name}`); } catch { /* */ }
+    try { await runCli(`openclaw channels logout --channel ${name}`); } catch { /* */ }
     await loadAll();
     setActionLoading(null);
   };
@@ -319,7 +319,7 @@ export function ChannelsView() {
   const handleRemove = async (name: string) => {
     if (!window.confirm(`Remove ${name}? This will delete all configuration for this channel.`)) return;
     setActionLoading(name);
-    try { await runCli(`npx openclaw channels remove --channel ${name}`); } catch { /* */ }
+    try { await runCli(`openclaw channels remove --channel ${name}`); } catch { /* */ }
     setSelectedName(null);
     await loadAll();
     setActionLoading(null);
@@ -341,11 +341,11 @@ export function ChannelsView() {
       const tokenField = addFields.token || addFields.password || addFields.bot_token || "";
       const tokenPart = tokenField ? ` --token "${tokenField.trim().replace(/"/g, '\\"')}"` : "";
 
-      await runCli(`npx openclaw channels add --channel ${addType}${tokenPart}`);
+      await runCli(`openclaw channels add --channel ${addType}${tokenPart}`);
 
       const configEntries = Object.entries(addFields).filter(([k, v]) => v.trim() && k !== "token" && k !== "password" && k !== "bot_token");
       for (const [key, value] of configEntries) {
-        await runCli(`npx openclaw config set channels.${addType}.${key} "${value.trim().replace(/"/g, '\\"')}"`).catch(() => {});
+        await runCli(`openclaw config set channels.${addType}.${key} "${value.trim().replace(/"/g, '\\"')}"`).catch(() => {});
       }
 
       setAddSuccess(true);
@@ -367,7 +367,7 @@ export function ChannelsView() {
     try {
       for (const [key, value] of Object.entries(editConfig)) {
         if (value.trim()) {
-          await runCli(`npx openclaw config set channels.${selected.type}.${key} "${value.trim().replace(/"/g, '\\"')}"`).catch(() => {});
+          await runCli(`openclaw config set channels.${selected.type}.${key} "${value.trim().replace(/"/g, '\\"')}"`).catch(() => {});
         }
       }
       setConfigSaved(true);
@@ -381,7 +381,7 @@ export function ChannelsView() {
     if (!resolveQuery.trim()) return;
     setActionLoading("resolve");
     try {
-      const raw = await runCli(`npx openclaw channels resolve --channel ${name} --query "${resolveQuery.trim().replace(/"/g, '\\"')}"`);
+      const raw = await runCli(`openclaw channels resolve --channel ${name} --query "${resolveQuery.trim().replace(/"/g, '\\"')}"`);
       setResolveResult(raw);
     } catch (e) {
       setResolveResult(`Error: ${e}`);

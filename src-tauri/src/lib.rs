@@ -442,6 +442,15 @@ fn get_server_status() -> ServerStatus {
     }
 }
 
+fn find_openclaw_bin() -> String {
+    let appdata = std::env::var("APPDATA").unwrap_or_default();
+    let cmd_path = format!(r"{}\npm\openclaw.cmd", appdata);
+    if Path::new(&cmd_path).exists() {
+        return cmd_path;
+    }
+    "openclaw".to_string()
+}
+
 #[tauri::command]
 fn start_openclaw_daemon(state: tauri::State<AppState>) -> Result<String, String> {
     if check_port_in_use(18789) {
@@ -449,8 +458,9 @@ fn start_openclaw_daemon(state: tauri::State<AppState>) -> Result<String, String
     }
     
     let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
+    let openclaw_bin = find_openclaw_bin();
     
-    match spawn_hidden("npx", &["openclaw", "gateway", "--port", "18789"]) {
+    match spawn_hidden(&openclaw_bin, &["gateway", "--port", "18789"]) {
         Ok(child) => {
             servers.openclaw = Some(child);
             Ok("OpenClaw daemon started".to_string())
@@ -630,30 +640,21 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
         })
     });
     
-    // Kill any orphaned gateway from a previous session, then start a fresh one we own
     if check_port_in_use(18789) {
-        println!("Killing orphaned OpenClaw gateway on port 18789...");
-        #[cfg(target_os = "windows")]
-        {
-            let mut cmd = Command::new("powershell");
-            cmd.args(["-NoProfile", "-NonInteractive", "-Command",
-                "Get-NetTCPConnection -LocalPort 18789 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"])
-                .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
-                .creation_flags(CREATE_NO_WINDOW);
-            let _ = cmd.output();
-        }
-        std::thread::sleep(std::time::Duration::from_millis(1500));
-    }
-    println!("Starting OpenClaw daemon...");
-    match spawn_hidden("npx", &["openclaw", "gateway", "--port", "18789"]) {
-        Ok(child) => {
-            if let Some(state) = app.try_state::<AppState>() {
-                let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
-                servers.openclaw = Some(child);
+        println!("OpenClaw gateway already running on port 18789 — reusing existing instance");
+    } else {
+        println!("Starting OpenClaw daemon...");
+        let openclaw_bin = find_openclaw_bin();
+        match spawn_hidden(&openclaw_bin, &["gateway", "--port", "18789"]) {
+            Ok(child) => {
+                if let Some(state) = app.try_state::<AppState>() {
+                    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
+                    servers.openclaw = Some(child);
+                }
+                println!("OpenClaw gateway started on port 18789");
             }
-            println!("OpenClaw gateway started on port 18789");
+            Err(e) => eprintln!("OpenClaw daemon not available: {} (agent will use direct LLM)", e),
         }
-        Err(e) => eprintln!("OpenClaw daemon not available: {} (agent will use direct LLM)", e),
     }
 
     // Start Ollama if not already running

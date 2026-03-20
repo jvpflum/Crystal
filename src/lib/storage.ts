@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { appDataDir } from "@tauri-apps/api/path";
 
 export interface StoredSettings {
-  inferenceBackend: "ollama" | "lmstudio";
   model: string;
   wakeWord: string;
   ttsVoice: string;
@@ -31,7 +30,6 @@ export interface StoredData {
 }
 
 const DEFAULT_SETTINGS: StoredSettings = {
-  inferenceBackend: "ollama",
   model: "gpt-oss:20b",
   wakeWord: "hey crystal",
   ttsVoice: "nova",

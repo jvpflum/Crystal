@@ -37,7 +37,7 @@ export function NodesView() {
   const loadNodes = useCallback(async () => {
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw nodes list --json",
+        command: "openclaw nodes list --json",
         cwd: null,
       });
       if (result.code === 0 && result.stdout.trim()) {
@@ -72,7 +72,7 @@ export function NodesView() {
     setOutput(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `npx openclaw nodes ${action} ${escapeShellArg(nodeId)} "${escapeShellArg(input)}"`,
+        command: `openclaw nodes ${action} ${escapeShellArg(nodeId)} "${escapeShellArg(input)}"`,
         cwd: null,
       });
       setOutput(result.code === 0 ? result.stdout || "Done." : result.stderr || "Command failed.");
@@ -88,7 +88,7 @@ export function NodesView() {
     setOutput(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `npx openclaw nodes notify ${notifyMessage.trim()}`,
+        command: `openclaw nodes notify ${notifyMessage.trim()}`,
         cwd: null,
       });
       setOutput(result.code === 0 ? result.stdout || "Notification sent." : result.stderr || "Notify failed.");

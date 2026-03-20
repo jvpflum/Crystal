@@ -119,7 +119,7 @@ export function ModelsView() {
 
   const tabs: { id: TabId; label: string }[] = [
     { id: "openclaw", label: "OpenClaw Models" },
-    { id: "ollama", label: "Ollama Library" },
+    { id: "ollama", label: "Local Models" },
     { id: "running", label: "Running" },
   ];
 
@@ -174,7 +174,7 @@ function OpenClawTab() {
     setLoading(true);
     setError(null);
     try {
-      const result = await cachedCommand("npx openclaw models list --json", { ttl: 30_000 });
+      const result = await cachedCommand("openclaw models list --json", { ttl: 30_000 });
       if (result.code !== 0) {
         setError(result.stderr || "Failed to list models");
         setModels([]);
@@ -195,7 +195,7 @@ function OpenClawTab() {
     setScanning(true);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw models list --all --json",
+        command: "openclaw models list --all --json",
         cwd: null,
       });
       if (result.code === 0) {
@@ -210,7 +210,7 @@ function OpenClawTab() {
     setSettingDefault(key);
     try {
       await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `npx openclaw models set ${key}`,
+        command: `openclaw models set ${key}`,
         cwd: null,
       });
       await loadModels();
@@ -223,7 +223,7 @@ function OpenClawTab() {
     setAuthOutput(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw models auth --json",
+        command: "openclaw models auth --json",
         cwd: null,
       });
       setAuthOutput(result.code === 0 ? result.stdout.trim() : (result.stderr || "Auth check failed"));
@@ -569,13 +569,13 @@ function OllamaTab() {
         cwd: null,
       });
       if (result.code !== 0) {
-        setError(result.stderr || "Failed to list Ollama models. Is Ollama running?");
+        setError(result.stderr || "Failed to list local models. Is the model server running?");
         setModels([]);
       } else {
         setModels(parseOllamaList(result.stdout));
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to connect to Ollama");
+      setError(e instanceof Error ? e.message : "Failed to connect to model server");
       setModels([]);
     }
     setLoading(false);
@@ -641,7 +641,7 @@ function OllamaTab() {
   const setAsOpenClawDefault = async (name: string) => {
     try {
       await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: `npx openclaw models set ollama/${name}`,
+        command: `openclaw models set ollama/${name}`,
         cwd: null,
       });
     } catch { /* ignore */ }
@@ -659,7 +659,7 @@ function OllamaTab() {
       <div style={{ padding: "14px 20px 10px", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
-            <h2 style={{ color: "white", fontSize: 15, fontWeight: 600, margin: 0 }}>Ollama Library</h2>
+            <h2 style={{ color: "white", fontSize: 15, fontWeight: 600, margin: 0 }}>Local Models</h2>
             <p style={{ margin: "2px 0 0", fontSize: 10, color: "rgba(255,255,255,0.4)" }}>
               {models.length} local model{models.length !== 1 ? "s" : ""} &middot;{" "}
               {humanSize(models.reduce((a, m) => a + m.sizeBytes, 0))} total
@@ -774,7 +774,7 @@ function OllamaTab() {
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 40, gap: 8 }}>
             <Cpu style={{ width: 28, height: 28, color: "rgba(255,255,255,0.15)" }} />
             <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
-              {models.length === 0 ? "No Ollama models installed" : "No matching models"}
+              {models.length === 0 ? "No local models installed" : "No matching models"}
             </p>
             {models.length === 0 && (
               <p style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>
@@ -959,7 +959,7 @@ function RunningTab() {
         setError(null);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to connect to Ollama");
+      setError(e instanceof Error ? e.message : "Failed to connect to model server");
       setModels([]);
     }
     setLoading(false);

@@ -1,6 +1,7 @@
 import {
   Home,
   MessageSquare,
+  Building2,
   Bot,
   Store,
   Cpu,
@@ -24,6 +25,7 @@ import { useAppStore, AppView } from "@/stores/appStore";
 const navItems: { id: AppView; icon: React.ElementType; label: string; group: "main" | "openclaw" | "system" }[] = [
   { id: "home",         icon: Home,          label: "Home",      group: "main" },
   { id: "conversation", icon: MessageSquare, label: "Chat",      group: "main" },
+  { id: "office",       icon: Building2,     label: "Office",    group: "main" },
   { id: "agents",       icon: Bot,           label: "Agents",    group: "openclaw" },
   { id: "marketplace",  icon: Store,         label: "Skills",    group: "openclaw" },
   { id: "models",       icon: Cpu,           label: "Models",    group: "openclaw" },

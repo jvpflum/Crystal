@@ -20,16 +20,46 @@ import { escapeShellArg } from "@/lib/tools";
 
 interface CronJob {
   id: string;
+  name?: string;
   schedule: string;
   message: string;
   agent: string;
   enabled: boolean;
+  nextRun?: string;
 }
 
 interface CronStatus {
   running: boolean;
   nextRun?: string;
   lastRun?: string;
+}
+
+function parseCronJob(raw: Record<string, unknown>): CronJob {
+  const sched = raw.schedule as Record<string, unknown> | string | undefined;
+  let scheduleStr = "";
+  if (typeof sched === "string") {
+    scheduleStr = sched;
+  } else if (sched && typeof sched === "object") {
+    if (sched.cron) scheduleStr = String(sched.cron);
+    else if (sched.kind === "every") scheduleStr = `every ${Math.round(Number(sched.everyMs) / 60000)}m`;
+    else if (sched.kind === "at") scheduleStr = `once at ${String(sched.atIso || sched.at || "")}`;
+    else scheduleStr = JSON.stringify(sched);
+  }
+
+  const payload = raw.payload as Record<string, unknown> | undefined;
+  const message = payload?.message ? String(payload.message) : String(raw.message || "");
+  const state = raw.state as Record<string, unknown> | undefined;
+  const nextRunMs = state?.nextRunAtMs ? Number(state.nextRunAtMs) : undefined;
+
+  return {
+    id: String(raw.id || ""),
+    name: raw.name ? String(raw.name) : undefined,
+    schedule: scheduleStr,
+    message,
+    agent: String(raw.agentId || raw.agent || "main"),
+    enabled: raw.enabled !== false,
+    nextRun: nextRunMs ? new Date(nextRunMs).toLocaleString() : undefined,
+  };
 }
 
 interface ExampleJob {
@@ -100,28 +130,33 @@ export function CronView() {
   const loadJobs = useCallback(async () => {
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw cron list --json", cwd: null,
+        command: "openclaw cron list --json --all", cwd: null,
       });
       if (result.code === 0 && result.stdout.trim()) {
         try {
           const parsed = JSON.parse(result.stdout);
-          setJobs(Array.isArray(parsed) ? parsed : parsed.jobs ?? []);
+          const rawJobs: Record<string, unknown>[] = Array.isArray(parsed) ? parsed : parsed.jobs ?? [];
+          setJobs(rawJobs.map(parseCronJob));
         } catch {
           setJobs([]);
         }
       } else {
+        const stderr = result.stderr || "";
+        if (stderr.includes("gateway closed") || stderr.includes("handshake")) {
+          setError("Gateway connection failed — is the OpenClaw gateway running?");
+        }
         setJobs([]);
       }
-      setError(null);
+      if (!error?.includes("Gateway")) setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load cron jobs");
     }
-  }, []);
+  }, [error]);
 
   const loadStatus = useCallback(async () => {
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw cron status", cwd: null,
+        command: "openclaw cron status", cwd: null,
       });
       if (result.code === 0 && result.stdout.trim()) {
         try {
@@ -141,34 +176,62 @@ export function CronView() {
     })();
   }, [loadJobs, loadStatus]);
 
+  const [runResult, setRunResult] = useState<{ id: string; text: string; ok: boolean } | null>(null);
+
   const toggleJob = async (job: CronJob) => {
     const cmd = job.enabled ? "disable" : "enable";
-    await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-      command: `npx openclaw cron ${cmd} ${job.id}`, cwd: null,
-    });
-    setJobs((prev) => prev.map((j) => (j.id === job.id ? { ...j, enabled: !j.enabled } : j)));
+    try {
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: `openclaw cron ${cmd} ${job.id}`, cwd: null,
+      });
+      if (result.code !== 0) {
+        setError(result.stderr || `Failed to ${cmd} job`);
+        return;
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : `Failed to ${cmd} job`);
+      return;
+    }
+    await loadJobs();
   };
 
   const runNow = async (id: string) => {
     setRunningId(id);
+    setRunResult(null);
     try {
-      await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `npx openclaw cron run ${id}`, cwd: null,
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: `openclaw cron run ${id}`, cwd: null,
       });
-    } catch { /* best-effort */ }
+      const output = result.stdout?.trim() || result.stderr?.trim() || "";
+      setRunResult({ id, text: output || "Job triggered successfully", ok: result.code === 0 });
+    } catch (e) {
+      setRunResult({ id, text: e instanceof Error ? e.message : "Failed to run job", ok: false });
+    }
     setRunningId(null);
+    await loadJobs();
   };
 
   const removeJob = async (id: string) => {
     setRemovingId(id);
-    await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-      command: `npx openclaw cron rm ${id}`, cwd: null,
-    });
-    setJobs((prev) => prev.filter((j) => j.id !== id));
+    try {
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: `openclaw cron rm ${id}`, cwd: null,
+      });
+      if (result.code !== 0) {
+        setError(result.stderr || "Failed to remove job");
+        setRemovingId(null);
+        return;
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to remove job");
+      setRemovingId(null);
+      return;
+    }
     setRemovingId(null);
+    await loadJobs();
   };
 
-  const addJob = async (schedule?: string, message?: string) => {
+  const addJob = async (schedule?: string, message?: string, name?: string) => {
     const sched = schedule || newSchedule;
     const msg = message || newMessage;
     if (!sched.trim() || !msg.trim()) return;
@@ -176,8 +239,9 @@ export function CronView() {
     try {
       const escaped = escapeShellArg(msg);
       const escapedSched = escapeShellArg(sched);
+      const namePart = name ? ` --name "${escapeShellArg(name)}"` : "";
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `npx openclaw cron add --schedule "${escapedSched}" --message "${escaped}" --agent main`, cwd: null,
+        command: `openclaw cron add --cron "${escapedSched}" --message "${escaped}" --agent main${namePart}`, cwd: null,
       });
       if (result.code === 0) {
         setNewSchedule(""); setNewMessage(""); setShowAdd(false);
@@ -192,7 +256,7 @@ export function CronView() {
   };
 
   const addExample = async (ex: ExampleJob) => {
-    await addJob(ex.schedule, ex.message);
+    await addJob(ex.schedule, ex.message, ex.name);
   };
 
   const refresh = async () => {
@@ -291,34 +355,51 @@ export function CronView() {
             <div style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
               {jobs.map((job, i) => (
                 <div key={job.id} style={{
-                  display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
+                  padding: "10px 14px",
                   borderBottom: i < jobs.length - 1 ? "1px solid var(--border)" : "none",
                   opacity: job.enabled ? 1 : 0.5,
                 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                      <span style={{ fontSize: 12, fontFamily: "monospace", color: "var(--accent)" }}>{job.schedule}</span>
-                      {job.agent && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                        {job.name && <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>{job.name}</span>}
+                        <span style={{ fontSize: 11, fontFamily: "monospace", color: "var(--accent)" }}>{job.schedule}</span>
                         <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, background: "var(--bg-hover)", color: "var(--text-muted)", border: "1px solid var(--border)" }}>
                           {job.agent}
                         </span>
+                      </div>
+                      <p style={{ margin: 0, fontSize: 11, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {job.message}
+                      </p>
+                      {job.nextRun && (
+                        <p style={{ margin: "2px 0 0", fontSize: 9, color: "var(--text-muted)" }}>
+                          Next: {job.nextRun}
+                        </p>
                       )}
                     </div>
-                    <p style={{ margin: 0, fontSize: 11, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {job.message}
-                    </p>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      <button onClick={() => runNow(job.id)} disabled={runningId === job.id} title="Run now"
+                        style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-elevated)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--text-muted)" }}>
+                        {runningId === job.id ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <Play style={{ width: 12, height: 12 }} />}
+                      </button>
+                      <button onClick={() => removeJob(job.id)} disabled={removingId === job.id} title="Remove"
+                        style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid rgba(248,113,113,0.15)", background: "rgba(248,113,113,0.06)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#f87171" }}>
+                        {removingId === job.id ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <Trash2 style={{ width: 12, height: 12 }} />}
+                      </button>
+                      <ToggleSwitch enabled={job.enabled} onToggle={() => toggleJob(job)} />
+                    </div>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                    <button onClick={() => runNow(job.id)} disabled={runningId === job.id} title="Run now"
-                      style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-elevated)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--text-muted)" }}>
-                      {runningId === job.id ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <Play style={{ width: 12, height: 12 }} />}
-                    </button>
-                    <button onClick={() => removeJob(job.id)} disabled={removingId === job.id} title="Remove"
-                      style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid rgba(248,113,113,0.15)", background: "rgba(248,113,113,0.06)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#f87171" }}>
-                      {removingId === job.id ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <Trash2 style={{ width: 12, height: 12 }} />}
-                    </button>
-                    <ToggleSwitch enabled={job.enabled} onToggle={() => toggleJob(job)} />
-                  </div>
+                  {runResult?.id === job.id && (
+                    <div style={{
+                      marginTop: 6, padding: "6px 10px", borderRadius: 6, fontSize: 10, fontFamily: "monospace",
+                      background: runResult.ok ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
+                      border: `1px solid ${runResult.ok ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)"}`,
+                      color: runResult.ok ? "#4ade80" : "#f87171",
+                      maxHeight: 80, overflowY: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word",
+                    }}>
+                      {runResult.text}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

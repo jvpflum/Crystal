@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore, type AppView } from "@/stores/appStore";
 import {
-  Home, MessageSquare, Bot, Store, Cpu, History, Radio, Brain,
+  Home, MessageSquare, Building2, Bot, Store, Cpu, History, Radio, Brain,
   Clock, Anchor, Wrench, Shield, Stethoscope, Activity, Settings,
   Trash2, HeartPulse, ShieldCheck, Thermometer, RotateCcw, Search,
   Network, Globe,
@@ -27,6 +27,7 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
   const commands: CommandItem[] = useMemo(() => [
     { id: "home",         icon: Home,          label: "Home",      description: "Dashboard overview",          category: "Navigation", action: () => setView("home" as AppView) },
     { id: "chat",         icon: MessageSquare, label: "Chat",      description: "Open conversation",           category: "Navigation", action: () => setView("conversation" as AppView) },
+    { id: "office",       icon: Building2,     label: "Office",    description: "Sub-agent workspace",         category: "Navigation", action: () => setView("office" as AppView) },
     { id: "skills",       icon: Store,         label: "Skills",    description: "Browse skill marketplace",    category: "Navigation", action: () => setView("marketplace" as AppView) },
     { id: "models",       icon: Cpu,           label: "Models",    description: "Manage LLM models",           category: "Navigation", action: () => setView("models" as AppView) },
     { id: "sessions",     icon: History,       label: "Sessions",  description: "View chat sessions",          category: "Navigation", action: () => setView("sessions" as AppView) },
@@ -44,10 +45,10 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
     { id: "nodes",        icon: Network,       label: "Nodes",     description: "Manage OpenClaw nodes",       category: "Navigation", action: () => setView("nodes" as AppView) },
     { id: "browser",      icon: Globe,         label: "Browser",   description: "Browser automation",          category: "Navigation", action: () => setView("browser" as AppView) },
     { id: "clear-chat",   icon: Trash2,        label: "Clear chat",      description: "Clear current conversation",  category: "Actions", action: () => { setView("conversation" as AppView); } },
-    { id: "heartbeat",    icon: HeartPulse,     label: "Heartbeat",       description: "Send heartbeat ping",         category: "Actions", action: () => invoke("execute_command", { command: "npx openclaw system heartbeat", cwd: null }).catch(console.error) },
+    { id: "heartbeat",    icon: HeartPulse,     label: "Heartbeat",       description: "Send heartbeat ping",         category: "Actions", action: () => invoke("execute_command", { command: "openclaw system heartbeat", cwd: null }).catch(console.error) },
     { id: "sec-audit",    icon: ShieldCheck,   label: "Security audit",  description: "Run a full security audit",   category: "Actions", action: () => setView("security" as AppView) },
     { id: "health",       icon: Thermometer,   label: "Check health",    description: "Run system health check",     category: "Actions", action: () => setView("doctor" as AppView) },
-    { id: "restart-gw",   icon: RotateCcw,     label: "Restart gateway", description: "Restart OpenClaw gateway",    category: "OpenClaw", action: () => invoke("execute_command", { command: "npx openclaw gateway --force --port 18789", cwd: null }).catch(console.error) },
+    { id: "restart-gw",   icon: RotateCcw,     label: "Restart gateway", description: "Restart OpenClaw gateway",    category: "OpenClaw", action: () => invoke("execute_command", { command: "openclaw gateway --force --port 18789", cwd: null }).catch(console.error) },
   ], [setView]);
 
   const fuzzyMatch = useCallback((text: string, pattern: string) => {

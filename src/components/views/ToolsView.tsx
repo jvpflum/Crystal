@@ -34,7 +34,7 @@ export function ToolsView() {
   const loadSandbox = useCallback(async () => {
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw sandbox list --json",
+        command: "openclaw sandbox list --json",
         cwd: null,
       });
       if (result.code === 0) {
@@ -52,7 +52,7 @@ export function ToolsView() {
   const loadPolicy = useCallback(async () => {
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw sandbox explain --json",
+        command: "openclaw sandbox explain --json",
         cwd: null,
       });
       if (result.code === 0) {
@@ -70,7 +70,7 @@ export function ToolsView() {
   const loadToolPermissions = useCallback(async () => {
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "npx openclaw config get tools --json",
+        command: "openclaw config get tools --json",
         cwd: null,
       });
       if (result.code === 0) {

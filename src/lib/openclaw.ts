@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { escapeShellArg } from "@/lib/tools";
 
 /* ─── Types ─── */
 
@@ -25,8 +26,6 @@ export interface ToolCallEvent {
   output?: string;
   exitCode?: number;
 }
-
-export type InferenceBackend = "ollama" | "lmstudio";
 
 export type GatewayStatus = "disconnected" | "connecting" | "connected" | "error";
 
@@ -88,14 +87,7 @@ export interface OpenClawConfig {
   memory?: Record<string, unknown>;
 }
 
-/* ─── Backend configs ─── */
-
-interface BackendDef { baseUrl: string; nativeUrl: string; defaultModel: string; }
-
-const BACKENDS: Record<InferenceBackend, BackendDef> = {
-  ollama: { baseUrl: "http://127.0.0.1:11434/v1", nativeUrl: "http://127.0.0.1:11434", defaultModel: "auto" },
-  lmstudio: { baseUrl: "http://127.0.0.1:1234/v1", nativeUrl: "http://127.0.0.1:1234", defaultModel: "default" },
-};
+const OPENCLAW_CMD = "openclaw";
 
 /* ─── Supported channels ─── */
 
@@ -118,15 +110,7 @@ export const SUPPORTED_CHANNELS: Omit<ChannelConfig, "enabled" | "connected" | "
 type GatewayListener = (msg: GatewayMessage) => void;
 
 class OpenClawClient {
-  /* LLM backend */
-  private backend: InferenceBackend = "ollama";
-  private baseUrl: string;
-  private nativeUrl: string;
-  private model: string;
-  private llmConnected = false;
-  private modelWarmedUp = false;
-
-  /* Gateway (checked via Rust port probe) */
+  /* Gateway */
   private gwStatus: GatewayStatus = "disconnected";
   private statusCallbacks: ((s: GatewayStatus) => void)[] = [];
   private listeners = new Map<string, Set<GatewayListener>>();
@@ -136,23 +120,23 @@ class OpenClawClient {
   private _dirCache: string | null = null;
   private _configCache: { data: OpenClawConfig; ts: number } | null = null;
   private _modelsCache: { data: string[]; ts: number } | null = null;
+  private _currentModel: string | null = null;
   private static CONFIG_TTL = 30_000;
   private static MODELS_TTL = 30_000;
 
+  /* TPS tracking */
+  private _lastTps = 0;
+  private _tpsCallbacks: ((tps: number) => void)[] = [];
+
   constructor() {
-    const cfg = BACKENDS[this.backend];
-    this.baseUrl = cfg.baseUrl;
-    this.nativeUrl = cfg.nativeUrl;
-    this.model = cfg.defaultModel;
-    this.warmUp();
+    this._currentModel = localStorage.getItem("crystal_openclaw_model") || null;
   }
 
-  /* ── Rust HTTP proxy ── */
+  /* ── TPS tracking ── */
 
-  private async proxyFetch(url: string, method = "GET", body?: string): Promise<{ status: number; body: string }> {
-    const raw = await invoke<string>("http_proxy", { method, url, body, headers: null });
-    return JSON.parse(raw);
-  }
+  onTps(cb: (tps: number) => void) { this._tpsCallbacks.push(cb); return () => { this._tpsCallbacks = this._tpsCallbacks.filter(c => c !== cb); }; }
+  getLastTps(): number { return this._lastTps; }
+  private emitTps(tps: number) { this._lastTps = tps; this._tpsCallbacks.forEach(cb => cb(tps)); }
 
   /* ── Gateway connection (via Rust port check + CLI) ── */
 
@@ -168,32 +152,72 @@ class OpenClawClient {
   async connectGateway(): Promise<boolean> {
     this.setGwStatus("connecting");
     try {
-      // Check if port 18789 is alive via Rust
       const status = await invoke<{ openclaw_running: boolean }>("get_server_status");
       if (!status.openclaw_running) {
         this.setGwStatus("disconnected");
         return false;
       }
-
-      // Verify gateway responds via CLI health check
       try {
         const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-          command: "npx openclaw health",
+          command: `${OPENCLAW_CMD} health`,
           cwd: null,
         });
         if (result.code === 0) {
           this.setGwStatus("connected");
+          await this.syncModelFromOpenClaw();
+          this.ensureDailyMemoryCron();
           return true;
         }
       } catch { /* fall through */ }
-
-      // Port is open, assume connected even if health check failed
       this.setGwStatus("connected");
+      await this.syncModelFromOpenClaw();
+      this.ensureDailyMemoryCron();
       return true;
     } catch {
       this.setGwStatus("error");
       return false;
     }
+  }
+
+  private async syncModelFromOpenClaw(): Promise<void> {
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} models status`,
+        cwd: null,
+      });
+      const defaultMatch = result.stdout.match(/Default\s*:\s*(\S+)/);
+      if (defaultMatch?.[1] && defaultMatch[1] !== "-") {
+        this._currentModel = defaultMatch[1];
+        localStorage.setItem("crystal_openclaw_model", defaultMatch[1]);
+      }
+    } catch { /* keep cached value */ }
+  }
+
+  private async ensureDailyMemoryCron(): Promise<void> {
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} cron list --json`, cwd: null,
+      });
+      if (result.code !== 0) return;
+      const parsed = JSON.parse(result.stdout);
+      const jobs = Array.isArray(parsed) ? parsed : parsed.jobs ?? [];
+      const hasMemoryCron = jobs.some((j: Record<string, unknown>) =>
+        String(j.name || "").toLowerCase().includes("daily memory")
+      );
+      if (hasMemoryCron) return;
+
+      const memoryPrompt = escapeShellArg(
+        "Review today's conversation history and extract the most important facts, decisions, preferences, and context. " +
+        "Write a concise summary as bullet points. Save it to the file ~/.openclaw/workspace/memory/daily-" +
+        new Date().toISOString().split("T")[0] + ".md using the write_file tool. " +
+        "Focus on: user preferences, project decisions, technical discoveries, action items, and anything the user would want remembered long-term. " +
+        "Keep entries factual and concise."
+      );
+      await invoke("execute_command", {
+        command: `${OPENCLAW_CMD} cron add --cron "0 23 * * *" --message "${memoryPrompt}" --agent main --name "Daily Memory Capture"`,
+        cwd: null,
+      });
+    } catch { /* non-critical */ }
   }
 
   isGatewayConnected(): boolean {
@@ -206,29 +230,45 @@ class OpenClawClient {
     return () => { this.listeners.get(type)?.delete(fn); };
   }
 
-  /* ── Gateway: Chat (via openclaw agent CLI) ── */
+  /* ── Chat via OpenClaw agent CLI ── */
 
-  async gatewayChat(text: string, _options?: { model?: string; noMemory?: boolean }): Promise<GatewayMessage> {
+  async openclawChat(text: string): Promise<string> {
     const escaped = text.replace(/"/g, '\\"').replace(/\n/g, ' ');
     const timeoutMs = 120_000;
+    const startTime = Date.now();
+
     const cmdPromise = invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-      command: `npx openclaw agent --agent main --message "${escaped}"`,
+      command: `${OPENCLAW_CMD} agent --agent main --message "${escaped}"`,
       cwd: null,
     });
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Gateway chat timed out after 120s")), timeoutMs)
+      setTimeout(() => reject(new Error("OpenClaw timed out after 120s")), timeoutMs)
     );
     const result = await Promise.race([cmdPromise, timeoutPromise]);
-    const output = result.stdout || result.stderr || "No response";
+
+    let output = result.stdout || "";
+    const stderr = result.stderr || "";
+    if (!output.trim() && stderr.trim()) {
+      const errorLines = stderr.split("\n").filter(l =>
+        !l.includes("[plugins]") && !l.includes("Require stack") && !l.includes("npm warn")
+      ).join("\n").trim();
+      output = errorLines || "No response from OpenClaw";
+    }
+    if (!output.trim()) output = "No response from OpenClaw";
+
+    const elapsed = (Date.now() - startTime) / 1000;
+    const wordCount = output.trim().split(/\s+/).length;
+    if (elapsed > 0) this.emitTps(Math.round(wordCount / elapsed * 4));
+
     this.logActivity({ type: "response", payload: { text: output } });
-    return { type: "response", payload: { text: output.trim() } };
+    return output.trim();
   }
 
   /* ── Gateway: Status ── */
 
   async gatewayStatus(): Promise<GatewayMessage> {
     const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-      command: "npx openclaw health",
+      command: `${OPENCLAW_CMD} health`,
       cwd: null,
     });
     return { type: "status", payload: { text: result.stdout, healthy: result.code === 0 } };
@@ -238,7 +278,7 @@ class OpenClawClient {
 
   async invokeSkill(skill: string, args: string): Promise<GatewayMessage> {
     const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-      command: `npx openclaw agent --agent main --message "Use the ${skill} skill: ${args.replace(/"/g, '\\"')}"`,
+      command: `${OPENCLAW_CMD} agent --agent main --message "Use the ${skill} skill: ${args.replace(/"/g, '\\"')}"`,
       cwd: null,
     });
     return { type: "response", payload: { text: result.stdout.trim() } };
@@ -247,7 +287,7 @@ class OpenClawClient {
   /* ── Gateway: Heartbeat ── */
 
   async triggerHeartbeat(dryRun = false): Promise<GatewayMessage> {
-    const cmd = dryRun ? "npx openclaw system heartbeat --dry-run" : "npx openclaw system heartbeat";
+    const cmd = dryRun ? `${OPENCLAW_CMD} system heartbeat --dry-run` : `${OPENCLAW_CMD} system heartbeat`;
     const result = await invoke<{ stdout: string; code: number }>("execute_command", { command: cmd, cwd: null });
     return { type: "heartbeat_status", payload: { text: result.stdout.trim(), result: result.code === 0 ? "HEARTBEAT_OK" : "HEARTBEAT_FAIL" } };
   }
@@ -269,12 +309,21 @@ class OpenClawClient {
   getActivityLog(): ActivityEntry[] { return [...this.messageLog]; }
   clearActivityLog() { this.messageLog.length = 0; }
 
-  /* ── Memory (file-based via Tauri) ── */
+  /* ── Memory (file-based via Tauri, stored in workspace/memory/) ── */
+
+  private async getMemoryDir(): Promise<string> {
+    const home = await this.getOpenClawDir();
+    const dir = `${home}\\workspace\\memory`;
+    try {
+      await invoke("execute_command", { command: `New-Item -ItemType Directory -Force -Path "${dir}"`, cwd: null });
+    } catch { /* exists */ }
+    return dir;
+  }
 
   async getMemory(): Promise<MemoryEntry[]> {
     try {
-      const home = await this.getOpenClawDir();
-      const content = await invoke<string>("read_file", { path: `${home}\\MEMORY.md` });
+      const dir = await this.getMemoryDir();
+      const content = await invoke<string>("read_file", { path: `${dir}\\MEMORY.md` });
       return this.parseMemoryMd(content, "curated");
     } catch { return []; }
   }
@@ -282,45 +331,91 @@ class OpenClawClient {
   async getDailyMemory(date?: string): Promise<MemoryEntry[]> {
     const d = date || new Date().toISOString().split("T")[0];
     try {
-      const home = await this.getOpenClawDir();
-      const content = await invoke<string>("read_file", { path: `${home}\\memory\\${d}.md` });
+      const dir = await this.getMemoryDir();
+      const content = await invoke<string>("read_file", { path: `${dir}\\daily-${d}.md` });
       return this.parseMemoryMd(content, "daily");
     } catch { return []; }
   }
 
   async addMemory(content: string): Promise<void> {
-    const home = await this.getOpenClawDir();
-
-    const curatedPath = `${home}\\MEMORY.md`;
+    const dir = await this.getMemoryDir();
+    const curatedPath = `${dir}\\MEMORY.md`;
     let curatedExisting = "";
     try { curatedExisting = await invoke<string>("read_file", { path: curatedPath }); } catch { /* new file */ }
-    const curatedUpdated = curatedExisting + (curatedExisting ? "\n\n" : "") + content;
+    const timestamp = new Date().toLocaleString();
+    const entry = `## Memory — ${timestamp}\n${content}`;
+    const curatedUpdated = curatedExisting
+      ? curatedExisting.trimEnd() + "\n\n" + entry
+      : `# Crystal User Memory\n\n${entry}`;
     await invoke("write_file", { path: curatedPath, content: curatedUpdated });
 
     const date = new Date().toISOString().split("T")[0];
-    const dailyDir = `${home}\\memory`;
-    const dailyPath = `${dailyDir}\\${date}.md`;
-    try {
-      await invoke("execute_command", { command: `New-Item -ItemType Directory -Force -Path "${dailyDir}"`, cwd: null });
-    } catch { /* dir may exist */ }
+    const dailyPath = `${dir}\\daily-${date}.md`;
     let dailyExisting = "";
     try { dailyExisting = await invoke<string>("read_file", { path: dailyPath }); } catch { /* new file */ }
-    const dailyUpdated = dailyExisting + (dailyExisting ? "\n\n" : "") + content;
+    const dailyUpdated = dailyExisting
+      ? dailyExisting.trimEnd() + "\n\n" + entry
+      : `# Daily Log: ${date}\n\n${entry}`;
     await invoke("write_file", { path: dailyPath, content: dailyUpdated });
+
+    this.reindexMemory();
+  }
+
+  async deleteMemory(entryId: string): Promise<void> {
+    const dir = await this.getMemoryDir();
+    const curatedPath = `${dir}\\MEMORY.md`;
+    try {
+      const content = await invoke<string>("read_file", { path: curatedPath });
+      const sections = content.split(/^(?=## )/m);
+      const filtered = sections.filter((_, i) => `mem-${i}` !== entryId && `mem-${i - 1}` !== entryId);
+      await invoke("write_file", { path: curatedPath, content: filtered.join("").trim() });
+      this.reindexMemory();
+    } catch { /* ignore */ }
+  }
+
+  async reindexMemory(): Promise<{ success: boolean; message: string }> {
+    try {
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} memory index --force`, cwd: null,
+      });
+      return { success: result.code === 0, message: result.stdout?.trim() || result.stderr?.trim() || "Done" };
+    } catch (e) {
+      return { success: false, message: e instanceof Error ? e.message : "Reindex failed" };
+    }
+  }
+
+  async getMemoryStatus(): Promise<Record<string, unknown> | null> {
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} memory status --json`, cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        const parsed = JSON.parse(result.stdout);
+        return Array.isArray(parsed) ? parsed[0] : parsed;
+      }
+    } catch { /* ignore */ }
+    return null;
   }
 
   async searchMemory(query: string): Promise<MemoryEntry[]> {
-    if (this.isGatewayConnected()) {
-      try {
-        const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-          command: `npx openclaw memory search "${query.replace(/"/g, '\\"')}"`,
-          cwd: null,
-        });
-        if (result.code === 0 && result.stdout.trim()) {
-          return [{ id: crypto.randomUUID(), content: result.stdout.trim(), source: "search", date: new Date().toISOString(), type: "curated" }];
-        }
-      } catch { /* fall through */ }
-    }
+    try {
+      const escaped = escapeShellArg(query);
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} memory search "${escaped}" --min-score 0.05 --max-results 20 --json`,
+        cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        const parsed = JSON.parse(result.stdout);
+        const results = parsed.results || [];
+        return results.map((r: { path?: string; snippet?: string; score?: number; startLine?: number; endLine?: number }, i: number) => ({
+          id: `search-${i}`,
+          content: r.snippet || "",
+          source: r.path || "memory",
+          date: `score: ${(r.score ?? 0).toFixed(3)}`,
+          type: "curated" as const,
+        }));
+      }
+    } catch { /* fall through */ }
     const all = await this.getMemory();
     const q = query.toLowerCase();
     return all.filter(e => e.content.toLowerCase().includes(q));
@@ -328,13 +423,14 @@ class OpenClawClient {
 
   private parseMemoryMd(md: string, type: "curated" | "daily"): MemoryEntry[] {
     if (!md.trim()) return [];
-    const sections = md.split(/^## /m).filter(Boolean);
+    const sections = md.split(/^(?=## )/m).filter(s => s.trim());
     return sections.map((s, i) => {
       const lines = s.trim().split("\n");
-      const title = lines[0] || "";
+      const heading = lines[0]?.replace(/^##\s*/, "") || "";
       const body = lines.slice(1).join("\n").trim();
-      return { id: `mem-${i}`, content: body || title, source: title, date: title, type };
-    });
+      if (heading.startsWith("#") && !body) return null;
+      return { id: `mem-${i}`, content: body || heading, source: heading, date: heading, type };
+    }).filter(Boolean) as MemoryEntry[];
   }
 
   private async getOpenClawDir(): Promise<string> {
@@ -396,195 +492,62 @@ class OpenClawClient {
     await this.updateConfig({ channels });
   }
 
-  /* ── Direct LLM ── */
+  /* ── Models (via OpenClaw CLI) ── */
 
-  setBackend(b: InferenceBackend) {
-    this.backend = b;
-    const cfg = BACKENDS[b];
-    this.baseUrl = cfg.baseUrl;
-    this.nativeUrl = cfg.nativeUrl;
-    this.model = cfg.defaultModel;
-    this.llmConnected = false;
-    this.modelWarmedUp = false;
-    this.warmUp();
-  }
-  getBackend(): InferenceBackend { return this.backend; }
-
-  async checkConnection(): Promise<boolean> {
-    try {
-      const r = await this.proxyFetch(`${this.baseUrl}/models`);
-      this.llmConnected = r.status >= 200 && r.status < 300;
-      return this.llmConnected;
-    } catch { this.llmConnected = false; return false; }
-  }
-  isConnected(): boolean { return this.llmConnected; }
-
-  /**
-   * Pre-load the model into GPU memory so the first real request is fast.
-   * Sends a trivial prompt with keep_alive=-1 (never unload).
-   */
-  async warmUp(): Promise<void> {
-    if (this.modelWarmedUp) return;
-    try {
-      if (this.model === "auto") await this.autoDetectModel();
-      if (this.model === "auto") return;
-
-      if (import.meta.env.DEV) console.log(`[Crystal] Warming up model: ${this.model}`);
-      const resp = await fetch(`${this.nativeUrl}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: this.model,
-          messages: [{ role: "user", content: "hi" }],
-          stream: false,
-          keep_alive: -1,
-          options: { num_predict: 1, num_ctx: 4096, num_gpu: 99 },
-        }),
-      });
-      if (resp.ok) {
-        this.modelWarmedUp = true;
-        this.llmConnected = true;
-        if (import.meta.env.DEV) console.log(`[Crystal] Model warm — loaded in VRAM, keep_alive=-1`);
-      }
-    } catch (e) {
-      console.warn("[Crystal] Warm-up failed (Ollama may not be running):", e);
-    }
-  }
-
-  async chat(messages: Message[]): Promise<string> {
-    let full = "";
-    for await (const chunk of this.streamChat(messages)) {
-      full += chunk;
-    }
-    return full || "No response";
-  }
-
-  /**
-   * Stream chat using Ollama's native /api/chat for maximum performance.
-   * Uses keep_alive=-1 to keep model in VRAM, reduced context window,
-   * and all GPU layers for fastest token generation.
-   */
-  async *streamChat(messages: Message[]): AsyncGenerator<string> {
-    if (this.model === "auto") {
-      await this.autoDetectModel();
-    }
-
-    const isOllama = this.backend === "ollama";
-    const url = isOllama
-      ? `${this.nativeUrl}/api/chat`
-      : `${this.baseUrl}/chat/completions`;
-
-    const body = isOllama
-      ? {
-          model: this.model,
-          messages: messages.map(m => ({ role: m.role, content: m.content })),
-          stream: true,
-          keep_alive: -1,
-          options: {
-            num_predict: 1024,
-            num_ctx: 4096,
-            num_gpu: 99,
-            temperature: 0.6,
-          },
-        }
-      : {
-          model: this.model,
-          messages: messages.map(m => ({ role: m.role, content: m.content })),
-          stream: true,
-          max_tokens: 1024,
-          temperature: 0.6,
-        };
-
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    if (!resp.ok) {
-      const errBody = await resp.text().catch(() => "");
-      throw new Error(`LLM error: ${resp.status} - ${errBody.slice(0, 200)}`);
-    }
-
-    const reader = resp.body?.getReader();
-    if (!reader) throw new Error("No response stream available");
-
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    if (isOllama) {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const json = JSON.parse(line);
-            const token = json.message?.content;
-            if (token) yield token;
-            if (json.done) return;
-          } catch { /* skip */ }
-        }
-      }
-    } else {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith("data: ")) continue;
-          const payload = trimmed.slice(6);
-          if (payload === "[DONE]") return;
-          try {
-            const json = JSON.parse(payload);
-            const token = json.choices?.[0]?.delta?.content;
-            if (token) yield token;
-          } catch { /* skip */ }
-        }
-      }
-    }
-  }
+  private _modelDisplayNames = new Map<string, string>();
 
   async getModels(): Promise<string[]> {
     if (this._modelsCache && Date.now() - this._modelsCache.ts < OpenClawClient.MODELS_TTL) {
       return this._modelsCache.data;
     }
-    try {
-      const r = await this.proxyFetch(`${this.baseUrl}/models`);
-      if (r.status < 200 || r.status >= 300) return [];
-      const d = JSON.parse(r.body);
-      const models = d.data?.map((m: { id: string }) => m.id) || [];
-      this._modelsCache = { data: models, ts: Date.now() };
-      return models;
-    } catch { return []; }
-  }
-
-  private async autoDetectModel(): Promise<void> {
-    try {
-      const models = await this.getModels();
-      if (models.length > 0) {
-        const preferred = ["qwen2.5:14b", "qwen2.5:7b", "llama3.1:8b", "mistral:7b"];
-        const match = preferred.find(p => models.some(m => m.startsWith(p)));
-        this.model = match || models[0];
-        if (import.meta.env.DEV) console.log(`[Crystal] Auto-detected model: ${this.model}`);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+          command: `${OPENCLAW_CMD} models list --json`,
+          cwd: null,
+        });
+        const stdout = result.stdout || "";
+        const jsonStart = stdout.indexOf("{");
+        const jsonStr = jsonStart >= 0 ? stdout.slice(jsonStart) : stdout;
+        if (jsonStr.trim()) {
+          const parsed = JSON.parse(jsonStr);
+          const arr = parsed.models || parsed || [];
+          const keys: string[] = [];
+          this._modelDisplayNames.clear();
+          for (const m of arr) {
+            const key = m.key || m.id || m.name || "";
+            if (!key) continue;
+            keys.push(key);
+            if (m.name) this._modelDisplayNames.set(key, m.name);
+          }
+          this._modelsCache = { data: keys, ts: Date.now() };
+          return keys;
+        }
+      } catch {
+        if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
       }
-    } catch { /* keep "auto" and let LLM call fail with clear error */ }
+    }
+    return [];
   }
 
-  setModel(m: string) {
-    this.model = m;
-    this.modelWarmedUp = false;
-    this.warmUp();
+  getModelDisplayName(key: string): string {
+    return this._modelDisplayNames.get(key) || key.split("/").pop() || key;
   }
-  getModel(): string { return this.model; }
-  getBaseUrl(): string { return this.baseUrl; }
-  setBaseUrl(u: string) { this.baseUrl = u; }
+
+  async setModel(m: string): Promise<void> {
+    this._currentModel = m;
+    localStorage.setItem("crystal_openclaw_model", m);
+    try {
+      await invoke("execute_command", {
+        command: `${OPENCLAW_CMD} models set "${m}"`,
+        cwd: null,
+      });
+    } catch { /* best effort */ }
+  }
+
+  getModel(): string { return this._currentModel || "default"; }
+
+  /* ── Gateway lifecycle ── */
 
   async startDaemon(): Promise<boolean> {
     try {
