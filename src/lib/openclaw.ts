@@ -324,6 +324,146 @@ class OpenClawClient {
     return output.trim();
   }
 
+  /**
+   * Streaming chat via background process. Yields incremental output chunks
+   * and emits tool_call / tool_result events as the agent works.
+   */
+  async *streamingChat(
+    text: string,
+    sessionId?: string,
+    thinking?: string,
+    onToolEvent?: (event: ToolCallEvent) => void,
+  ): AsyncGenerator<string> {
+    this.logActivity({ type: "chat", payload: { text } });
+
+    const escaped = text.replace(/"/g, '\\"').replace(/\n/g, ' ');
+    let cmd = `${OPENCLAW_CMD} agent --agent main`;
+    if (sessionId) cmd += ` --session-id ${sessionId}`;
+    if (thinking) cmd += ` --thinking ${thinking}`;
+    cmd += ` --message "${escaped}"`;
+
+    const streamId = await invoke<string>("start_streaming_command", { command: cmd, cwd: null });
+    const startTime = Date.now();
+    const TIMEOUT = 180_000;
+    const POLL_INTERVAL = 300;
+    let fullOutput = "";
+    let lastParsedLen = 0;
+
+    try {
+      while (true) {
+        await new Promise(r => setTimeout(r, POLL_INTERVAL));
+
+        const poll = await invoke<{ new_output: string; new_stderr: string; done: boolean; exit_code: number | null }>(
+          "poll_streaming_command", { id: streamId }
+        );
+
+        if (poll.new_output) {
+          fullOutput += poll.new_output;
+          yield poll.new_output;
+
+          if (onToolEvent) {
+            const newChunk = fullOutput.slice(lastParsedLen);
+            const events = this.parseToolEvents(newChunk);
+            for (const ev of events) {
+              onToolEvent(ev);
+              this.logActivity({ type: ev.status === "executing" ? "tool_call" : "tool_result", payload: { tool: ev.tool, args: ev.args } });
+            }
+            lastParsedLen = fullOutput.length;
+          }
+        }
+
+        if (poll.done) {
+          if (poll.new_stderr) {
+            const errorLines = poll.new_stderr.split("\n").filter(l =>
+              !l.includes("[plugins]") && !l.includes("Require stack") && !l.includes("npm warn") && l.trim()
+            ).join("\n").trim();
+            if (!fullOutput.trim() && errorLines) {
+              yield errorLines;
+              fullOutput += errorLines;
+            }
+          }
+          break;
+        }
+
+        if (Date.now() - startTime > TIMEOUT) {
+          await invoke("kill_streaming_command", { id: streamId });
+          yield "\n\n*[Timed out after 3 minutes]*";
+          break;
+        }
+      }
+    } finally {
+      await invoke("cleanup_streaming_command", { id: streamId }).catch(() => {});
+    }
+
+    if (!fullOutput.trim()) {
+      yield "No response from OpenClaw";
+      fullOutput = "No response from OpenClaw";
+    }
+
+    const elapsed = (Date.now() - startTime) / 1000;
+    const wordCount = fullOutput.trim().split(/\s+/).length;
+    if (elapsed > 0) this.emitTps(Math.round(wordCount / elapsed * 4));
+
+    this.logActivity({ type: "response", payload: { text: fullOutput.trim().slice(0, 500) } });
+    this._sessionMessages.push({ role: "user", text, ts: Date.now() });
+    this._sessionMessages.push({ role: "assistant", text: fullOutput.trim().slice(0, 500), ts: Date.now() });
+    if (this._sessionMessages.length > 40) this._sessionMessages = this._sessionMessages.slice(-30);
+    this._maybeFlushMemory();
+  }
+
+  /** Kill the currently running streaming command */
+  async killStreamingCommand(streamId: string): Promise<void> {
+    await invoke("kill_streaming_command", { id: streamId }).catch(() => {});
+  }
+
+  private parseToolEvents(chunk: string): ToolCallEvent[] {
+    const events: ToolCallEvent[] = [];
+    const lines = chunk.split("\n");
+    for (const line of lines) {
+      const trimmed = line.replace(/\x1b\[[0-9;]*m/g, "").trim();
+      if (!trimmed) continue;
+
+      // Match: ⚙ Tool: tool_name(...) or [tool_call] tool_name
+      let m = trimmed.match(/(?:⚙|🔧|Tool:|tool_call[:\]]\s*)(\w+)/i);
+      if (m) {
+        events.push({ tool: m[1], args: {}, status: "executing" });
+        continue;
+      }
+      // Match: ✓ tool_name completed / ✗ tool_name failed
+      m = trimmed.match(/(?:✓|✔|✅)\s*(\w+)/);
+      if (m) {
+        events.push({ tool: m[1], args: {}, status: "completed" });
+        continue;
+      }
+      m = trimmed.match(/(?:✗|✘|❌)\s*(\w+)/);
+      if (m) {
+        events.push({ tool: m[1], args: {}, status: "error" });
+        continue;
+      }
+      // Match: Running `command...` or $ command
+      m = trimmed.match(/(?:Running\s+[`']([^`']+)[`']|\$\s+(.+))/);
+      if (m) {
+        events.push({ tool: "bash", args: { command: m[1] || m[2] }, status: "executing" });
+        continue;
+      }
+      // Match: Writing to /path or Created /path or Wrote /path
+      m = trimmed.match(/(?:Writing to|Created|Wrote|Saving)\s+[`'"]?([^\s`'"]+)/i);
+      if (m) {
+        const filePath = m[1];
+        const ext = filePath.split(".").pop() || "";
+        events.push({ tool: "write_file", args: { path: filePath, language: ext }, status: "executing" });
+        continue;
+      }
+      // Match: Reading /path or Read /path
+      m = trimmed.match(/(?:Reading|Read)\s+[`'"]?([^\s`'"]+)/i);
+      if (m) {
+        events.push({ tool: "read_file", args: { path: m[1] }, status: "executing" });
+        continue;
+      }
+    }
+    return events;
+  }
+
   private async _maybeFlushMemory(): Promise<void> {
     const MIN_INTERVAL = 10 * 60 * 1000;
     const MIN_MESSAGES = 6;

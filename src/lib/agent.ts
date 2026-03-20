@@ -108,26 +108,44 @@ class AgentService {
     this.emitStep({ action: { type: "thinking" }, timestamp: new Date() });
 
     const imagePrompt = this.isImageRequest(userMessage);
-    let response: string;
 
     if (imagePrompt) {
       this.emitStep({ action: { type: "tool_call", tool: "openai-image-gen", args: { prompt: imagePrompt } }, timestamp: new Date() });
-      response = await this.generateImage(imagePrompt);
-    } else {
-      response = await openclawClient.openclawChat(userMessage, sessionId, thinking);
+      const response = await this.generateImage(imagePrompt);
+      const cleaned = this.extractAndEmitActions(response);
+      this.emitStep({ action: { type: "response", content: cleaned }, timestamp: new Date() });
+      yield cleaned;
+      return;
     }
 
-    const cleaned = this.extractAndEmitActions(response);
+    let fullResponse = "";
+    for await (const chunk of openclawClient.streamingChat(
+      userMessage,
+      sessionId,
+      thinking,
+      (toolEvent) => {
+        this.emitStep({
+          action: {
+            type: "tool_call",
+            tool: toolEvent.tool,
+            args: toolEvent.args as Record<string, string>,
+          },
+          result: toolEvent.status !== "executing"
+            ? { success: toolEvent.status === "completed", output: toolEvent.output || "", error: toolEvent.status === "error" ? "Tool failed" : undefined }
+            : undefined,
+          timestamp: new Date(),
+        });
+      },
+    )) {
+      fullResponse += chunk;
+      yield chunk;
+    }
+
+    const cleaned = this.extractAndEmitActions(fullResponse);
+    if (cleaned !== fullResponse) {
+      yield "";
+    }
     this.emitStep({ action: { type: "response", content: cleaned }, timestamp: new Date() });
-
-    const CHARS_PER_TICK = 3;
-    const TICK_MS = 8;
-    for (let i = 0; i < cleaned.length; i += CHARS_PER_TICK) {
-      yield cleaned.slice(i, i + CHARS_PER_TICK);
-      if (i + CHARS_PER_TICK < cleaned.length) {
-        await new Promise(r => setTimeout(r, TICK_MS));
-      }
-    }
   }
 
   async chat(userMessage: string, sessionId?: string, thinking?: string): Promise<string> {

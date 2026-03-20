@@ -1,6 +1,6 @@
 [package]
 name = "crystal"
-version = "0.2.1"
+version = "0.3.0"
 description = "Crystal - AI Desktop Assistant powered by OpenClaw"
 authors = ["jvpflum"]
 edition = "2021"

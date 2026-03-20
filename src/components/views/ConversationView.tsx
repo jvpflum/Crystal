@@ -391,7 +391,7 @@ export function ConversationView() {
 
   useEffect(() => {
     agentService.onStep((step) => {
-      setToolSteps(prev => [...prev.slice(-8), step]);
+      setToolSteps(prev => [...prev.slice(-20), step]);
     });
     agentService.onActions((actions) => setActionButtons(actions));
     return () => {};
@@ -399,13 +399,13 @@ export function ConversationView() {
 
   useEffect(() => {
     const unsub = openclawClient.on("tool_call", (msg) => {
-      setToolSteps(prev => [...prev.slice(-8), {
+      setToolSteps(prev => [...prev.slice(-20), {
         action: { type: "tool_call", tool: msg.payload.tool as string, args: msg.payload.args as Record<string, string> },
         timestamp: new Date(),
       }]);
     });
     const unsub2 = openclawClient.on("tool_result", (msg) => {
-      setToolSteps(prev => [...prev.slice(-8), {
+      setToolSteps(prev => [...prev.slice(-20), {
         action: { type: "tool_call", tool: msg.payload.tool as string },
         result: { success: msg.payload.exit_code === 0 || !msg.payload.exit_code, output: msg.payload.output as string || "", error: "" },
         timestamp: new Date(),
@@ -1097,11 +1097,11 @@ export function ConversationView() {
             )}
 
             {isLoading && (
-              <div className="animate-msg-in" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div className="animate-msg-in" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {toolSteps.filter(s => s.action.type === "tool_call").map((step, i) => (
                   <ToolCallBubble key={i} step={step} />
                 ))}
-                <ThinkingIndicator hasTools={toolSteps.length > 0} />
+                <ThinkingIndicator hasTools={toolSteps.some(s => s.action.type === "tool_call")} />
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -1869,29 +1869,68 @@ function ToolCallBubble({ step }: { step: AgentStep }) {
   const [expanded, setExpanded] = useState(false);
   const isDone = !!step.result;
   const success = step.result?.success;
+  const tool = step.action.tool || "";
+  const args = step.action.args || {};
+
+  const toolIcon = () => {
+    if (tool === "write_file" || tool === "create_file") return "📝";
+    if (tool === "read_file") return "📄";
+    if (tool === "bash" || tool === "shell" || tool === "execute_command") return "⚡";
+    if (tool === "search" || tool === "grep" || tool === "find") return "🔍";
+    if (tool === "edit_file" || tool === "patch") return "✏️";
+    if (tool === "delete_file") return "🗑️";
+    return "⚙️";
+  };
+
+  const toolDetail = () => {
+    if (args.path) {
+      const name = args.path.split(/[/\\]/).pop() || args.path;
+      return name;
+    }
+    if (args.command) {
+      const cmd = args.command.length > 60 ? args.command.slice(0, 60) + "…" : args.command;
+      return cmd;
+    }
+    if (args.language) return `.${args.language}`;
+    return null;
+  };
+
+  const isExecuting = !isDone;
+  const detail = toolDetail();
 
   return (
     <div className="animate-msg-in" style={{ marginLeft: 38 }}>
       <button
         onClick={() => setExpanded(!expanded)}
         style={{
-          display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px",
+          display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px",
           borderRadius: 8, cursor: "pointer", border: "none",
-          background: "rgba(139,92,246,0.06)",
+          background: isExecuting ? "rgba(139,92,246,0.1)" : "rgba(139,92,246,0.06)",
           transition: "background 0.15s",
+          maxWidth: "100%",
         }}
-        onMouseEnter={e => e.currentTarget.style.background = "rgba(139,92,246,0.12)"}
-        onMouseLeave={e => e.currentTarget.style.background = "rgba(139,92,246,0.06)"}
+        onMouseEnter={e => e.currentTarget.style.background = "rgba(139,92,246,0.15)"}
+        onMouseLeave={e => e.currentTarget.style.background = isExecuting ? "rgba(139,92,246,0.1)" : "rgba(139,92,246,0.06)"}
       >
-        {expanded
-          ? <ChevronDown style={{ width: 10, height: 10, color: "var(--accent)" }} />
-          : <ChevronRight style={{ width: 10, height: 10, color: "var(--accent)" }} />
+        {isExecuting
+          ? <Loader2 style={{ width: 11, height: 11, color: "var(--accent)", animation: "spin 1s linear infinite", flexShrink: 0 }} />
+          : expanded
+            ? <ChevronDown style={{ width: 10, height: 10, color: "var(--accent)", flexShrink: 0 }} />
+            : <ChevronRight style={{ width: 10, height: 10, color: "var(--accent)", flexShrink: 0 }} />
         }
-        <Terminal style={{ width: 11, height: 11, color: "var(--accent)" }} />
-        <span style={{ fontSize: 11, color: "var(--accent-hover)", fontFamily: "'JetBrains Mono', monospace" }}>{step.action.tool}</span>
+        <span style={{ fontSize: 12, flexShrink: 0 }}>{toolIcon()}</span>
+        <span style={{ fontSize: 11, color: "var(--accent-hover)", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>{tool}</span>
+        {detail && (
+          <span style={{
+            fontSize: 10, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 300,
+          }}>
+            {detail}
+          </span>
+        )}
         {isDone && (
           <span style={{
-            fontSize: 9, fontWeight: 600, padding: "1px 5px", borderRadius: 4,
+            fontSize: 9, fontWeight: 600, padding: "1px 6px", borderRadius: 4, flexShrink: 0,
             background: success ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)",
             color: success ? "var(--success)" : "var(--error)",
           }}>
@@ -1904,9 +1943,9 @@ function ToolCallBubble({ step }: { step: AgentStep }) {
           marginTop: 4, padding: "8px 12px", borderRadius: 8,
           background: "var(--bg-surface)", border: "1px solid var(--border)",
           fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: "var(--text-secondary)",
-          maxHeight: 120, overflow: "auto", whiteSpace: "pre-wrap",
+          maxHeight: 200, overflow: "auto", whiteSpace: "pre-wrap",
         }}>
-          {step.result.output?.slice(0, 500) || step.result.error}
+          {step.result.output?.slice(0, 1000) || step.result.error}
         </div>
       )}
     </div>

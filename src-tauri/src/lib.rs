@@ -1,9 +1,12 @@
 use std::process::{Command, Child, Stdio};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+use std::collections::HashMap;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -41,9 +44,29 @@ struct ServerProcesses {
     http_client: reqwest::Client,
 }
 
+struct StreamingProcess {
+    stdout_buf: Mutex<String>,
+    stderr_buf: Mutex<String>,
+    read_cursor: Mutex<usize>,
+    done: Mutex<bool>,
+    exit_code: Mutex<Option<i32>>,
+    pid: u32,
+}
+
+#[derive(Serialize)]
+struct StreamingPollResult {
+    new_output: String,
+    new_stderr: String,
+    done: bool,
+    exit_code: Option<i32>,
+}
+
+static STREAM_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+
 struct AppState {
     servers: Mutex<ServerProcesses>,
     scripts_dir: Mutex<Option<String>>,
+    streaming: Mutex<HashMap<String, Arc<StreamingProcess>>>,
 }
 
 impl Default for AppState {
@@ -59,6 +82,7 @@ impl Default for AppState {
                 http_client: reqwest::Client::new(),
             }),
             scripts_dir: Mutex::new(None),
+            streaming: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -211,6 +235,167 @@ async fn execute_command(command: String, cwd: Option<String>) -> Result<Command
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
+fn start_streaming_command(state: tauri::State<AppState>, command: String, cwd: Option<String>) -> Result<String, String> {
+    let working_dir = cwd.unwrap_or_else(|| {
+        std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string())
+    });
+
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = Command::new("powershell");
+        c.args(["-NoProfile", "-NonInteractive", "-Command", &command])
+            .current_dir(&working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null());
+
+        let sys_path = std::env::var("PATH").unwrap_or_default();
+        let extra_dirs = [
+            r"C:\Program Files\nodejs",
+            r"C:\Program Files\Git\cmd",
+        ];
+        let user_appdata = std::env::var("APPDATA")
+            .map(|a| format!(r"{}\npm", a))
+            .unwrap_or_default();
+        let mut full_path = String::new();
+        for d in &extra_dirs {
+            if Path::new(d).exists() && !sys_path.contains(d) {
+                full_path.push_str(d);
+                full_path.push(';');
+            }
+        }
+        if !user_appdata.is_empty() && Path::new(&user_appdata).exists() && !sys_path.contains(&user_appdata) {
+            full_path.push_str(&user_appdata);
+            full_path.push(';');
+        }
+        full_path.push_str(&sys_path);
+        c.env("PATH", &full_path);
+        c.creation_flags(CREATE_NO_WINDOW);
+        c
+    };
+
+    #[cfg(not(target_os = "windows"))]
+    let mut cmd = {
+        let mut c = Command::new("sh");
+        c.args(["-c", &command])
+            .current_dir(&working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null());
+        c
+    };
+
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn: {}", e))?;
+    let pid = child.id();
+    let id = format!("stream-{}", STREAM_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
+
+    let proc = Arc::new(StreamingProcess {
+        stdout_buf: Mutex::new(String::new()),
+        stderr_buf: Mutex::new(String::new()),
+        read_cursor: Mutex::new(0),
+        done: Mutex::new(false),
+        exit_code: Mutex::new(None),
+        pid,
+    });
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    let proc_out = Arc::clone(&proc);
+    if let Some(stdout) = stdout {
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    let mut buf = proc_out.stdout_buf.lock().unwrap_or_else(|e| e.into_inner());
+                    buf.push_str(&line);
+                    buf.push('\n');
+                }
+            }
+        });
+    }
+
+    let proc_err = Arc::clone(&proc);
+    if let Some(stderr) = stderr {
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    let mut buf = proc_err.stderr_buf.lock().unwrap_or_else(|e| e.into_inner());
+                    buf.push_str(&line);
+                    buf.push('\n');
+                }
+            }
+        });
+    }
+
+    let proc_wait = Arc::clone(&proc);
+    std::thread::spawn(move || {
+        let status = child.wait();
+        let code = status.ok().and_then(|s| s.code()).unwrap_or(-1);
+        *proc_wait.exit_code.lock().unwrap_or_else(|e| e.into_inner()) = Some(code);
+        *proc_wait.done.lock().unwrap_or_else(|e| e.into_inner()) = true;
+    });
+
+    state.streaming.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), proc);
+    Ok(id)
+}
+
+#[tauri::command]
+fn poll_streaming_command(state: tauri::State<AppState>, id: String) -> Result<StreamingPollResult, String> {
+    let map = state.streaming.lock().unwrap_or_else(|e| e.into_inner());
+    let proc = map.get(&id).ok_or("No such streaming command")?;
+
+    let stdout_buf = proc.stdout_buf.lock().unwrap_or_else(|e| e.into_inner());
+    let stderr_buf = proc.stderr_buf.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cursor = proc.read_cursor.lock().unwrap_or_else(|e| e.into_inner());
+    let done = *proc.done.lock().unwrap_or_else(|e| e.into_inner());
+    let exit_code = *proc.exit_code.lock().unwrap_or_else(|e| e.into_inner());
+
+    let new_output = if *cursor < stdout_buf.len() {
+        let chunk = stdout_buf[*cursor..].to_string();
+        *cursor = stdout_buf.len();
+        chunk
+    } else {
+        String::new()
+    };
+
+    let new_stderr = stderr_buf.clone();
+
+    Ok(StreamingPollResult { new_output, new_stderr, done, exit_code })
+}
+
+#[tauri::command]
+fn kill_streaming_command(state: tauri::State<AppState>, id: String) -> Result<(), String> {
+    let map = state.streaming.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(proc) = map.get(&id) {
+        let pid = proc.pid;
+        #[cfg(target_os = "windows")]
+        {
+            let mut cmd = Command::new("taskkill");
+            cmd.args(["/F", "/T", "/PID", &pid.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .stdin(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW);
+            let _ = cmd.output();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
+        }
+        *proc.done.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        *proc.exit_code.lock().unwrap_or_else(|e| e.into_inner()) = Some(-1);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn cleanup_streaming_command(state: tauri::State<AppState>, id: String) {
+    state.streaming.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
 }
 
 fn resolve_path(path: &str) -> String {
@@ -949,6 +1134,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             execute_command,
+            start_streaming_command,
+            poll_streaming_command,
+            kill_streaming_command,
+            cleanup_streaming_command,
             get_gpu_stats,
             get_sys_stats,
             read_file,
