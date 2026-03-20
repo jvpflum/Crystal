@@ -1,4 +1,6 @@
 import { openclawClient } from "./openclaw";
+import { invoke } from "@tauri-apps/api/core";
+import { escapeShellArg } from "@/lib/tools";
 
 export interface AgentAction {
   type: "tool_call" | "response" | "thinking";
@@ -51,12 +53,76 @@ class AgentService {
    * for a typewriter effect. All orchestration (tools, memory, skills) is handled
    * by the OpenClaw gateway.
    */
-  async *streamChat(userMessage: string): AsyncGenerator<string> {
+  private isImageRequest(msg: string): string | null {
+    const lower = msg.toLowerCase();
+    const patterns = [
+      /(?:generate|create|make|draw|paint|render|design)\s+(?:an?\s+)?(?:image|picture|photo|illustration|art|artwork|icon|logo|graphic)\s+(?:of\s+)?(.+)/i,
+      /(?:image|picture|photo)\s+(?:of\s+)?(.+)/i,
+    ];
+    for (const p of patterns) {
+      const m = msg.match(p);
+      if (m?.[1]) return m[1].trim().replace(/[.!?]+$/, "");
+    }
+    if ((lower.includes("generate") || lower.includes("create") || lower.includes("make") || lower.includes("draw")) &&
+        (lower.includes("image") || lower.includes("picture") || lower.includes("photo"))) {
+      return msg.replace(/^.*?(?:image|picture|photo)\s*(?:of\s*)?/i, "").trim() || msg;
+    }
+    return null;
+  }
+
+  private async generateImage(prompt: string): Promise<string> {
+    const escaped = escapeShellArg(prompt);
+    const outDir = "$env:USERPROFILE\\.openclaw\\workspace\\images";
+    const skillPath = "$env:APPDATA\\npm\\node_modules\\openclaw\\skills\\openai-image-gen\\scripts\\gen.py";
+    const apiKeyCmd = `$env:OPENAI_API_KEY = (Get-Content "$env:USERPROFILE\\.openclaw\\agents\\main\\agent\\auth-profiles.json" | ConvertFrom-Json).profiles.'openai:default'.key`;
+    const cmd = `${apiKeyCmd}; New-Item -ItemType Directory -Force -Path "${outDir}" | Out-Null; python3 "${skillPath}" --prompt "${escaped}" --count 1 --out-dir "${outDir}"`;
+
+    const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+      command: cmd, cwd: null,
+    });
+
+    if (result.code !== 0) {
+      const err = result.stderr || result.stdout || "Unknown error";
+      return `**Image generation failed:** ${err}`;
+    }
+
+    const listResult = await invoke<{ stdout: string; code: number }>("execute_command", {
+      command: `Get-ChildItem "${outDir}" -Filter *.png | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName`,
+      cwd: null,
+    });
+    const imagePath = listResult.stdout?.trim();
+
+    if (imagePath) {
+      try {
+        const b64Result = await invoke<{ stdout: string; code: number }>("execute_command", {
+          command: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("${imagePath}"))`,
+          cwd: null,
+        });
+        if (b64Result.code === 0 && b64Result.stdout?.trim()) {
+          const dataUrl = `data:image/png;base64,${b64Result.stdout.trim()}`;
+          return `Here's your generated image:\n\n![${prompt}](${dataUrl})\n\n*Saved to: \`${imagePath}\`*`;
+        }
+      } catch { /* fall through to path-only response */ }
+      return `Image generated successfully!\n\n*Saved to: \`${imagePath}\`*\n\n(Open the file to view it)`;
+    }
+
+    return `Image generated in the workspace images folder.`;
+  }
+
+  async *streamChat(userMessage: string, sessionId?: string): AsyncGenerator<string> {
     this.emitStep({ action: { type: "thinking" }, timestamp: new Date() });
 
-    const response = await openclawClient.openclawChat(userMessage);
-    const cleaned = this.extractAndEmitActions(response);
+    const imagePrompt = this.isImageRequest(userMessage);
+    let response: string;
 
+    if (imagePrompt) {
+      this.emitStep({ action: { type: "tool_call", tool: "openai-image-gen", args: { prompt: imagePrompt } }, timestamp: new Date() });
+      response = await this.generateImage(imagePrompt);
+    } else {
+      response = await openclawClient.openclawChat(userMessage, sessionId);
+    }
+
+    const cleaned = this.extractAndEmitActions(response);
     this.emitStep({ action: { type: "response", content: cleaned }, timestamp: new Date() });
 
     const CHARS_PER_TICK = 3;
@@ -69,8 +135,8 @@ class AgentService {
     }
   }
 
-  async chat(userMessage: string): Promise<string> {
-    const response = await openclawClient.openclawChat(userMessage);
+  async chat(userMessage: string, sessionId?: string): Promise<string> {
+    const response = await openclawClient.openclawChat(userMessage, sessionId);
     return this.extractAndEmitActions(response);
   }
 

@@ -3,8 +3,10 @@ import { create } from "zustand";
 export type AppView =
   | "home"
   | "conversation"
-  | "office"
+  | "command-center"
   | "agents"
+  | "office"
+  | "factory"
   | "marketplace"
   | "models"
   | "sessions"
@@ -21,7 +23,16 @@ export type AppView =
   | "nodes"
   | "browser";
 
-export type VoiceState = "idle" | "listening" | "processing" | "thinking" | "speaking";
+export type VoiceState =
+  | "idle"
+  | "listening"
+  | "processing"
+  | "thinking"
+  | "transcribing"
+  | "awaiting_confirmation"
+  | "executing"
+  | "speaking"
+  | "error";
 
 interface AppState {
   currentView: AppView;

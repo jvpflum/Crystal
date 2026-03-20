@@ -199,8 +199,37 @@ async function runCli(command: string): Promise<string> {
 
 async function fetchChannels(): Promise<Channel[]> {
   try {
-    const raw = await runCli("openclaw channels list --json");
-    return JSON.parse(raw);
+    const statusRaw = await runCli("openclaw channels status --json");
+    const statusData = JSON.parse(statusRaw);
+    const channels: Channel[] = [];
+    const meta: { id: string; label: string }[] = statusData.channelMeta || [];
+    const chMap: Record<string, { configured: boolean; running: boolean }> = statusData.channels || {};
+    const accounts: Record<string, { accountId: string; connected: boolean; bot?: { username: string } }[]> = statusData.channelAccounts || {};
+
+    for (const m of meta) {
+      const ch = chMap[m.id];
+      if (!ch?.configured) continue;
+      const accs = accounts[m.id] || [];
+      const connected = accs.some(a => a.connected);
+      channels.push({
+        name: m.id,
+        type: m.id,
+        status: connected ? "connected" : ch.running ? "disconnected" : "disconnected",
+        capabilities: [],
+        config: {},
+      });
+    }
+
+    if (channels.length === 0) {
+      const listRaw = await runCli("openclaw channels list --json");
+      const listData = JSON.parse(listRaw);
+      const chat: Record<string, string[]> = listData.chat || {};
+      for (const [type] of Object.entries(chat)) {
+        channels.push({ name: type, type, status: "disconnected", capabilities: [], config: {} });
+      }
+    }
+
+    return channels;
   } catch {
     return [];
   }
@@ -209,7 +238,18 @@ async function fetchChannels(): Promise<Channel[]> {
 async function fetchStatus(): Promise<Record<string, string>> {
   try {
     const raw = await runCli("openclaw channels status --json");
-    return JSON.parse(raw);
+    const data = JSON.parse(raw);
+    const result: Record<string, string> = {};
+    const chMap: Record<string, { configured: boolean; running: boolean }> = data.channels || {};
+    const accounts: Record<string, { connected: boolean }[]> = data.channelAccounts || {};
+
+    for (const [id, ch] of Object.entries(chMap)) {
+      if (!ch.configured) continue;
+      const accs = accounts[id] || [];
+      const connected = accs.some(a => a.connected);
+      result[id] = connected ? "connected" : ch.running ? "disconnected" : "disconnected";
+    }
+    return result;
   } catch {
     return {};
   }

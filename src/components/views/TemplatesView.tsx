@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { escapeShellArg } from "@/lib/tools";
 import {
@@ -18,11 +18,16 @@ import {
   Zap,
   Edit3,
   Copy,
+  MessageSquare,
+  ArrowRight,
+  Bot,
 } from "lucide-react";
+import { useAppStore } from "@/stores/appStore";
 
 interface WorkflowStep {
   id: string;
   message: string;
+  agentId?: string;
 }
 
 interface Workflow {
@@ -196,25 +201,47 @@ export function TemplatesView() {
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
   const [userInput, setUserInput] = useState("");
   const resultsRef = useRef<HTMLDivElement>(null);
+  const setView = useAppStore(s => s.setView);
+  const [availableAgents, setAvailableAgents] = useState<string[]>(["main"]);
 
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [newCategory, setNewCategory] = useState<Workflow["category"]>("Productivity");
-  const [newSteps, setNewSteps] = useState<{ message: string }[]>([{ message: "" }]);
+  const [newSteps, setNewSteps] = useState<{ message: string; agentId?: string }[]>([{ message: "" }]);
   const [newNeedsInput, setNewNeedsInput] = useState(false);
   const [newInputLabel, setNewInputLabel] = useState("");
   const [createError, setCreateError] = useState("");
 
+  const loadAgents = useCallback(async () => {
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: "openclaw agents --json", cwd: null,
+      });
+      if (result.code === 0 && result.stdout) {
+        const data = JSON.parse(result.stdout);
+        const ids = Array.isArray(data) ? data.map((a: { id: string }) => a.id) : ["main"];
+        setAvailableAgents(ids.length > 0 ? ids : ["main"]);
+      }
+    } catch {
+      setAvailableAgents(["main"]);
+    }
+  }, []);
+
   useEffect(() => {
     setCustomWorkflows(loadCustomWorkflows());
-  }, []);
+    loadAgents();
+  }, [loadAgents]);
 
   const allWorkflows = [...BUILTIN_WORKFLOWS, ...customWorkflows];
   const selected = allWorkflows.find((w) => w.id === selectedId) ?? null;
 
+  const [workflowSessionId, setWorkflowSessionId] = useState<string | null>(null);
+
   const runWorkflow = async (workflow: Workflow) => {
     if (workflow.needsInput && !userInput.trim()) return;
 
+    const sessionId = crypto.randomUUID();
+    setWorkflowSessionId(sessionId);
     setRunningId(workflow.id);
     setSelectedId(workflow.id);
     setCurrentStep(0);
@@ -238,7 +265,8 @@ export function TemplatesView() {
 
       try {
         const escaped = escapeShellArg(msg);
-        const command = `openclaw agent --agent main --message "${escaped}"`;
+        const agent = step.agentId || "main";
+        const command = `openclaw agent --agent "${agent}" --session-id ${sessionId} --message "${escaped}"`;
         const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
           command,
           cwd: null,
@@ -277,7 +305,7 @@ export function TemplatesView() {
       isBuiltIn: false,
       needsInput: newNeedsInput,
       inputLabel: newInputLabel.trim() || "Input",
-      steps: validSteps.map((s, i) => ({ id: `step-${i}`, message: s.message.trim() })),
+      steps: validSteps.map((s, i) => ({ id: `step-${i}`, message: s.message.trim(), agentId: s.agentId })),
     };
     const updated = [...customWorkflows, wf];
     setCustomWorkflows(updated);
@@ -375,19 +403,36 @@ export function TemplatesView() {
 
             <p style={{ fontSize: 10, textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: 1, margin: "0 0 6px", fontWeight: 600 }}>Steps</p>
             {newSteps.map((step, i) => (
-              <div key={i} style={{ display: "flex", gap: 4, marginBottom: 4 }}>
-                <span style={{ width: 18, height: 28, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }}>
-                  {i + 1}
-                </span>
-                <input type="text" placeholder={`Step ${i + 1} message...`} value={step.message}
-                  onChange={(e) => { const updated = [...newSteps]; updated[i] = { message: e.target.value }; setNewSteps(updated); }}
-                  style={{ flex: 1, padding: "4px 8px", borderRadius: 6, background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 11, outline: "none" }}
-                />
-                {newSteps.length > 1 && (
-                  <button onClick={() => setNewSteps(newSteps.filter((_, j) => j !== i))}
-                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2, display: "flex", alignItems: "center" }}>
-                    <Trash2 style={{ width: 10, height: 10 }} />
-                  </button>
+              <div key={i} style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 6 }}>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <span style={{ width: 18, height: 28, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }}>
+                    {i + 1}
+                  </span>
+                  <input type="text" placeholder={`Step ${i + 1} message...`} value={step.message}
+                    onChange={(e) => { const updated = [...newSteps]; updated[i] = { ...updated[i], message: e.target.value }; setNewSteps(updated); }}
+                    style={{ flex: 1, padding: "4px 8px", borderRadius: 6, background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 11, outline: "none" }}
+                  />
+                  {newSteps.length > 1 && (
+                    <button onClick={() => setNewSteps(newSteps.filter((_, j) => j !== i))}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2, display: "flex", alignItems: "center" }}>
+                      <Trash2 style={{ width: 10, height: 10 }} />
+                    </button>
+                  )}
+                </div>
+                {availableAgents.length > 1 && (
+                  <div style={{ marginLeft: 22, display: "flex", alignItems: "center", gap: 4 }}>
+                    <Bot style={{ width: 9, height: 9, color: "var(--text-muted)" }} />
+                    <select value={step.agentId || "main"} onChange={(e) => {
+                      const updated = [...newSteps];
+                      updated[i] = { ...updated[i], agentId: e.target.value === "main" ? undefined : e.target.value };
+                      setNewSteps(updated);
+                    }}
+                      style={{ padding: "2px 4px", borderRadius: 4, background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text-secondary)", fontSize: 9, outline: "none" }}>
+                      {availableAgents.map(a => (
+                        <option key={a} value={a} style={{ background: "var(--bg-base)" }}>{a}</option>
+                      ))}
+                    </select>
+                  </div>
                 )}
               </div>
             ))}
@@ -583,13 +628,24 @@ export function TemplatesView() {
                           <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600 }}>{i + 1}</span>
                         )}
                       </div>
-                      <span style={{
-                        flex: 1, fontSize: 12,
-                        color: isRunning ? "var(--accent)" : isDone ? "var(--text-secondary)" : "var(--text-muted)",
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      }}>
-                        {displayMsg}
-                      </span>
+                      <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{
+                          fontSize: 12,
+                          color: isRunning ? "var(--accent)" : isDone ? "var(--text-secondary)" : "var(--text-muted)",
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>
+                          {displayMsg}
+                        </span>
+                        {step.agentId && step.agentId !== "main" && (
+                          <span style={{
+                            fontSize: 8, padding: "1px 5px", borderRadius: 4, flexShrink: 0,
+                            background: "rgba(139,92,246,0.1)", color: "rgba(139,92,246,0.8)",
+                            fontWeight: 500, display: "flex", alignItems: "center", gap: 3,
+                          }}>
+                            <Bot style={{ width: 8, height: 8 }} />{step.agentId}
+                          </span>
+                        )}
+                      </div>
                       {isDone && (
                         isExpanded
                           ? <ChevronDown style={{ width: 12, height: 12, color: "var(--text-muted)" }} />
@@ -642,6 +698,61 @@ export function TemplatesView() {
                   <button onClick={copyResults}
                     style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-elevated)", color: "var(--text-secondary)", fontSize: 10, cursor: "pointer" }}>
                     <Copy style={{ width: 10, height: 10 }} /> Copy All
+                  </button>
+                </div>
+
+                {/* Action buttons */}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    onClick={() => {
+                      const summary = stepResults.map((r, i) => {
+                        const step = selected.steps[i];
+                        return `**Step ${i + 1}** (${step?.message?.slice(0, 60) || ""}...):\n${r.output}`;
+                      }).join("\n\n---\n\n");
+                      const context = `The workflow "${selected.name}" just completed. Here are the results:\n\n${summary}\n\nPlease review these results and execute any actionable items (send emails, create files, schedule tasks, etc). Ask me to confirm before taking any irreversible actions.`;
+                      setView("conversation");
+                      setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent("crystal:send-to-chat", {
+                          detail: { context, surface: "workflow", sessionId: workflowSessionId },
+                        }));
+                      }, 300);
+                    }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6,
+                      padding: "7px 14px", borderRadius: 8, border: "none",
+                      background: "var(--accent)", color: "#fff",
+                      fontSize: 11, fontWeight: 600, cursor: "pointer",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    <ArrowRight style={{ width: 12, height: 12 }} />
+                    Execute in Chat
+                  </button>
+                  <button
+                    onClick={() => {
+                      const summary = stepResults.map((r, i) => {
+                        const step = selected.steps[i];
+                        return `[Step ${i + 1}: ${step?.message?.slice(0, 50)}]\n${r.output}`;
+                      }).join("\n\n");
+                      const context = `Here are the results from the "${selected.name}" workflow:\n\n${summary}`;
+                      setView("conversation");
+                      setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent("crystal:send-to-chat", {
+                          detail: { context, followUp: "Summarize these results and suggest next steps.", surface: "workflow", sessionId: workflowSessionId },
+                        }));
+                      }, 300);
+                    }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6,
+                      padding: "7px 14px", borderRadius: 8,
+                      border: "1px solid var(--border)",
+                      background: "var(--bg-elevated)", color: "var(--text-secondary)",
+                      fontSize: 11, fontWeight: 500, cursor: "pointer",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    <MessageSquare style={{ width: 12, height: 12 }} />
+                    Discuss in Chat
                   </button>
                 </div>
               </div>

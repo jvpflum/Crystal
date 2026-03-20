@@ -27,6 +27,8 @@ struct ServerStatus {
     tts_running: bool,
     ollama_running: bool,
     openclaw_running: bool,
+    nvidia_stt_running: bool,
+    nvidia_tts_running: bool,
 }
 
 struct ServerProcesses {
@@ -34,6 +36,8 @@ struct ServerProcesses {
     whisper: Option<Child>,
     tts: Option<Child>,
     openclaw: Option<Child>,
+    nvidia_stt: Option<Child>,
+    nvidia_tts: Option<Child>,
     http_client: reqwest::Client,
 }
 
@@ -50,6 +54,8 @@ impl Default for AppState {
                 whisper: None,
                 tts: None,
                 openclaw: None,
+                nvidia_stt: None,
+                nvidia_tts: None,
                 http_client: reqwest::Client::new(),
             }),
             scripts_dir: Mutex::new(None),
@@ -439,6 +445,78 @@ fn get_server_status() -> ServerStatus {
         tts_running: check_port_in_use(8081),
         ollama_running: check_port_in_use(11434),
         openclaw_running: check_port_in_use(18789),
+        nvidia_stt_running: check_port_in_use(8090),
+        nvidia_tts_running: check_port_in_use(8091),
+    }
+}
+
+#[tauri::command]
+fn start_nvidia_speech_servers(state: tauri::State<AppState>) -> Result<String, String> {
+    let scripts_dir = state.scripts_dir.lock().unwrap_or_else(|e| e.into_inner());
+    let scripts_path = scripts_dir.as_ref().ok_or("Scripts directory not set")?;
+
+    let python_cmd = find_python().unwrap_or_else(|| "python".to_string());
+    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
+    let mut started = Vec::new();
+
+    if !check_port_in_use(8090) {
+        let stt_script = Path::new(scripts_path).join("nvidia_stt_worker.py");
+        if stt_script.exists() {
+            let script_str = stt_script.to_string_lossy().to_string();
+            match spawn_hidden(&python_cmd, &[&script_str]) {
+                Ok(child) => {
+                    servers.nvidia_stt = Some(child);
+                    started.push("NVIDIA STT (Nemotron)");
+                }
+                Err(e) => eprintln!("Failed to start NVIDIA STT: {}", e),
+            }
+        }
+    } else {
+        started.push("NVIDIA STT (already running)");
+    }
+
+    if !check_port_in_use(8091) {
+        let tts_script = Path::new(scripts_path).join("nvidia_tts_worker.py");
+        if tts_script.exists() {
+            let script_str = tts_script.to_string_lossy().to_string();
+            match spawn_hidden(&python_cmd, &[&script_str]) {
+                Ok(child) => {
+                    servers.nvidia_tts = Some(child);
+                    started.push("NVIDIA TTS (Magpie)");
+                }
+                Err(e) => eprintln!("Failed to start NVIDIA TTS: {}", e),
+            }
+        }
+    } else {
+        started.push("NVIDIA TTS (already running)");
+    }
+
+    if started.is_empty() {
+        Ok("No NVIDIA speech servers needed to start".to_string())
+    } else {
+        Ok(format!("Started: {}", started.join(", ")))
+    }
+}
+
+#[tauri::command]
+fn stop_nvidia_speech_servers(state: tauri::State<AppState>) -> Result<String, String> {
+    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
+    let mut stopped = Vec::new();
+
+    if let Some(mut child) = servers.nvidia_stt.take() {
+        kill_process_tree(&mut child);
+        stopped.push("NVIDIA STT");
+    }
+
+    if let Some(mut child) = servers.nvidia_tts.take() {
+        kill_process_tree(&mut child);
+        stopped.push("NVIDIA TTS");
+    }
+
+    if stopped.is_empty() {
+        Ok("No NVIDIA speech servers were running".to_string())
+    } else {
+        Ok(format!("Stopped: {}", stopped.join(", ")))
     }
 }
 
@@ -697,7 +775,7 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
                     // Kill orphaned voice servers from previous sessions
                     #[cfg(target_os = "windows")]
                     {
-                        for port in [8080u16, 8081] {
+                        for port in [8080u16, 8081, 8090, 8091] {
                             if check_port_in_use(port) {
                                 let kill_cmd = format!("Get-NetTCPConnection -LocalPort {} -ErrorAction SilentlyContinue | ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}", port);
                                 let mut cmd = Command::new("powershell");
@@ -710,8 +788,37 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
                         std::thread::sleep(std::time::Duration::from_millis(500));
                     }
 
+                    // Start NVIDIA speech workers (primary)
+                    let nvidia_stt_script = scripts_path.join("nvidia_stt_worker.py");
+                    let nvidia_tts_script = scripts_path.join("nvidia_tts_worker.py");
+
+                    if nvidia_stt_script.exists() {
+                        println!("Starting NVIDIA STT worker (Nemotron/Parakeet)...");
+                        let script_str = nvidia_stt_script.to_string_lossy().to_string();
+                        match spawn_hidden(python, &[&script_str]) {
+                            Ok(child) => {
+                                servers.nvidia_stt = Some(child);
+                                println!("NVIDIA STT worker started on port 8090");
+                            }
+                            Err(e) => eprintln!("Failed to start NVIDIA STT: {}", e),
+                        }
+                    }
+
+                    if nvidia_tts_script.exists() {
+                        println!("Starting NVIDIA TTS worker (Magpie)...");
+                        let script_str = nvidia_tts_script.to_string_lossy().to_string();
+                        match spawn_hidden(python, &[&script_str]) {
+                            Ok(child) => {
+                                servers.nvidia_tts = Some(child);
+                                println!("NVIDIA TTS worker started on port 8091");
+                            }
+                            Err(e) => eprintln!("Failed to start NVIDIA TTS: {}", e),
+                        }
+                    }
+
+                    // Start fallback Whisper/Kokoro servers
                     if whisper_script.exists() {
-                        println!("Starting Whisper STT server...");
+                        println!("Starting Whisper STT server (fallback)...");
                         let script_str = whisper_script.to_string_lossy().to_string();
                         match spawn_hidden(python, &[&script_str]) {
                             Ok(child) => {
@@ -723,7 +830,7 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
                     }
                     
                     if tts_script.exists() {
-                        println!("Starting TTS server...");
+                        println!("Starting TTS server (fallback)...");
                         let script_str = tts_script.to_string_lossy().to_string();
                         match spawn_hidden(python, &[&script_str]) {
                             Ok(child) => {
@@ -777,6 +884,16 @@ fn cleanup_servers(app: &AppHandle<impl Runtime>) {
             println!("Stopping TTS server...");
             kill_process_tree(&mut child);
         }
+
+        if let Some(mut child) = servers.nvidia_stt.take() {
+            println!("Stopping NVIDIA STT worker...");
+            kill_process_tree(&mut child);
+        }
+
+        if let Some(mut child) = servers.nvidia_tts.take() {
+            println!("Stopping NVIDIA TTS worker...");
+            kill_process_tree(&mut child);
+        }
         
         if let Some(mut child) = servers.openclaw.take() {
             println!("Stopping OpenClaw daemon...");
@@ -815,6 +932,8 @@ pub fn run() {
             get_server_status,
             start_voice_servers,
             stop_voice_servers,
+            start_nvidia_speech_servers,
+            stop_nvidia_speech_servers,
             start_openclaw_daemon,
             http_proxy,
             get_openclaw_token

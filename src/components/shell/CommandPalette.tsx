@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore, type AppView } from "@/stores/appStore";
 import {
-  Home, MessageSquare, Building2, Bot, Store, Cpu, History, Radio, Brain,
+  Home, MessageSquare, Building2, Bot, Store, Cpu, Radio, Brain,
   Clock, Anchor, Wrench, Shield, Stethoscope, Activity, Settings,
   Trash2, HeartPulse, ShieldCheck, Thermometer, RotateCcw, Search,
   Network, Globe,
@@ -27,14 +27,13 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
   const commands: CommandItem[] = useMemo(() => [
     { id: "home",         icon: Home,          label: "Home",      description: "Dashboard overview",          category: "Navigation", action: () => setView("home" as AppView) },
     { id: "chat",         icon: MessageSquare, label: "Chat",      description: "Open conversation",           category: "Navigation", action: () => setView("conversation" as AppView) },
-    { id: "office",       icon: Building2,     label: "Office",    description: "Sub-agent workspace",         category: "Navigation", action: () => setView("office" as AppView) },
+    { id: "command-center", icon: Building2,   label: "Command Center", description: "Calendar, workflows & scheduling", category: "Navigation", action: () => setView("command-center" as AppView) },
     { id: "skills",       icon: Store,         label: "Skills",    description: "Browse skill marketplace",    category: "Navigation", action: () => setView("marketplace" as AppView) },
     { id: "models",       icon: Cpu,           label: "Models",    description: "Manage LLM models",           category: "Navigation", action: () => setView("models" as AppView) },
-    { id: "sessions",     icon: History,       label: "Sessions",  description: "View chat sessions",          category: "Navigation", action: () => setView("sessions" as AppView) },
-    { id: "agents",       icon: Bot,           label: "Agents",    description: "Manage AI agents",            category: "Navigation", action: () => setView("agents" as AppView) },
+    { id: "agents",       icon: Bot,           label: "Agents Hub", description: "Manage agents, sessions & task dispatch", category: "Navigation", action: () => setView("agents" as AppView) },
     { id: "channels",     icon: Radio,         label: "Channels",  description: "Communication channels",      category: "Navigation", action: () => setView("channels" as AppView) },
     { id: "memory",       icon: Brain,         label: "Memory",    description: "Knowledge & memory store",    category: "Navigation", action: () => setView("memory" as AppView) },
-    { id: "cron",         icon: Clock,         label: "Cron",      description: "Scheduled tasks",             category: "Navigation", action: () => setView("cron" as AppView) },
+    { id: "cron",         icon: Clock,         label: "Scheduled Jobs", description: "Cron jobs & scheduling",  category: "Navigation", action: () => setView("command-center" as AppView) },
 
     { id: "hooks",        icon: Anchor,        label: "Hooks",     description: "Manage hooks",                category: "Navigation", action: () => setView("hooks" as AppView) },
     { id: "tools",        icon: Wrench,        label: "Tools",     description: "Available tools",             category: "Navigation", action: () => setView("tools" as AppView) },

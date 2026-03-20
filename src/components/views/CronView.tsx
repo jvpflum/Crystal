@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { escapeShellArg } from "@/lib/tools";
+import { useDataStore } from "@/stores/dataStore";
 
 interface CronJob {
   id: string;
@@ -127,31 +128,17 @@ export function CronView() {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadJobs = useCallback(async () => {
+  const getCronJobs = useDataStore(s => s.getCronJobs);
+
+  const loadJobs = useCallback(async (force = false) => {
     try {
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "openclaw cron list --json --all", cwd: null,
-      });
-      if (result.code === 0 && result.stdout.trim()) {
-        try {
-          const parsed = JSON.parse(result.stdout);
-          const rawJobs: Record<string, unknown>[] = Array.isArray(parsed) ? parsed : parsed.jobs ?? [];
-          setJobs(rawJobs.map(parseCronJob));
-        } catch {
-          setJobs([]);
-        }
-      } else {
-        const stderr = result.stderr || "";
-        if (stderr.includes("gateway closed") || stderr.includes("handshake")) {
-          setError("Gateway connection failed — is the OpenClaw gateway running?");
-        }
-        setJobs([]);
-      }
-      if (!error?.includes("Gateway")) setError(null);
+      const raw = await getCronJobs(force);
+      setJobs(raw.map(parseCronJob));
+      setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load cron jobs");
+      if (jobs.length === 0) setError(e instanceof Error ? e.message : "Failed to load cron jobs");
     }
-  }, [error]);
+  }, [getCronJobs]);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -169,11 +156,14 @@ export function CronView() {
   }, []);
 
   useEffect(() => {
+    let active = true;
     (async () => {
       setLoading(true);
       await Promise.all([loadJobs(), loadStatus()]);
-      setLoading(false);
+      if (active) setLoading(false);
     })();
+    const interval = setInterval(() => { loadJobs(true); loadStatus(); }, 30_000);
+    return () => { active = false; clearInterval(interval); };
   }, [loadJobs, loadStatus]);
 
   const [runResult, setRunResult] = useState<{ id: string; text: string; ok: boolean } | null>(null);

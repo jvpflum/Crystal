@@ -1,3 +1,21 @@
+/**
+ * Voice service compatibility shim.
+ *
+ * This module preserves the original VoiceService API so that existing consumers
+ * (useVoice hook, VoiceOrb, ConversationView, SettingsView) continue to work
+ * without changes during migration.
+ *
+ * Under the hood, it delegates to the new ConversationAgent which uses
+ * provider-pluggable STT/TTS with NVIDIA Nemotron/Magpie as primary targets.
+ *
+ * Provider selection (automatic, runtime):
+ *   STT: NVIDIA Nemotron (8090) → Whisper (8080) → Browser Speech API
+ *   TTS: NVIDIA Magpie (8091)   → Kokoro (8081)  → Browser speechSynthesis
+ */
+
+import { ConversationAgent } from "./voice/conversation-agent";
+import type { VoiceState as NewVoiceState, ProviderStatuses } from "./voice/types";
+
 export type VoiceState = "idle" | "listening" | "processing" | "speaking";
 
 export interface VoiceConfig {
@@ -10,80 +28,84 @@ export interface VoiceConfig {
 
 const defaultConfig: VoiceConfig = {
   wakeWord: "hey crystal",
-  sttModel: "whisper-large-v3",
-  ttsVoice: "nova",
+  sttModel: "nvidia-nemotron",
+  ttsVoice: "default",
   silenceThreshold: 1500,
   maxRecordingTime: 30000,
 };
 
-interface SpeechRecognitionEvent {
-  resultIndex: number;
-  results: SpeechRecognitionResultList;
+/**
+ * Map expanded 8-state VoiceState to the legacy 4-state type
+ * so existing UI components don't break.
+ */
+function toLegacyState(state: NewVoiceState): VoiceState {
+  switch (state) {
+    case "idle":
+      return "idle";
+    case "listening":
+      return "listening";
+    case "transcribing":
+    case "thinking":
+    case "awaiting_confirmation":
+    case "executing":
+    case "error":
+      return "processing";
+    case "speaking":
+      return "speaking";
+    default:
+      return "idle";
+  }
 }
 
 class VoiceService {
   private config: VoiceConfig = defaultConfig;
   private onStateChange: ((state: VoiceState) => void) | null = null;
   private onTranscript: ((text: string) => void) | null = null;
-  private whisperEndpoint: string = "http://127.0.0.1:8080/inference";
-  private ttsEndpoint: string = "http://127.0.0.1:8081/tts";
 
-  private recognition: any = null;
-  private isListening: boolean = false;
-
-  private mediaRecorder: MediaRecorder | null = null;
-  private audioChunks: Blob[] = [];
-
-  private useWebSpeech: boolean = true;
-  private whisperAvailable: boolean = false;
-  private ttsAvailable: boolean = false;
+  private _agent: ConversationAgent;
+  private _initialized = false;
+  private _whisperAvailable = false;
+  private _ttsAvailable = false;
 
   constructor() {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      this.recognition = new SpeechRecognition();
-      this.recognition.continuous = false;
-      this.recognition.interimResults = true;
-      this.recognition.lang = "en-US";
-      this.recognition.maxAlternatives = 1;
+    this._agent = new ConversationAgent({
+      wakeWord: this.config.wakeWord,
+      ttsVoice: this.config.ttsVoice,
+      silenceThreshold: this.config.silenceThreshold,
+      maxRecordingTime: this.config.maxRecordingTime,
+    });
 
-      this.recognition.onresult = (event: SpeechRecognitionEvent) => {
-        let final = "";
-        let interim = "";
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const result = event.results[i];
-          if (result.isFinal) {
-            final += result[0].transcript;
-          } else {
-            interim += result[0].transcript;
-          }
-        }
-        if (final) {
-          this.onTranscript?.(final.trim());
-        } else if (interim) {
-          this.onTranscript?.(interim.trim());
-        }
-      };
+    // Wire agent events to legacy callbacks
+    this._agent.on((event) => {
+      if (event.kind === "state_change") {
+        const legacy = toLegacyState(event.to);
+        this.onStateChange?.(legacy);
+      }
 
-      this.recognition.onend = () => {
-        if (this.isListening) {
-          this.isListening = false;
-          this.setState("processing");
-          setTimeout(() => this.setState("idle"), 500);
-        }
-      };
+      if (event.kind === "transcript" && event.entry.role === "user" && !event.entry.is_partial) {
+        this.onTranscript?.(event.entry.text);
+      }
+    });
 
-      this.recognition.onerror = (event: any) => {
-        console.warn("[Crystal] Speech recognition error:", event.error);
-        this.isListening = false;
-        this.setState("idle");
-      };
+    this._initAsync();
+  }
 
-      this.useWebSpeech = true;
-    } else {
-      this.useWebSpeech = false;
+  private async _initAsync(): Promise<void> {
+    try {
+      await this._agent.initialize();
+      this._initialized = true;
+
+      // Check which providers are available for legacy compatibility booleans
+      this._whisperAvailable = this._agent.hasStt;
+      this._ttsAvailable = this._agent.hasTts;
+    } catch (err) {
+      console.error("[VoiceService] Initialization error:", err);
     }
+  }
+
+  /** Access the underlying ConversationAgent for new-style consumers. */
+  get agent(): ConversationAgent {
+    return this._agent;
   }
 
   setConfig(config: Partial<VoiceConfig>) {
@@ -102,221 +124,80 @@ class VoiceService {
     this.onTranscript = callback;
   }
 
-  private setState(state: VoiceState) {
-    this.onStateChange?.(state);
-  }
-
   async startListening(): Promise<void> {
-    if (this.isListening) return;
-
-    if (this.useWebSpeech && this.recognition) {
-      return this.startWebSpeech();
-    }
-
-    if (this.whisperAvailable) {
-      return this.startWhisperRecording();
-    }
-
-    throw new Error("No speech recognition available. Enable microphone permissions.");
-  }
-
-  private async startWebSpeech(): Promise<void> {
-    this.isListening = true;
-    this.setState("listening");
-    try {
-      this.recognition.start();
-    } catch (e: any) {
-      if (e.message?.includes("already started")) {
-        this.recognition.stop();
-        await new Promise(r => setTimeout(r, 200));
-        this.recognition.start();
-      } else {
-        this.isListening = false;
-        this.setState("idle");
-        throw e;
-      }
-    }
-
-    setTimeout(() => {
-      if (this.isListening) {
-        this.stopListening();
-      }
-    }, this.config.maxRecordingTime);
-  }
-
-  private async startWhisperRecording(): Promise<void> {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 },
-      });
-
-      this.mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
-      this.audioChunks = [];
-      this.isListening = true;
-      this.setState("listening");
-
-      this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) this.audioChunks.push(event.data);
-      };
-
-      this.mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(this.audioChunks, { type: "audio/webm" });
-        this.audioChunks = [];
-        if (audioBlob.size > 0) {
-          this.setState("processing");
-          await this.transcribeWhisper(audioBlob);
-        }
-        this.setState("idle");
-      };
-
-      this.mediaRecorder.start(100);
-
-      setTimeout(() => {
-        if (this.isListening) this.stopListening();
-      }, this.config.maxRecordingTime);
-    } catch (error) {
-      console.error("Failed to start Whisper recording:", error);
-      this.setState("idle");
-      throw error;
-    }
+    await this._agent.startListening();
   }
 
   async stopListening(): Promise<void> {
-    if (!this.isListening) return;
-    this.isListening = false;
-
-    if (this.useWebSpeech && this.recognition) {
-      try {
-        this.recognition.stop();
-      } catch {}
-    }
-
-    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
-      this.mediaRecorder.stop();
-      this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
-      this.mediaRecorder = null;
-    }
-  }
-
-  private async transcribeWhisper(audioBlob: Blob): Promise<string> {
-    try {
-      const formData = new FormData();
-      formData.append("file", audioBlob, "audio.webm");
-      formData.append("response_format", "json");
-
-      const response = await fetch(this.whisperEndpoint, {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) throw new Error(`Whisper API error: ${response.statusText}`);
-
-      const data = await response.json();
-      const transcript = data.text || "";
-
-      if (transcript) this.onTranscript?.(transcript);
-      return transcript;
-    } catch (error) {
-      console.error("Transcription failed:", error);
-      return "";
-    }
+    await this._agent.stopListening();
   }
 
   async speak(text: string): Promise<void> {
-    this.setState("speaking");
-
-    if (this.ttsAvailable) {
-      try {
-        const response = await fetch(this.ttsEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, voice: this.config.ttsVoice }),
-        });
-
-        if (response.ok) {
-          const audioBlob = await response.blob();
-          const audioUrl = URL.createObjectURL(audioBlob);
-          const audio = new Audio(audioUrl);
-
-          return new Promise((resolve, reject) => {
-            audio.onended = () => {
-              URL.revokeObjectURL(audioUrl);
-              this.setState("idle");
-              resolve();
-            };
-            audio.onerror = (e) => {
-              URL.revokeObjectURL(audioUrl);
-              this.setState("idle");
-              reject(e);
-            };
-            audio.play();
-          });
-        }
-      } catch {
-        // fall through to browser TTS
-      }
-    }
-
-    if ("speechSynthesis" in window) {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.0;
-      utterance.pitch = 1.0;
-      return new Promise((resolve) => {
-        utterance.onend = () => {
-          this.setState("idle");
-          resolve();
-        };
-        utterance.onerror = () => {
-          this.setState("idle");
-          resolve();
-        };
-        speechSynthesis.speak(utterance);
-      });
-    }
-
-    this.setState("idle");
+    await this._agent.speak(text);
   }
 
-  setWhisperEndpoint(endpoint: string) {
-    this.whisperEndpoint = endpoint;
+  setWhisperEndpoint(_endpoint: string) {
+    // No-op in new architecture — providers manage their own endpoints
   }
 
-  setTTSEndpoint(endpoint: string) {
-    this.ttsEndpoint = endpoint;
+  setTTSEndpoint(_endpoint: string) {
+    // No-op in new architecture — providers manage their own endpoints
   }
 
   async checkWhisperConnection(): Promise<boolean> {
-    try {
-      const response = await fetch(this.whisperEndpoint.replace("/inference", "/health"), {
-        signal: AbortSignal.timeout(2000),
-      });
-      this.whisperAvailable = response.ok;
-      return response.ok;
-    } catch {
-      this.whisperAvailable = false;
-      return false;
+    if (!this._initialized) {
+      await this._waitForInit();
     }
+    const result = await this._agent.refreshProviders();
+    this._whisperAvailable = result.stt !== "None";
+    return this._whisperAvailable;
   }
 
   async checkTTSConnection(): Promise<boolean> {
-    try {
-      const response = await fetch(this.ttsEndpoint.replace("/tts", "/health"), {
-        signal: AbortSignal.timeout(2000),
-      });
-      this.ttsAvailable = response.ok;
-      return response.ok;
-    } catch {
-      this.ttsAvailable = false;
-      return false;
+    if (!this._initialized) {
+      await this._waitForInit();
     }
+    const result = await this._agent.refreshProviders();
+    this._ttsAvailable = result.tts !== "None";
+    return this._ttsAvailable;
   }
 
   hasSpeechRecognition(): boolean {
-    return this.useWebSpeech || this.whisperAvailable;
+    return this._agent.hasStt;
   }
 
   hasTTS(): boolean {
-    return this.ttsAvailable || "speechSynthesis" in window;
+    return this._agent.hasTts;
+  }
+
+  async getProviderStatuses(): Promise<ProviderStatuses> {
+    if (!this._initialized) await this._waitForInit();
+    return this._agent.getProviderStatuses();
+  }
+
+  async setPreferredSttProvider(id: string): Promise<void> {
+    if (!this._initialized) await this._waitForInit();
+    await this._agent.setPreferredSttProvider(id);
+  }
+
+  async setPreferredTtsProvider(id: string): Promise<void> {
+    if (!this._initialized) await this._waitForInit();
+    await this._agent.setPreferredTtsProvider(id);
+  }
+
+  private _waitForInit(): Promise<void> {
+    if (this._initialized) return Promise.resolve();
+    return new Promise((resolve) => {
+      const check = () => {
+        if (this._initialized) {
+          resolve();
+        } else {
+          setTimeout(check, 500);
+        }
+      };
+      check();
+      setTimeout(resolve, 10000);
+    });
   }
 }
 

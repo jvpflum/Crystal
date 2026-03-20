@@ -17,7 +17,7 @@ import "./index.css";
 
 const HomeView = lazy(() => import("@/components/views/HomeView").then(m => ({ default: m.HomeView })));
 const ConversationView = lazy(() => import("@/components/views/ConversationView").then(m => ({ default: m.ConversationView })));
-const OfficeView = lazy(() => import("@/components/views/OfficeView").then(m => ({ default: m.OfficeView })));
+const CommandCenterView = lazy(() => import("@/components/views/CommandCenterView").then(m => ({ default: m.CommandCenterView })));
 const AgentsView = lazy(() => import("@/components/views/AgentsView").then(m => ({ default: m.AgentsView })));
 const MarketplaceView = lazy(() => import("@/components/views/MarketplaceView").then(m => ({ default: m.MarketplaceView })));
 const ModelsView = lazy(() => import("@/components/views/ModelsView").then(m => ({ default: m.ModelsView })));
@@ -34,6 +34,8 @@ const HooksView = lazy(() => import("@/components/views/HooksView").then(m => ({
 const DoctorView = lazy(() => import("@/components/views/DoctorView").then(m => ({ default: m.DoctorView })));
 const NodesView = lazy(() => import("@/components/views/NodesView").then(m => ({ default: m.NodesView })));
 const BrowserView = lazy(() => import("@/components/views/BrowserView").then(m => ({ default: m.BrowserView })));
+const OfficeView = lazy(() => import("@/components/views/OfficeView").then(m => ({ default: m.OfficeView })));
+const FactoryView = lazy(() => import("@/components/views/FactoryView").then(m => ({ default: m.FactoryView })));
 
 function ViewSlot({ id, active, children }: { id: string; active: boolean; children: React.ReactNode }) {
   const mountedRef = useRef(false);
@@ -95,6 +97,19 @@ function App() {
     openclawClient.connectGateway().then(connected => {
       setGatewayConnected(connected);
     });
+
+    let attempts = 0;
+    const tryReconnect = async () => {
+      if (!openclawClient.isGatewayConnected()) {
+        const ok = await openclawClient.connectGateway();
+        setGatewayConnected(ok);
+      }
+      attempts++;
+      const delay = attempts < 6 ? 5_000 : 15_000;
+      reconnectTimer = setTimeout(tryReconnect, delay);
+    };
+    let reconnectTimer = setTimeout(tryReconnect, 5_000);
+    return () => clearTimeout(reconnectTimer);
   }, [setGatewayConnected]);
 
   if (!isInitialized) {
@@ -122,7 +137,7 @@ function App() {
                 <Suspense fallback={<ViewFallback />}>
                   <ViewSlot id="home" active={currentView === "home"}><HomeView /></ViewSlot>
                   <ViewSlot id="conversation" active={currentView === "conversation"}><ConversationView /></ViewSlot>
-                  <ViewSlot id="office" active={currentView === "office"}><OfficeView /></ViewSlot>
+                  <ViewSlot id="command-center" active={currentView === "command-center"}><CommandCenterView /></ViewSlot>
                   <ViewSlot id="agents" active={currentView === "agents"}><AgentsView /></ViewSlot>
                   <ViewSlot id="marketplace" active={currentView === "marketplace"}><MarketplaceView /></ViewSlot>
                   <ViewSlot id="models" active={currentView === "models"}><ModelsView /></ViewSlot>
@@ -139,6 +154,8 @@ function App() {
                   <ViewSlot id="doctor" active={currentView === "doctor"}><DoctorView /></ViewSlot>
                   <ViewSlot id="nodes" active={currentView === "nodes"}><NodesView /></ViewSlot>
                   <ViewSlot id="browser" active={currentView === "browser"}><BrowserView /></ViewSlot>
+                  <ViewSlot id="office" active={currentView === "office"}><OfficeView /></ViewSlot>
+                  <ViewSlot id="factory" active={currentView === "factory"}><FactoryView /></ViewSlot>
                 </Suspense>
               </ErrorBoundary>
             </main>

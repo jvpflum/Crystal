@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useState, useEffect, type CSSProperties, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
 import { cachedCommand } from "@/lib/cache";
@@ -53,6 +53,15 @@ const dot = (color: string): CSSProperties => ({
   width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0,
 });
 
+const VOICE_PROVIDER_META: Record<string, { label: string; port?: string }> = {
+  "nvidia-nemotron": { label: "NVIDIA Nemotron/Parakeet", port: "8090" },
+  "whisper":         { label: "Whisper STT", port: "8080" },
+  "browser-stt":     { label: "Browser Speech API" },
+  "nvidia-magpie":   { label: "NVIDIA Magpie TTS", port: "8091" },
+  "kokoro":          { label: "Kokoro TTS", port: "8081" },
+  "browser-tts":     { label: "Browser TTS" },
+};
+
 /* ── SVG helpers ── */
 
 function IconRefresh({ spin }: { spin?: boolean }) {
@@ -65,10 +74,6 @@ function IconRefresh({ spin }: { spin?: boolean }) {
 
 function IconCheck() {
   return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>;
-}
-
-function IconChevron() {
-  return <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}><path d="m6 9 6 6 6-6" /></svg>;
 }
 
 function IconEye({ open }: { open: boolean }) {
@@ -87,15 +92,17 @@ function IconCopy() {
 /* ── Main component ── */
 
 export function SettingsView() {
-  const { isConnected, checkConnection, getModel, setModel, getModels } = useOpenClaw();
-  const { isWhisperConnected, isTTSConnected, checkConnections } = useVoice();
+  const { isConnected, checkConnection } = useOpenClaw();
+  const setView = useAppStore(s => s.setView);
+  const {
+    checkConnections, providerStatuses,
+    preferredStt, preferredTts, setSttProvider, setTtsProvider,
+  } = useVoice();
   const gatewayConnected = useAppStore(s => s.gatewayConnected);
   const { themeId, setTheme } = useThemeStore();
 
   const [checking, setChecking] = useState(false);
   const [checkingVoice, setCheckingVoice] = useState(false);
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [showModelPicker, setShowModelPicker] = useState(false);
   const [showAuthToken, setShowAuthToken] = useState(false);
   const [authToken, setAuthToken] = useState("");
   const [tokenCopied, setTokenCopied] = useState(false);
@@ -104,9 +111,9 @@ export function SettingsView() {
 
   const [temperature, setTemperature] = useState(() => parseFloat(localStorage.getItem("crystal_ai_temperature") || "0.7"));
   const [maxTokens, setMaxTokens] = useState(() => localStorage.getItem("crystal_ai_max_tokens") || "1024");
-  const [contextWindow, setContextWindow] = useState("32768");
+  const [contextWindow, setContextWindow] = useState(() => localStorage.getItem("crystal_ai_context_window") || "32768");
   const [systemPrompt, setSystemPrompt] = useState(
-    "You are Crystal, an intelligent AI assistant powered by OpenClaw."
+    () => localStorage.getItem("crystal_ai_system_prompt") || "You are Crystal, an intelligent AI assistant powered by OpenClaw."
   );
 
   const [auditResult, setAuditResult] = useState<{ pass: number; warn: number; fail: number; details?: string } | null>(null);
@@ -133,8 +140,6 @@ export function SettingsView() {
   const [configValue, setConfigValue] = useState("");
   const [configOutput, setConfigOutput] = useState("");
 
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
   /* ── effects ── */
 
   useEffect(() => {
@@ -144,7 +149,6 @@ export function SettingsView() {
     loadOpenClawVersion();
     measureLatency();
     checkDaemonStatus();
-    loadModels();
     homeDir().then(home => {
       const sep = home.endsWith("\\") || home.endsWith("/") ? "" : "\\";
       const cfgPath = `${home}${sep}.openclaw\\openclaw.json`;
@@ -158,21 +162,7 @@ export function SettingsView() {
     }).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node))
-        setShowModelPicker(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
   /* ── helpers ── */
-
-  const loadModels = async () => {
-    const models = await getModels();
-    setAvailableModels(models);
-  };
 
   const measureLatency = async () => {
     try {
@@ -187,15 +177,19 @@ export function SettingsView() {
     try {
       const cfg = await openclawClient.getConfig();
       setConfigText(JSON.stringify(cfg, null, 2));
-      if (cfg.systemPrompt) setSystemPrompt(cfg.systemPrompt);
-      if (cfg.contextLength) setContextWindow(String(cfg.contextLength));
     } catch { setConfigText("{}"); }
+    const savedPrompt = localStorage.getItem("crystal_ai_system_prompt");
+    if (savedPrompt) setSystemPrompt(savedPrompt);
+    const savedContext = localStorage.getItem("crystal_ai_context_window");
+    if (savedContext) setContextWindow(savedContext);
     setLoadingConfig(false);
   };
 
   const saveConfig = async () => {
     try {
       const cfg = JSON.parse(configText);
+      delete cfg.systemPrompt;
+      delete cfg.contextLength;
       await openclawClient.updateConfig(cfg);
       setConfigSaved(true);
       setTimeout(() => setConfigSaved(false), 2000);
@@ -212,7 +206,6 @@ export function SettingsView() {
   const handleRefreshGateway = async () => {
     setChecking(true);
     await checkConnection();
-    await loadModels();
     setChecking(false);
   };
 
@@ -261,13 +254,11 @@ export function SettingsView() {
     setCheckingUpdates(false);
   };
 
-  const saveAISettings = async () => {
-    await openclawClient.updateConfig({
-      systemPrompt,
-      contextLength: parseInt(contextWindow) || 32768,
-    });
+  const saveAISettings = () => {
     localStorage.setItem("crystal_ai_temperature", temperature.toString());
     localStorage.setItem("crystal_ai_max_tokens", maxTokens);
+    localStorage.setItem("crystal_ai_context_window", contextWindow);
+    localStorage.setItem("crystal_ai_system_prompt", systemPrompt);
   };
 
   const checkDaemonStatus = async () => {
@@ -292,8 +283,6 @@ export function SettingsView() {
     setDaemonBusy(false);
   };
 
-  const installDaemon = () => runDaemonCmd("install");
-  const uninstallDaemon = () => runDaemonCmd("uninstall");
   const restartDaemon = () => runDaemonCmd("restart");
   const stopDaemon = () => runDaemonCmd("stop");
 
@@ -369,7 +358,7 @@ export function SettingsView() {
             <div style={ROW}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={dot(gatewayConnected ? "var(--success)" : "var(--error)")} />
-                <span style={LABEL}>Status</span>
+                <span style={LABEL}>Connection</span>
               </div>
               <span style={{ ...VALUE, color: gatewayConnected ? "var(--success)" : "var(--error)" }}>
                 {gatewayConnected ? "Connected" : "Offline"}
@@ -384,6 +373,13 @@ export function SettingsView() {
               <span style={{ ...VALUE, ...MONO, fontSize: 11, color: gatewayLatency !== null && gatewayLatency < 100 ? "var(--success)" : "var(--warning)" }}>
                 {gatewayLatency !== null ? `${gatewayLatency}ms` : "—"}
               </span>
+            </div>
+            <div style={ROW}>
+              <span style={LABEL}>Daemon</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: daemonInstalled ? "var(--success)" : "var(--error)", flexShrink: 0 }} />
+                <span style={{ ...VALUE, fontSize: 11, color: daemonInstalled ? "var(--success)" : "var(--error)" }}>{daemonInstalled ? "Installed" : "Not Installed"}</span>
+              </div>
             </div>
 
             {/* auth token */}
@@ -403,61 +399,34 @@ export function SettingsView() {
               </div>
             </div>
 
-            <div style={{ padding: "8px 14px 10px", display: "flex", gap: 8 }}>
+            <div style={{ padding: "8px 14px 10px", display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button onClick={handleStartGateway} style={BTN_PRIMARY}>
                 <IconRefresh /> {gatewayConnected ? "Restart Gateway" : "Start Gateway"}
               </button>
               <button onClick={measureLatency} style={{ ...BTN_GHOST, fontSize: 11 }}>Ping</button>
+              <button onClick={restartDaemon} disabled={daemonBusy} style={BTN_PRIMARY}>{daemonBusy ? <IconRefresh spin /> : null} Restart Daemon</button>
+              <button onClick={stopDaemon} disabled={daemonBusy} style={BTN_GHOST}>Stop</button>
             </div>
+            {daemonOutput && <pre style={{ margin: 0, padding: "8px 14px", fontSize: 10, ...MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 80, overflowY: "auto", borderTop: "1px solid var(--border)" }}>{daemonOutput}</pre>}
           </div>
         </Section>
 
         {/* ───────── OPENCLAW MODEL ───────── */}
         <Section title="OPENCLAW MODEL">
           <div style={CARD}>
-            <div style={{ ...ROW, position: "relative" }} ref={dropdownRef}>
-              <span style={LABEL}>Active Model</span>
-              <button onClick={() => { setShowModelPicker(!showModelPicker); if (!showModelPicker) loadModels(); }} style={{
-                display: "flex", alignItems: "center", gap: 6, ...MONO, fontSize: 11,
-                color: "var(--text)", background: "var(--bg-elevated)", border: "1px solid var(--border)",
-                borderRadius: 6, padding: "5px 10px", cursor: "pointer",
-              }}>
-                {openclawClient.getModelDisplayName(getModel())} <IconChevron />
-              </button>
-              {showModelPicker && availableModels.length > 0 && (
-                <div style={{
-                  position: "absolute", right: 14, top: "100%", marginTop: 2,
-                  background: "var(--bg-elevated)", border: "1px solid var(--border)",
-                  borderRadius: 8, overflow: "hidden", zIndex: 100, minWidth: 240, maxHeight: 260,
-                  overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.55)", backdropFilter: "blur(20px)",
-                }}>
-                  {availableModels.map((m) => {
-                    const active = m === getModel();
-                    const displayName = openclawClient.getModelDisplayName(m);
-                    const isLocal = m.startsWith("ollama/");
-                    const sizeMatch = m.match(/:(\d+)b/i);
-                    const sizeB = sizeMatch ? parseInt(sizeMatch[1]) : null;
-                    const speedTag = isLocal && sizeB
-                      ? sizeB <= 8 ? { label: "Blazing", color: "#4ade80" }
-                      : sizeB <= 14 ? { label: "Fast", color: "#60a5fa" }
-                      : sizeB <= 32 ? { label: "Balanced", color: "#fbbf24" }
-                      : { label: "Slow", color: "#f87171" }
-                      : !isLocal ? { label: "Cloud", color: "#a78bfa" }
-                      : null;
-                    return (
-                      <button key={m} onClick={() => { setModel(m); setShowModelPicker(false); }} style={{
-                        display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "8px 12px",
-                        fontSize: 11, ...MONO, color: active ? "var(--accent)" : "var(--text-secondary)",
-                        background: active ? "var(--accent-bg)" : "transparent", border: "none", cursor: "pointer", textAlign: "left",
-                      }}>
-                        {active && <IconCheck />}
-                        <span style={{ marginLeft: active ? 0 : 18, flex: 1 }}>{displayName}</span>
-                        {speedTag && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: `${speedTag.color}22`, color: speedTag.color, fontFamily: "system-ui", fontWeight: 600 }}>{speedTag.label}</span>}
-                      </button>
-                    );
-                  })}
+            <div style={ROW}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={dot(openclawClient.getModel() !== "default" ? "var(--accent)" : "var(--text-muted)")} />
+                <div>
+                  <span style={{ ...LABEL, display: "block" }}>Active Model</span>
+                  <span style={{ fontSize: 12, color: "var(--text)", ...MONO, fontWeight: 500 }}>
+                    {openclawClient.getModelDisplayName(openclawClient.getModel())}
+                  </span>
                 </div>
-              )}
+              </div>
+              <button onClick={() => setView("models")} style={{ ...BTN_PRIMARY, padding: "5px 14px" }}>
+                Change Model
+              </button>
             </div>
 
             <div style={ROW}>
@@ -487,36 +456,26 @@ export function SettingsView() {
         {/* ───────── VOICE ───────── */}
         <Section title="VOICE">
           <div style={CARD}>
-            <div style={ROW}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={dot(isWhisperConnected ? "var(--success)" : "var(--text-muted)")} />
-                <div>
-                  <span style={{ ...LABEL, display: "block" }}>Whisper STT</span>
-                  <span style={{ fontSize: 10, color: "var(--text-muted)", ...MONO }}>localhost:8080</span>
-                </div>
+            <VoiceProviderRow
+              label="Speech to Text"
+              providers={providerStatuses?.stt ?? []}
+              preferredId={preferredStt}
+              onSelect={setSttProvider}
+            />
+            <VoiceProviderRow
+              label="Text to Speech"
+              providers={providerStatuses?.tts ?? []}
+              preferredId={preferredTts}
+              onSelect={setTtsProvider}
+            />
+            {preferredStt === "whisper" && (
+              <div style={ROW}>
+                <span style={LABEL}>Whisper Model</span>
+                <select value={whisperModel} onChange={(e) => setWhisperModel(e.target.value)} style={{ ...INPUT, appearance: "none", paddingRight: 24, backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.4)' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center" }}>
+                  {["tiny.en", "base.en", "small.en", "medium.en", "large-v3"].map((m) => <option key={m} value={m} style={{ background: "var(--bg-elevated)", color: "var(--text)" }}>{m}</option>)}
+                </select>
               </div>
-              <span style={{ fontSize: 10, color: isWhisperConnected ? "var(--success)" : "var(--text-muted)" }}>
-                {isWhisperConnected ? "Connected" : "Offline (using browser voice)"}
-              </span>
-            </div>
-            <div style={ROW}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={dot(isTTSConnected ? "var(--success)" : "var(--text-muted)")} />
-                <div>
-                  <span style={{ ...LABEL, display: "block" }}>TTS Engine</span>
-                  <span style={{ fontSize: 10, color: "var(--text-muted)", ...MONO }}>localhost:8081</span>
-                </div>
-              </div>
-              <span style={{ fontSize: 10, color: isTTSConnected ? "var(--success)" : "var(--text-muted)" }}>
-                {isTTSConnected ? "Connected" : "Offline (using browser TTS)"}
-              </span>
-            </div>
-            <div style={ROW}>
-              <span style={LABEL}>Whisper Model</span>
-              <select value={whisperModel} onChange={(e) => setWhisperModel(e.target.value)} style={{ ...INPUT, appearance: "none", paddingRight: 24, backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.4)' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center" }}>
-                {["tiny.en", "base.en", "small.en", "medium.en", "large-v3"].map((m) => <option key={m} value={m} style={{ background: "var(--bg-elevated)", color: "var(--text)" }}>{m}</option>)}
-              </select>
-            </div>
+            )}
             <div style={{ padding: "8px 14px 10px", display: "flex", gap: 8, borderTop: "1px solid var(--border)" }}>
               <button onClick={handleRefreshVoice} style={BTN_PRIMARY}><IconRefresh spin={checkingVoice} /> Test Connections</button>
             </div>
@@ -626,25 +585,6 @@ export function SettingsView() {
           </div>
         </Section>
 
-        {/* ───────── GATEWAY SERVICE ───────── */}
-        <Section title="GATEWAY SERVICE">
-          <div style={CARD}>
-            <div style={ROW}>
-              <span style={LABEL}>Daemon Status</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: daemonInstalled ? "var(--success)" : "var(--error)", flexShrink: 0 }} />
-                <span style={{ ...VALUE, fontSize: 11, color: daemonInstalled ? "var(--success)" : "var(--error)" }}>{daemonInstalled ? "Installed" : "Not Installed"}</span>
-              </div>
-            </div>
-            <div style={{ padding: "8px 14px 10px", display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button onClick={installDaemon} disabled={daemonBusy} style={BTN_PRIMARY}>{daemonBusy ? <IconRefresh spin /> : null} Install</button>
-              <button onClick={uninstallDaemon} disabled={daemonBusy} style={{ ...BTN_GHOST, color: "var(--error)" }}>Uninstall</button>
-              <button onClick={restartDaemon} disabled={daemonBusy} style={BTN_PRIMARY}>Restart</button>
-              <button onClick={stopDaemon} disabled={daemonBusy} style={BTN_GHOST}>Stop</button>
-            </div>
-            {daemonOutput && <pre style={{ margin: 0, padding: "8px 14px", fontSize: 10, ...MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 80, overflowY: "auto", borderTop: "1px solid var(--border)" }}>{daemonOutput}</pre>}
-          </div>
-        </Section>
 
         {/* ───────── CONFIG CLI ───────── */}
         <Section title="CONFIG CLI">
@@ -695,6 +635,76 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   return <div style={{ marginBottom: 18 }}><div style={SECTION_HEADER}>{title}</div>{children}</div>;
 }
 
+/* ── Voice Provider Selector ── */
+
+function VoiceProviderRow({ label, providers, preferredId, onSelect }: {
+  label: string;
+  providers: Array<{ id: string; name: string; available: boolean; active: boolean }>;
+  preferredId: string;
+  onSelect: (id: string) => void;
+}) {
+  const preferred = providers.find((p) => p.id === preferredId);
+  const active = providers.find((p) => p.active);
+  const meta = preferred ? VOICE_PROVIDER_META[preferred.id] : null;
+  const activeMeta = active ? VOICE_PROVIDER_META[active.id] : null;
+  const isFallback = preferred && active && preferred.id !== active.id;
+
+  return (
+    <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+      <span style={{ ...LABEL, display: "block", marginBottom: 8 }}>{label}</span>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+        {providers.map((p) => {
+          const isSelected = p.id === preferredId;
+          const pmeta = VOICE_PROVIDER_META[p.id];
+          return (
+            <button
+              key={p.id}
+              onClick={() => onSelect(p.id)}
+              style={{
+                padding: "5px 12px", borderRadius: 6, fontSize: 10, fontWeight: 500,
+                cursor: "pointer", transition: "all .15s ease",
+                display: "flex", alignItems: "center", gap: 6,
+                border: isSelected ? "1px solid var(--accent)" : "1px solid var(--border)",
+                background: isSelected ? "var(--accent-bg)" : "var(--bg-elevated)",
+                color: isSelected ? "var(--accent)" : "var(--text-muted)",
+              }}
+            >
+              <span style={{
+                width: 5, height: 5, borderRadius: "50%", flexShrink: 0,
+                background: p.available ? "var(--success)" : "var(--text-muted)",
+              }} />
+              {pmeta?.label ?? p.name}
+            </button>
+          );
+        })}
+      </div>
+      {providers.length > 0 && (
+        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+          {preferred?.available ? (
+            <>
+              <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--success)", flexShrink: 0 }} />
+              <span style={{ fontSize: 11, color: "var(--success)" }}>Connected</span>
+              {meta?.port && <span style={{ fontSize: 10, color: "var(--text-muted)", ...MONO }}>:{meta.port}</span>}
+            </>
+          ) : (
+            <>
+              <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--warning, #f59e0b)", flexShrink: 0 }} />
+              <span style={{ fontSize: 11, color: "var(--warning, #f59e0b)" }}>
+                {isFallback
+                  ? `Offline — using ${activeMeta?.label ?? active?.name ?? "fallback"}`
+                  : "Offline"}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+      {providers.length === 0 && (
+        <span style={{ fontSize: 10, color: "var(--text-muted)", fontStyle: "italic" }}>Loading providers...</span>
+      )}
+    </div>
+  );
+}
+
 /* ── API Keys Manager ── */
 
 const API_PROVIDERS = [
@@ -725,12 +735,19 @@ function ApiKeysSection() {
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [editKey, setEditKey] = useState("");
   const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+
+  const getProfilePath = async (): Promise<string> => {
+    const result = await invoke<{ stdout: string }>("execute_command", {
+      command: "echo $env:USERPROFILE\\.openclaw\\agents\\main\\agent\\auth-profiles.json",
+      cwd: null,
+    });
+    return result.stdout.trim().replace(/\r?\n/g, "");
+  };
 
   const loadProfiles = async () => {
     try {
-      const home = await homeDir();
-      const sep = home.endsWith("\\") || home.endsWith("/") ? "" : "\\";
-      const path = `${home}${sep}.openclaw\\agents\\main\\agent\\auth-profiles.json`;
+      const path = await getProfilePath();
       const raw = await invoke<string>("read_file", { path });
       const data = JSON.parse(raw);
       setProfiles(data.profiles || {});
@@ -742,12 +759,19 @@ function ApiKeysSection() {
 
   useEffect(() => { loadProfiles(); }, []);
 
+  useEffect(() => {
+    if (feedback) {
+      const t = setTimeout(() => setFeedback(null), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [feedback]);
+
   const saveKey = async (providerId: string, apiKey: string) => {
+    if (!apiKey.trim()) return;
     setSaving(true);
+    setFeedback(null);
     try {
-      const home = await homeDir();
-      const sep = home.endsWith("\\") || home.endsWith("/") ? "" : "\\";
-      const path = `${home}${sep}.openclaw\\agents\\main\\agent\\auth-profiles.json`;
+      const path = await getProfilePath();
 
       let data: Record<string, unknown> = { version: 1, profiles: {}, lastGood: {}, usageStats: {} };
       try {
@@ -757,27 +781,61 @@ function ApiKeysSection() {
 
       const profileKey = `${providerId}:default`;
       const profs = (data.profiles || {}) as Record<string, unknown>;
-      profs[profileKey] = { type: "api_key", provider: providerId, key: apiKey };
+
+      if (providerId === "ollama") {
+        profs[profileKey] = { type: "api_key", provider: providerId, key: "ollama", baseUrl: "http://127.0.0.1:11434" };
+      } else {
+        profs[profileKey] = { type: "api_key", provider: providerId, key: apiKey };
+      }
       data.profiles = profs;
 
       const lastGood = (data.lastGood || {}) as Record<string, string>;
       lastGood[providerId] = profileKey;
       data.lastGood = lastGood;
 
-      await invoke("write_file", { path, content: JSON.stringify(data, null, 2) });
-      await loadProfiles();
-      setEditingProvider(null);
-      setEditKey("");
-    } catch { /* save failed */ }
+      const jsonStr = JSON.stringify(data, null, 2);
+      await invoke("write_file", { path, content: jsonStr });
+
+      const verify = await invoke<string>("read_file", { path });
+      const verifyData = JSON.parse(verify);
+      if (verifyData.profiles?.[profileKey]?.key === apiKey || providerId === "ollama") {
+        setFeedback({ type: "success", msg: `${providerId} key saved successfully` });
+        await loadProfiles();
+        setEditingProvider(null);
+        setEditKey("");
+      } else {
+        setFeedback({ type: "error", msg: "Key was written but verification failed — file may be locked by gateway" });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("EPERM") || msg.includes("Access")) {
+        setFeedback({ type: "error", msg: "File locked by OpenClaw gateway. Trying alternative save..." });
+        try {
+          const escaped = apiKey.replace(/'/g, "''");
+          const cmd = `$p = "$env:USERPROFILE\\.openclaw\\agents\\main\\agent\\auth-profiles.json"; $d = Get-Content $p | ConvertFrom-Json; $d.profiles.'${providerId}:default' = @{type='api_key';provider='${providerId}';key='${escaped}'}; $d | ConvertTo-Json -Depth 10 | Set-Content $p -Encoding UTF8`;
+          const result = await invoke<{ code: number; stderr: string }>("execute_command", { command: cmd, cwd: null });
+          if (result.code === 0) {
+            setFeedback({ type: "success", msg: `${providerId} key saved via fallback` });
+            await loadProfiles();
+            setEditingProvider(null);
+            setEditKey("");
+          } else {
+            setFeedback({ type: "error", msg: `Save failed: ${result.stderr || "Unknown error"}` });
+          }
+        } catch (e2) {
+          setFeedback({ type: "error", msg: `Both save methods failed: ${e2 instanceof Error ? e2.message : String(e2)}` });
+        }
+      } else {
+        setFeedback({ type: "error", msg: `Save failed: ${msg}` });
+      }
+    }
     setSaving(false);
   };
 
   const removeKey = async (providerId: string) => {
+    setFeedback(null);
     try {
-      const home = await homeDir();
-      const sep = home.endsWith("\\") || home.endsWith("/") ? "" : "\\";
-      const path = `${home}${sep}.openclaw\\agents\\main\\agent\\auth-profiles.json`;
-
+      const path = await getProfilePath();
       const raw = await invoke<string>("read_file", { path });
       const data = JSON.parse(raw);
       const profileKey = `${providerId}:default`;
@@ -786,8 +844,11 @@ function ApiKeysSection() {
       if (data.usageStats) delete data.usageStats[profileKey];
 
       await invoke("write_file", { path, content: JSON.stringify(data, null, 2) });
+      setFeedback({ type: "success", msg: `${providerId} key removed` });
       await loadProfiles();
-    } catch { /* remove failed */ }
+    } catch (e) {
+      setFeedback({ type: "error", msg: `Remove failed: ${e instanceof Error ? e.message : String(e)}` });
+    }
   };
 
   const maskKey = (key: string) => {
@@ -808,6 +869,23 @@ function ApiKeysSection() {
           API keys for cloud LLM providers. Stored in OpenClaw's auth-profiles.
         </span>
       </div>
+
+      {feedback && (
+        <div style={{
+          padding: "8px 14px", display: "flex", alignItems: "center", gap: 8,
+          background: feedback.type === "success" ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
+          borderBottom: "1px solid var(--border)",
+        }}>
+          <span style={{
+            width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+            background: feedback.type === "success" ? "#4ade80" : "#f87171",
+          }} />
+          <span style={{ fontSize: 11, color: feedback.type === "success" ? "#4ade80" : "#f87171", flex: 1 }}>
+            {feedback.msg}
+          </span>
+          <button onClick={() => setFeedback(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 12 }}>×</button>
+        </div>
+      )}
 
       {API_PROVIDERS.map(provider => {
         const profileKey = `${provider.id}:default`;

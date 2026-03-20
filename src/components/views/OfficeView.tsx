@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Bot, Loader2, CheckCircle2, AlertCircle, Plus, Clock, Brain, Globe, Terminal, FileText, Shield, Cpu, Copy, ChevronDown, ChevronUp } from "lucide-react";
+import { Bot, Loader2, CheckCircle2, AlertCircle, Plus, Clock, Brain, Globe, Terminal, FileText, Shield, Cpu, Copy, ChevronDown, ChevronUp, MessageSquare, ArrowRight } from "lucide-react";
 import { escapeShellArg } from "@/lib/tools";
+import { useAppStore } from "@/stores/appStore";
+import { useDataStore } from "@/stores/dataStore";
 
 interface SubAgent {
   id: string;
@@ -13,6 +15,7 @@ interface SubAgent {
   taskLog: TaskLogEntry[];
   color: string;
   progress: number;
+  openclawAgentId?: string;
 }
 
 interface TaskLogEntry {
@@ -26,6 +29,7 @@ interface TaskLogEntry {
 
 interface OfficeTask {
   id: string;
+  sessionId: string;
   prompt: string;
   assignedTo: string | null;
   status: "queued" | "running" | "completed" | "error";
@@ -64,6 +68,21 @@ export function OfficeView() {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [autoAssign, setAutoAssign] = useState(true);
   const runningRef = useRef<Set<string>>(new Set());
+  const setView = useAppStore(s => s.setView);
+  const [realAgents, setRealAgents] = useState<string[]>([]);
+
+  const getAgents = useDataStore(s => s.getAgents);
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await getAgents();
+        if (Array.isArray(data)) {
+          const ids = data.map((a: Record<string, unknown>) => String(a.id || "")).filter((id: string) => id && id !== "main");
+          setRealAgents(ids);
+        }
+      } catch { /* ignore */ }
+    })();
+  }, []);
 
   const dispatchTask = useCallback(async (task: OfficeTask, agentId: string) => {
     if (runningRef.current.has(task.id)) return;
@@ -86,10 +105,11 @@ export function OfficeView() {
 
     try {
       const agent = agents.find(a => a.id === agentId);
-      const roleHint = agent ? `You are ${agent.name}, a sub-agent specializing in ${agent.role}.` : "";
-      const fullPrompt = `${roleHint} ${task.prompt}`;
+      const ocAgent = agent?.openclawAgentId || "main";
+      const roleHint = (ocAgent === "main" && agent) ? `You are ${agent.name}, a sub-agent specializing in ${agent.role}.` : "";
+      const fullPrompt = `${roleHint} ${task.prompt}`.trim();
       const escaped = escapeShellArg(fullPrompt);
-      const command = `openclaw agent --agent main --message "${escaped}"`;
+      const command = `openclaw agent --agent "${ocAgent}" --session-id ${task.sessionId} --message "${escaped}"`;
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
         command,
         cwd: null,
@@ -139,6 +159,7 @@ export function OfficeView() {
     if (!newTaskPrompt.trim()) return;
     const task: OfficeTask = {
       id: crypto.randomUUID(),
+      sessionId: crypto.randomUUID(),
       prompt: newTaskPrompt.trim(),
       assignedTo: null,
       status: "queued",
@@ -216,6 +237,8 @@ export function OfficeView() {
               agent={agent}
               selected={selectedAgent === agent.id}
               onSelect={() => setSelectedAgent(selectedAgent === agent.id ? null : agent.id)}
+              realAgents={realAgents}
+              onMapAgent={(ocId) => setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, openclawAgentId: ocId } : a))}
             />
           ))}
         </div>
@@ -296,7 +319,15 @@ export function OfficeView() {
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {[...tasks].reverse().map(task => (
-                <TaskRow key={task.id} task={task} agents={agents} onRun={runTask} />
+                <TaskRow key={task.id} task={task} agents={agents} onRun={runTask} onSendToChat={(result, prompt, sessionId) => {
+                  const context = `A sub-agent completed the following task:\n\n**Task:** ${prompt}\n\n**Result:**\n${result}\n\nPlease review this result and execute any actionable items. Ask me to confirm before taking irreversible actions.`;
+                  setView("conversation");
+                  setTimeout(() => {
+                    window.dispatchEvent(new CustomEvent("crystal:send-to-chat", {
+                      detail: { context, surface: "office", sessionId },
+                    }));
+                  }, 300);
+                }} />
               ))}
             </div>
           </div>
@@ -311,7 +342,10 @@ export function OfficeView() {
   );
 }
 
-function AgentCard({ agent, selected, onSelect }: { agent: SubAgent; selected: boolean; onSelect: () => void }) {
+function AgentCard({ agent, selected, onSelect, realAgents, onMapAgent }: {
+  agent: SubAgent; selected: boolean; onSelect: () => void;
+  realAgents: string[]; onMapAgent: (openclawId: string | undefined) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const statusColor = agent.status === "working" ? agent.color
     : agent.status === "done" ? "var(--success)"
@@ -367,7 +401,27 @@ function AgentCard({ agent, selected, onSelect }: { agent: SubAgent; selected: b
               animation: agent.status === "working" ? "thinking-dot 1.4s ease-in-out infinite" : "none",
             }} />
           </div>
-          <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{agent.role}</div>
+          <div style={{ fontSize: 10, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
+            {agent.role}
+            {realAgents.length > 0 && (
+              <select
+                value={agent.openclawAgentId || ""}
+                onClick={e => e.stopPropagation()}
+                onChange={e => { e.stopPropagation(); onMapAgent(e.target.value || undefined); }}
+                style={{
+                  fontSize: 8, padding: "1px 4px", borderRadius: 4,
+                  background: agent.openclawAgentId ? "rgba(139,92,246,0.12)" : "var(--bg-input)",
+                  border: "1px solid var(--border)", color: agent.openclawAgentId ? "rgba(139,92,246,0.9)" : "var(--text-muted)",
+                  outline: "none", cursor: "pointer",
+                }}
+              >
+                <option value="" style={{ background: "var(--bg-base)" }}>main (default)</option>
+                {realAgents.map(id => (
+                  <option key={id} value={id} style={{ background: "var(--bg-base)" }}>{id}</option>
+                ))}
+              </select>
+            )}
+          </div>
         </div>
         <div style={{
           fontSize: 9, padding: "2px 8px", borderRadius: 6,
@@ -468,7 +522,12 @@ function TaskLogItem({ log, agentColor }: { log: TaskLogEntry; agentColor: strin
   );
 }
 
-function TaskRow({ task, agents, onRun }: { task: OfficeTask; agents: SubAgent[]; onRun: (taskId: string, agentId: string) => void }) {
+function TaskRow({ task, agents, onRun, onSendToChat }: {
+  task: OfficeTask;
+  agents: SubAgent[];
+  onRun: (taskId: string, agentId: string) => void;
+  onSendToChat?: (result: string, prompt: string, sessionId: string) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const assigned = task.assignedTo ? agents.find(a => a.id === task.assignedTo) : null;
 
@@ -514,6 +573,25 @@ function TaskRow({ task, agents, onRun }: { task: OfficeTask; agents: SubAgent[]
           {task.status}
         </span>
 
+        {(task.status === "completed" || task.status === "error") && task.result && onSendToChat && (
+          <button
+            onClick={() => onSendToChat(task.result || "", task.prompt, task.sessionId)}
+            title="Execute in Chat"
+            style={{
+              display: "flex", alignItems: "center", gap: 4,
+              padding: "3px 8px", borderRadius: 6, border: "none",
+              background: "rgba(59,130,246,0.1)", color: "var(--accent)",
+              fontSize: 9, fontWeight: 600, cursor: "pointer",
+              transition: "all 0.15s", flexShrink: 0,
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = "rgba(59,130,246,0.2)"}
+            onMouseLeave={e => e.currentTarget.style.background = "rgba(59,130,246,0.1)"}
+          >
+            <ArrowRight style={{ width: 10, height: 10 }} />
+            Chat
+          </button>
+        )}
+
         {task.result && (
           <button onClick={() => setExpanded(!expanded)}
             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: "2px", display: "flex", alignItems: "center" }}>
@@ -543,10 +621,18 @@ function TaskRow({ task, agents, onRun }: { task: OfficeTask; agents: SubAgent[]
         <div style={{ marginTop: 8 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
             <span style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>Full Result</span>
-            <button onClick={() => navigator.clipboard.writeText(task.result || "")}
-              style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: 9 }}>
-              <Copy style={{ width: 10, height: 10 }} /> Copy
-            </button>
+            <div style={{ display: "flex", gap: 6 }}>
+              {onSendToChat && (
+                <button onClick={() => onSendToChat(task.result || "", task.prompt, task.sessionId)}
+                  style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: 9, fontWeight: 600 }}>
+                  <MessageSquare style={{ width: 10, height: 10 }} /> Send to Chat
+                </button>
+              )}
+              <button onClick={() => navigator.clipboard.writeText(task.result || "")}
+                style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: 9 }}>
+                <Copy style={{ width: 10, height: 10 }} /> Copy
+              </button>
+            </div>
           </div>
           <div style={{
             padding: "8px 10px", borderRadius: 6,

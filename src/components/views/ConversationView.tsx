@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Mic, Loader2, Trash2, Terminal, ChevronDown, ChevronRight, Copy, Check, Bot, User, Plus, X, PanelLeftClose, PanelLeft, MessageSquare, Zap, Settings2, Shield, Puzzle, Stethoscope, Play, Search, RefreshCw, Download, Globe, Cpu, Brain, ArrowDown, Volume2 } from "lucide-react";
+import { Send, Mic, Loader2, Trash2, Terminal, ChevronDown, ChevronRight, Copy, Check, Bot, User, Plus, X, PanelLeftClose, PanelLeft, MessageSquare, Zap, Settings2, Shield, Puzzle, Stethoscope, Play, Search, RefreshCw, Download, Globe, Cpu, Brain, ArrowDown, Volume2, Paperclip, FileText, ImageIcon, Music, Video, FileArchive, Upload, Square } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { agentService, AgentStep, ActionButton } from "@/lib/agent";
 import { invoke } from "@tauri-apps/api/core";
-import { Message, openclawClient } from "@/lib/openclaw";
+import { Message, ChatAttachment, Surface, openclawClient } from "@/lib/openclaw";
 import { useAppStore, type AppView } from "@/stores/appStore";
 import { voiceService } from "@/lib/voice";
 
@@ -13,6 +13,7 @@ import { voiceService } from "@/lib/voice";
 
 interface Conversation {
   id: string;
+  sessionId: string;
   title: string;
   messages: Message[];
   createdAt: number;
@@ -21,14 +22,50 @@ interface Conversation {
 
 interface StoredConversation {
   id: string;
+  sessionId?: string;
   title: string;
-  messages: Array<{ id: string; role: string; content: string; timestamp: string }>;
+  messages: Array<{ id: string; role: string; content: string; timestamp: string; surface?: Surface; attachments?: Array<{ id: string; name: string; size: number; type: string }> }>;
   createdAt: number;
   updatedAt: number;
 }
 
 const STORAGE_KEY = "crystal_conversations";
 const MAX_CONVERSATIONS = 50;
+
+function getFileIcon(name: string, mimeType?: string) {
+  const ext = name.split(".").pop()?.toLowerCase() || "";
+  const mime = mimeType || "";
+  if (mime.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"].includes(ext))
+    return ImageIcon;
+  if (mime.startsWith("audio/") || ["mp3", "wav", "ogg", "m4a", "flac", "aac"].includes(ext))
+    return Music;
+  if (mime.startsWith("video/") || ["mp4", "webm", "mov"].includes(ext))
+    return Video;
+  if (["zip", "tar", "gz", "rar", "7z"].includes(ext))
+    return FileArchive;
+  return FileText;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isImageAttachment(att: ChatAttachment): boolean {
+  const ext = att.name.split(".").pop()?.toLowerCase() || "";
+  return att.type.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"].includes(ext);
+}
+
+function isAudioAttachment(att: ChatAttachment): boolean {
+  const ext = att.name.split(".").pop()?.toLowerCase() || "";
+  return att.type.startsWith("audio/") || ["mp3", "wav", "ogg", "m4a", "flac", "aac"].includes(ext);
+}
+
+function isVideoAttachment(att: ChatAttachment): boolean {
+  const ext = att.name.split(".").pop()?.toLowerCase() || "";
+  return att.type.startsWith("video/") || ["mp4", "webm", "mov"].includes(ext);
+}
 
 const WELCOME: Message = {
   id: "welcome",
@@ -58,7 +95,14 @@ function loadConversations(): Conversation[] {
     const parsed: StoredConversation[] = JSON.parse(raw);
     return parsed.map(c => ({
       ...c,
-      messages: c.messages.map(m => ({ ...m, role: m.role as Message["role"], timestamp: new Date(m.timestamp) })),
+      sessionId: c.sessionId || crypto.randomUUID(),
+      messages: c.messages.map(m => ({
+        ...m,
+        role: m.role as Message["role"],
+        timestamp: new Date(m.timestamp),
+        surface: m.surface as Surface | undefined,
+        attachments: m.attachments?.map(a => ({ ...a, content: "" })),
+      })),
     }));
   } catch {
     return [];
@@ -69,7 +113,12 @@ function saveConversations(conversations: Conversation[]) {
   const trimmed = conversations.slice(0, MAX_CONVERSATIONS);
   const serializable = trimmed.map(c => ({
     ...c,
-    messages: c.messages.map(m => ({ ...m, timestamp: m.timestamp.toISOString() })),
+    messages: c.messages.map(m => ({
+      ...m,
+      timestamp: m.timestamp.toISOString(),
+      surface: m.surface,
+      attachments: m.attachments?.map(a => ({ id: a.id, name: a.name, size: a.size, type: a.type })),
+    })),
   }));
   localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable));
 }
@@ -77,6 +126,7 @@ function saveConversations(conversations: Conversation[]) {
 function createNewConversation(): Conversation {
   return {
     id: crypto.randomUUID(),
+    sessionId: crypto.randomUUID(),
     title: "New Chat",
     messages: [WELCOME],
     createdAt: Date.now(),
@@ -125,6 +175,7 @@ export function ConversationView() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [toolSteps, setToolSteps] = useState<AgentStep[]>([]);
+  const abortRef = useRef(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [micFlashRed, setMicFlashRed] = useState(false);
   const [responseMeta, setResponseMeta] = useState<Record<string, { tokens: number; durationMs: number }>>({});
@@ -141,6 +192,11 @@ export function ConversationView() {
   const [slashFilter, setSlashFilter] = useState("");
   const [slashIndex, setSlashIndex] = useState(0);
   const voiceTriggeredRef = useRef(false);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const dragCounterRef = useRef(0);
+  const [lightboxSrc, setLightboxSrc] = useState<{ src: string; name: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const gatewayConnected = useAppStore(s => s.gatewayConnected);
   const setView = useAppStore(s => s.setView);
@@ -170,8 +226,10 @@ export function ConversationView() {
     { cmd: "/tools", label: "Tools", description: "Sandbox & tool permissions", action: () => setView("tools") },
     { cmd: "/activity", label: "Activity", description: "Gateway event log", action: () => setView("activity") },
     { cmd: "/templates", label: "Templates", description: "Workflow builder", action: () => setView("templates") },
+    { cmd: "/workflows", label: "Workflows", description: "Run multi-step workflows", action: () => setView("templates") },
+    { cmd: "/office", label: "Office", description: "Watch agents work visually", action: () => setView("office") },
     { cmd: "/powerup", label: "Power Up", description: "Enable everything", action: () => setView("marketplace") },
-    { cmd: "/office", label: "Office", description: "Sub-agent workspace", action: () => setView("office") },
+    { cmd: "/agents", label: "Agents", description: "Agent hub & task dispatch", action: () => setView("agents") },
     { cmd: "/new", label: "New Chat", description: "Start a fresh conversation", action: () => handleNewChat() },
     { cmd: "/clear", label: "Clear", description: "Clear current chat", action: () => clearConversation() },
     { cmd: "/search", label: "Search", description: "Open command palette (Ctrl+K)", action: () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true })) },
@@ -204,11 +262,14 @@ export function ConversationView() {
 
   useEffect(() => { scrollToBottom(); }, [messages, toolSteps, scrollToBottom]);
 
+  const pendingSendRef = useRef<{ surface?: Surface; sessionId?: string } | null>(null);
+
   useEffect(() => {
     const handler = (e: Event) => {
       const text = (e as CustomEvent).detail;
       if (text && !isLoading) {
         voiceTriggeredRef.current = true;
+        pendingSendRef.current = { surface: "voice" };
         setInput(text);
         setTimeout(() => {
           const btn = document.querySelector("[data-send-btn]") as HTMLButtonElement;
@@ -219,6 +280,24 @@ export function ConversationView() {
     window.addEventListener("crystal:voice-message", handler);
     return () => window.removeEventListener("crystal:voice-message", handler);
   }, [isLoading]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { context, followUp, surface, sessionId } = (e as CustomEvent).detail ?? {};
+      if (!context) return;
+      const text = followUp
+        ? `${context}\n\n${followUp}`
+        : context;
+      pendingSendRef.current = { surface, sessionId };
+      setInput(text);
+      setTimeout(() => {
+        const btn = document.querySelector("[data-send-btn]") as HTMLButtonElement;
+        btn?.click();
+      }, 150);
+    };
+    window.addEventListener("crystal:send-to-chat", handler);
+    return () => window.removeEventListener("crystal:send-to-chat", handler);
+  }, []);
 
   useEffect(() => {
     agentService.onStep((step) => {
@@ -280,33 +359,152 @@ export function ConversationView() {
     setIsListening(true);
   }, [isListening]);
 
-  const sendMessage = async () => {
-    if (!input.trim() || isLoading) return;
-    const text = input;
-    const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: text, timestamp: new Date() };
+  const handleAttachFiles = useCallback(async (files: FileList | File[]) => {
+    const TEXT_EXTENSIONS = new Set([
+      "txt", "md", "json", "csv", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf", "log",
+      "js", "ts", "jsx", "tsx", "py", "rs", "go", "java", "c", "cpp", "h", "hpp", "cs",
+      "html", "css", "scss", "sass", "less", "sql", "sh", "bash", "ps1", "bat", "cmd",
+      "env", "gitignore", "dockerfile", "makefile", "cmake",
+      "pdf", "doc", "docx", "rtf",
+    ]);
+    const MEDIA_EXTENSIONS = new Set([
+      "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico",
+      "mp3", "wav", "ogg", "m4a", "flac", "aac",
+      "mp4", "webm", "mov",
+      "zip", "tar", "gz",
+    ]);
+    const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
-    updateConversation(activeId, c => {
-      const updated = { ...c, messages: [...c.messages, userMessage], updatedAt: Date.now() };
-      if (c.title === "New Chat") updated.title = generateTitle([...c.messages, userMessage]);
-      return updated;
+    const isBinary = (f: File) =>
+      f.type.startsWith("image/") || f.type.startsWith("audio/") || f.type.startsWith("video/") ||
+      MEDIA_EXTENSIONS.has(f.name.split(".").pop()?.toLowerCase() || "");
+
+    const readAsDataURL = (f: File): Promise<string> =>
+      new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(f);
+      });
+
+    for (const file of Array.from(files)) {
+      const ext = file.name.split(".").pop()?.toLowerCase() || "";
+      const allowed = TEXT_EXTENSIONS.has(ext) || MEDIA_EXTENSIONS.has(ext) ||
+        file.type.startsWith("text/") || file.type.startsWith("image/") ||
+        file.type.startsWith("audio/") || file.type.startsWith("video/");
+      if (!allowed) {
+        console.warn(`[Attach] Skipped unsupported file type: ${file.name}`);
+        continue;
+      }
+      if (file.size > MAX_FILE_SIZE) {
+        console.warn(`[Attach] Skipped file too large: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`);
+        continue;
+      }
+      try {
+        const content = isBinary(file) ? await readAsDataURL(file) : await file.text();
+        setAttachments(prev => [...prev, {
+          id: crypto.randomUUID(),
+          name: file.name,
+          size: file.size,
+          type: file.type || ext,
+          content,
+        }]);
+      } catch {
+        console.error(`[Attach] Failed to read: ${file.name}`);
+      }
+    }
+  }, []);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments(prev => prev.filter(a => a.id !== id));
+  }, []);
+
+  const buildMessageWithAttachments = useCallback((text: string, files: ChatAttachment[]): string => {
+    if (files.length === 0) return text;
+    const parts = files.map(f => {
+      if (isImageAttachment(f)) {
+        return `<attachment name="${f.name}" type="image" size="${formatFileSize(f.size)}">${f.content}</attachment>`;
+      }
+      if (isAudioAttachment(f)) {
+        return `<attachment name="${f.name}" type="audio" size="${formatFileSize(f.size)}">(audio file, ${formatFileSize(f.size)})</attachment>`;
+      }
+      if (isVideoAttachment(f)) {
+        return `<attachment name="${f.name}" type="video" size="${formatFileSize(f.size)}">(video file, ${formatFileSize(f.size)})</attachment>`;
+      }
+      const ext = f.name.split(".").pop() || "txt";
+      return `<attachment name="${f.name}" size="${f.size}">\n\`\`\`${ext}\n${f.content}\n\`\`\`\n</attachment>`;
     });
+    return `${parts.join("\n\n")}\n\n${text}`;
+  }, []);
+
+  const cancelRequest = useCallback(() => {
+    abortRef.current = true;
+    setIsLoading(false);
+    setToolSteps([]);
+  }, []);
+
+  const sendMessage = async (overrideSurface?: Surface, overrideSessionId?: string) => {
+    if ((!input.trim() && attachments.length === 0) || isLoading) return;
+    abortRef.current = false;
+    const text = input;
+    const currentAttachments = [...attachments];
+    const surface: Surface = overrideSurface || "gui-chat";
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: text,
+      timestamp: new Date(),
+      surface,
+      attachments: currentAttachments.length > 0 ? currentAttachments : undefined,
+    };
+
+    if (overrideSessionId) {
+      updateConversation(activeId, c => ({
+        ...c,
+        sessionId: overrideSessionId,
+        messages: [...c.messages, userMessage],
+        updatedAt: Date.now(),
+        title: c.title === "New Chat" ? generateTitle([...c.messages, userMessage]) : c.title,
+      }));
+    } else {
+      updateConversation(activeId, c => {
+        const updated = { ...c, messages: [...c.messages, userMessage], updatedAt: Date.now() };
+        if (c.title === "New Chat") updated.title = generateTitle([...c.messages, userMessage]);
+        return updated;
+      });
+    }
 
     setInput("");
+    setAttachments([]);
     if (inputRef.current) {
       inputRef.current.style.height = "auto";
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
     setIsLoading(true);
     setToolSteps([]);
     setActionButtons([]);
     inputRef.current?.focus();
 
+    const sessionId = overrideSessionId || activeConversation?.sessionId;
+
     const msgId = crypto.randomUUID();
-    const assistantMessage: Message = { id: msgId, role: "assistant", content: "", timestamp: new Date() };
+    const assistantMessage: Message = { id: msgId, role: "assistant", content: "", timestamp: new Date(), surface };
     updateConversation(activeId, c => ({
       ...c,
       messages: [...c.messages, assistantMessage],
       updatedAt: Date.now(),
     }));
+
+    const messageToSend = buildMessageWithAttachments(text, currentAttachments);
+
+    const safetyTimer = setTimeout(() => {
+      if (!abortRef.current) {
+        abortRef.current = true;
+        setIsLoading(false);
+      }
+    }, 180_000);
 
     try {
       let accumulated = "";
@@ -314,7 +512,11 @@ export function ConversationView() {
       let tokenCount = 0;
       const streamStart = Date.now();
       const FLUSH_INTERVAL = 40;
-      for await (const token of agentService.streamChat(text)) {
+      for await (const token of agentService.streamChat(messageToSend, sessionId)) {
+        if (abortRef.current) {
+          accumulated += "\n\n*[Cancelled by user]*";
+          break;
+        }
         accumulated += token;
         tokenCount++;
         const now = Date.now();
@@ -364,7 +566,9 @@ export function ConversationView() {
         updatedAt: Date.now(),
       }));
     } finally {
+      clearTimeout(safetyTimer);
       setIsLoading(false);
+      abortRef.current = false;
     }
   };
 
@@ -651,6 +855,19 @@ export function ConversationView() {
             <StatusPill connected={gatewayConnected} label="OpenClaw" />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {activeConversation?.sessionId && (
+              <span
+                title={`Session: ${activeConversation.sessionId}`}
+                style={{
+                  fontSize: 9, padding: "2px 7px", borderRadius: 6,
+                  background: "rgba(139,92,246,0.08)", color: "rgba(139,92,246,0.6)",
+                  fontFamily: "'JetBrains Mono', monospace", cursor: "default",
+                  letterSpacing: 0.3,
+                }}
+              >
+                {activeConversation.sessionId.slice(0, 8)}
+              </span>
+            )}
             <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>{model}</span>
             {liveTps > 0 && (
               <span style={{
@@ -683,11 +900,38 @@ export function ConversationView() {
             const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
             setShowScrollTop(distanceFromBottom > 200);
           }}
+          onDragEnter={e => { e.preventDefault(); e.stopPropagation(); dragCounterRef.current++; setDragOver(true); }}
+          onDragOver={e => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "copy"; }}
+          onDragLeave={e => { e.preventDefault(); e.stopPropagation(); dragCounterRef.current--; if (dragCounterRef.current <= 0) { dragCounterRef.current = 0; setDragOver(false); } }}
+          onDrop={e => {
+            e.preventDefault();
+            e.stopPropagation();
+            dragCounterRef.current = 0;
+            setDragOver(false);
+            if (e.dataTransfer.files.length > 0) handleAttachFiles(e.dataTransfer.files);
+          }}
           style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "20px 20px 12px", position: "relative" }}
         >
+          {dragOver && (
+            <div style={{
+              position: "absolute", inset: 0, zIndex: 50,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              background: "rgba(59,130,246,0.08)", backdropFilter: "blur(4px)",
+              border: "2px dashed rgba(59,130,246,0.5)", borderRadius: 12,
+              pointerEvents: "none",
+            }}>
+              <div style={{
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+              }}>
+                <Upload style={{ width: 36, height: 36, color: "var(--accent)", opacity: 0.8 }} />
+                <span style={{ fontSize: 14, fontWeight: 600, color: "var(--accent)" }}>Drop files here</span>
+                <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>Images, audio, video, documents — up to 25 MB</span>
+              </div>
+            </div>
+          )}
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
             {messages.map((msg, i) => (
-              <MessageBubble key={msg.id} message={msg} isLatest={i === messages.length - 1 && msg.role === "assistant"} meta={responseMeta[msg.id]} />
+              <MessageBubble key={msg.id} message={msg} isLatest={i === messages.length - 1 && msg.role === "assistant"} meta={responseMeta[msg.id]} onImageClick={(src, name) => setLightboxSrc({ src, name })} />
             ))}
 
             {messages.length === 1 && messages[0].id === "welcome" && !isLoading && (
@@ -800,6 +1044,68 @@ export function ConversationView() {
           borderTop: "1px solid var(--border-subtle)",
           background: "var(--bg-surface)",
         }}>
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".txt,.md,.json,.csv,.xml,.yaml,.yml,.toml,.ini,.log,.js,.ts,.jsx,.tsx,.py,.rs,.go,.java,.c,.cpp,.h,.hpp,.cs,.html,.css,.scss,.sql,.sh,.ps1,.bat,.pdf,.doc,.docx,.rtf,.env,.dockerfile,.makefile,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.ico,.mp3,.wav,.ogg,.m4a,.flac,.aac,.mp4,.webm,.mov,.zip,.tar,.gz,image/*,audio/*,video/*"
+            style={{ display: "none" }}
+            onChange={e => {
+              if (e.target.files) handleAttachFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+
+          {/* Attachment chips */}
+          {attachments.length > 0 && (
+            <div style={{
+              display: "flex", flexWrap: "wrap", gap: 6,
+              padding: "6px 14px 4px",
+            }}>
+              {attachments.map(att => {
+                const Icon = getFileIcon(att.name, att.type);
+                const showThumb = isImageAttachment(att) && att.content?.startsWith("data:");
+                return (
+                  <div key={att.id} style={{
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                    padding: "3px 8px 3px 6px", borderRadius: 8,
+                    background: "rgba(59,130,246,0.08)",
+                    border: "1px solid rgba(59,130,246,0.15)",
+                    fontSize: 11, color: "var(--text-secondary)",
+                    maxWidth: 240,
+                  }}>
+                    {showThumb ? (
+                      <img src={att.content} alt={att.name} style={{
+                        width: 28, height: 28, borderRadius: 4, objectFit: "cover", flexShrink: 0,
+                      }} />
+                    ) : (
+                      <Icon style={{ width: 12, height: 12, color: "var(--accent)", flexShrink: 0 }} />
+                    )}
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {att.name}
+                    </span>
+                    <span style={{ fontSize: 9, color: "var(--text-muted)", flexShrink: 0 }}>
+                      {formatFileSize(att.size)}
+                    </span>
+                    <button
+                      onClick={() => removeAttachment(att.id)}
+                      style={{
+                        background: "none", border: "none", cursor: "pointer", padding: 1,
+                        display: "flex", alignItems: "center", flexShrink: 0,
+                        borderRadius: 4,
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(248,113,113,0.15)"}
+                      onMouseLeave={e => e.currentTarget.style.background = "none"}
+                    >
+                      <X style={{ width: 10, height: 10, color: "var(--text-muted)" }} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           <div style={{
             display: "flex", alignItems: "flex-end", gap: 6,
             background: "var(--bg-elevated)", border: "1px solid var(--border)",
@@ -850,19 +1156,37 @@ export function ConversationView() {
                     }
                     if (e.key === "Escape") { setShowSlashMenu(false); return; }
                   }
+                  if (e.key === "Escape" && isLoading) {
+                    e.preventDefault();
+                    cancelRequest();
+                  }
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    sendMessage();
+                    if (!isLoading) sendMessage();
+                  }
+                }}
+                onPaste={e => {
+                  const items = e.clipboardData?.items;
+                  if (!items) return;
+                  const pastedFiles: File[] = [];
+                  for (const item of Array.from(items)) {
+                    if (item.kind === "file") {
+                      const f = item.getAsFile();
+                      if (f) pastedFiles.push(f);
+                    }
+                  }
+                  if (pastedFiles.length > 0) {
+                    e.preventDefault();
+                    handleAttachFiles(pastedFiles);
                   }
                 }}
                 onBlur={() => setTimeout(() => setShowSlashMenu(false), 150)}
-                placeholder="Ask anything… or type / for commands"
-                disabled={isLoading}
+                placeholder={isLoading ? "Thinking… click Stop to cancel" : "Ask anything… or type / for commands"}
+                disabled={false}
                 style={{
                   width: "100%", padding: "6px 0",
                   background: "transparent", border: "none",
                   color: "var(--text)", fontSize: 13, outline: "none",
-                  opacity: isLoading ? 0.5 : 1,
                   resize: "none", maxHeight: 120, overflowY: "auto",
                   fontFamily: "inherit", lineHeight: 1.5,
                 }}
@@ -904,13 +1228,31 @@ export function ConversationView() {
               )}
             </div>
             <button
+              onClick={() => fileInputRef.current?.click()}
+              title="Attach document"
+              style={{
+                padding: 6, borderRadius: 8, border: "none", cursor: "pointer", flexShrink: 0,
+                display: "flex", alignItems: "center",
+                background: attachments.length > 0 ? "rgba(59,130,246,0.1)" : "transparent",
+                transition: "all 0.2s",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = attachments.length > 0 ? "rgba(59,130,246,0.1)" : "transparent"; }}
+            >
+              <Paperclip style={{
+                width: 15, height: 15,
+                color: attachments.length > 0 ? "var(--accent)" : "var(--text-muted)",
+                transition: "color 0.2s",
+              }} />
+            </button>
+            <button
               onClick={handleMicClick}
               style={{
                 padding: 6, borderRadius: 8, border: "none", cursor: "pointer", flexShrink: 0,
                 display: "flex", alignItems: "center",
                 background: isListening
                   ? "rgba(59,130,246,0.2)"
-                  : "var(--bg-elevated)",
+                  : "transparent",
                 boxShadow: isListening
                   ? "0 0 12px rgba(59,130,246,0.4)"
                   : "none",
@@ -930,25 +1272,50 @@ export function ConversationView() {
                 transition: "color 0.2s",
               }} />
             </button>
-            <button
-              data-send-btn
-              onClick={sendMessage}
-              disabled={!input.trim() || isLoading}
-              style={{
-                padding: 8, borderRadius: 8, flexShrink: 0, border: "none", cursor: "pointer",
-                background: input.trim() && !isLoading
-                  ? "var(--chat-user)"
-                  : "var(--bg-elevated)",
-                color: input.trim() && !isLoading ? "var(--chat-user-text)" : "var(--text-muted)",
-                display: "flex", alignItems: "center",
-                transition: "all 0.2s",
-              }}
-            >
-              <Send style={{ width: 15, height: 15 }} />
-            </button>
+            {isLoading ? (
+              <button
+                onClick={cancelRequest}
+                title="Stop generating"
+                style={{
+                  padding: 8, borderRadius: 8, flexShrink: 0, border: "1px solid rgba(248,113,113,0.3)",
+                  cursor: "pointer",
+                  background: "rgba(248,113,113,0.12)",
+                  color: "#f87171",
+                  display: "flex", alignItems: "center",
+                  transition: "all 0.2s",
+                }}
+              >
+                <Square style={{ width: 13, height: 13, fill: "currentColor" }} />
+              </button>
+            ) : (
+              <button
+                data-send-btn
+                onClick={() => {
+                  const pending = pendingSendRef.current;
+                  pendingSendRef.current = null;
+                  sendMessage(pending?.surface, pending?.sessionId);
+                }}
+                disabled={!input.trim() && attachments.length === 0}
+                style={{
+                  padding: 8, borderRadius: 8, flexShrink: 0, border: "none", cursor: "pointer",
+                  background: (input.trim() || attachments.length > 0)
+                    ? "var(--chat-user)"
+                    : "var(--bg-elevated)",
+                  color: (input.trim() || attachments.length > 0) ? "var(--chat-user-text)" : "var(--text-muted)",
+                  display: "flex", alignItems: "center",
+                  transition: "all 0.2s",
+                }}
+              >
+                <Send style={{ width: 15, height: 15 }} />
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {lightboxSrc && (
+        <ImageLightbox src={lightboxSrc.src} name={lightboxSrc.name} onClose={() => setLightboxSrc(null)} />
+      )}
     </div>
   );
 }
@@ -974,7 +1341,7 @@ function StatusPill({ connected, label }: { connected: boolean; label: string })
 }
 
 /* ── Message bubble ── */
-function MessageBubble({ message, isLatest, meta }: { message: Message; isLatest: boolean; meta?: { tokens: number; durationMs: number } }) {
+function MessageBubble({ message, isLatest, meta, onImageClick }: { message: Message; isLatest: boolean; meta?: { tokens: number; durationMs: number }; onImageClick?: (src: string, name: string) => void }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -1083,8 +1450,82 @@ function MessageBubble({ message, isLatest, meta }: { message: Message; isLatest
         )}
 
         {isUser ? (
-          <div style={{ fontSize: 13, color: "var(--chat-user-text)", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-            {message.content}
+          <div>
+            {message.attachments && message.attachments.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 6 }}>
+                {/* Image previews */}
+                {message.attachments.filter(a => isImageAttachment(a) && a.content?.startsWith("data:")).length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {message.attachments.filter(a => isImageAttachment(a) && a.content?.startsWith("data:")).map(att => (
+                      <img
+                        key={att.id}
+                        src={att.content}
+                        alt={att.name}
+                        onClick={() => onImageClick?.(att.content!, att.name)}
+                        style={{
+                          maxWidth: 260, maxHeight: 200, borderRadius: 8,
+                          objectFit: "cover", cursor: "pointer",
+                          border: "1px solid rgba(255,255,255,0.15)",
+                          transition: "opacity 0.15s",
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.opacity = "0.85")}
+                        onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
+                      />
+                    ))}
+                  </div>
+                )}
+                {/* Audio players */}
+                {message.attachments.filter(a => isAudioAttachment(a) && a.content?.startsWith("data:")).map(att => (
+                  <div key={att.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <Music style={{ width: 12, height: 12, color: "rgba(255,255,255,0.7)", flexShrink: 0 }} />
+                    <audio controls src={att.content} style={{ height: 32, maxWidth: 240 }} />
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.6)" }}>{att.name}</span>
+                  </div>
+                ))}
+                {/* Video players */}
+                {message.attachments.filter(a => isVideoAttachment(a) && a.content?.startsWith("data:")).map(att => (
+                  <video key={att.id} controls src={att.content} style={{
+                    maxWidth: 300, maxHeight: 200, borderRadius: 8,
+                    border: "1px solid rgba(255,255,255,0.15)",
+                  }} />
+                ))}
+                {/* Non-media file badges */}
+                {message.attachments.filter(a => !isImageAttachment(a) && !isAudioAttachment(a) && !isVideoAttachment(a)).length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {message.attachments.filter(a => !isImageAttachment(a) && !isAudioAttachment(a) && !isVideoAttachment(a)).map(att => {
+                      const Icon = getFileIcon(att.name, att.type);
+                      return (
+                        <span key={att.id} style={{
+                          display: "inline-flex", alignItems: "center", gap: 4,
+                          padding: "2px 8px", borderRadius: 6,
+                          background: "rgba(255,255,255,0.12)",
+                          fontSize: 10, color: "rgba(255,255,255,0.8)",
+                        }}>
+                          <Icon style={{ width: 10, height: 10 }} />
+                          {att.name}
+                          <span style={{ fontSize: 9, color: "rgba(255,255,255,0.5)" }}>{formatFileSize(att.size)}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+                {/* Image-only badges (no content loaded, e.g. from prior session) */}
+                {message.attachments.filter(a => isImageAttachment(a) && !a.content?.startsWith("data:")).map(att => (
+                  <span key={att.id} style={{
+                    display: "inline-flex", alignItems: "center", gap: 4,
+                    padding: "2px 8px", borderRadius: 6,
+                    background: "rgba(255,255,255,0.12)",
+                    fontSize: 10, color: "rgba(255,255,255,0.8)",
+                  }}>
+                    <ImageIcon style={{ width: 10, height: 10 }} />
+                    {att.name}
+                  </span>
+                ))}
+              </div>
+            )}
+            <div style={{ fontSize: 13, color: "var(--chat-user-text)", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+              {message.content}
+            </div>
           </div>
         ) : (
           <div className={`md-content ${isLatest ? "animate-fade-in" : ""}`}>
@@ -1092,6 +1533,24 @@ function MessageBubble({ message, isLatest, meta }: { message: Message; isLatest
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeHighlight]}
               components={{
+                img: ({ src, alt }) => (
+                  <div style={{ margin: "12px 0" }}>
+                    <img
+                      src={src}
+                      alt={alt || "Generated image"}
+                      onClick={() => src && onImageClick?.(src, alt || "image")}
+                      style={{
+                        maxWidth: "100%",
+                        maxHeight: 512,
+                        borderRadius: 12,
+                        border: "1px solid var(--border)",
+                        boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+                        display: "block",
+                        cursor: "pointer",
+                      }}
+                    />
+                  </div>
+                ),
                 pre: ({ children }) => <pre>{children}</pre>,
                 code: ({ className, children, ...props }) => {
                   const isBlock = className?.includes("language-");
@@ -1123,13 +1582,23 @@ function MessageBubble({ message, isLatest, meta }: { message: Message; isLatest
           </div>
         )}
 
-        {/* Timestamp + performance meta */}
+        {/* Timestamp + surface + performance meta */}
         <div style={{
           fontSize: 9, color: isUser ? "rgba(255,255,255,0.5)" : "var(--text-muted)",
           marginTop: 4, textAlign: isUser ? "right" : "left",
-          display: "flex", gap: 8, justifyContent: isUser ? "flex-end" : "flex-start",
+          display: "flex", gap: 6, alignItems: "center", justifyContent: isUser ? "flex-end" : "flex-start",
         }}>
           <span>{message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+          {message.surface && message.surface !== "gui-chat" && (
+            <span style={{
+              padding: "1px 5px", borderRadius: 4,
+              background: isUser ? "rgba(255,255,255,0.12)" : "rgba(139,92,246,0.08)",
+              color: isUser ? "rgba(255,255,255,0.7)" : "rgba(139,92,246,0.7)",
+              fontWeight: 500, letterSpacing: 0.3,
+            }}>
+              {message.surface}
+            </span>
+          )}
           {meta && meta.durationMs > 0 && (
             <span style={{ fontVariantNumeric: "tabular-nums" }}>
               {(meta.durationMs / 1000).toFixed(1)}s
@@ -1282,4 +1751,51 @@ function ActionIcon({ name }: { name: string }) {
     case "mic": return <Mic style={size} />;
     default: return <Zap style={size} />;
   }
+}
+
+/* ── Lightbox modal ── */
+function ImageLightbox({ src, name, onClose }: { src: string; name: string; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 10000,
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        background: "rgba(0,0,0,0.85)", backdropFilter: "blur(8px)",
+        cursor: "zoom-out",
+      }}
+    >
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        width: "100%", maxWidth: 800, padding: "0 16px 8px",
+      }}>
+        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>{name}</span>
+        <button
+          onClick={onClose}
+          style={{
+            background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 6,
+            padding: "4px 8px", cursor: "pointer", display: "flex", alignItems: "center",
+          }}
+        >
+          <X style={{ width: 14, height: 14, color: "rgba(255,255,255,0.8)" }} />
+        </button>
+      </div>
+      <img
+        src={src}
+        alt={name}
+        onClick={e => e.stopPropagation()}
+        style={{
+          maxWidth: "90vw", maxHeight: "85vh", borderRadius: 8,
+          objectFit: "contain", cursor: "default",
+          boxShadow: "0 8px 48px rgba(0,0,0,0.6)",
+        }}
+      />
+    </div>
+  );
 }

@@ -3,13 +3,25 @@ import { escapeShellArg } from "@/lib/tools";
 
 /* ─── Types ─── */
 
+export type Surface = "gui-chat" | "voice" | "workflow" | "office" | "discord" | "cron";
+
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  content?: string;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
   timestamp: Date;
+  surface?: Surface;
   artifacts?: Artifact[];
   toolCalls?: ToolCallEvent[];
+  attachments?: ChatAttachment[];
 }
 
 export interface Artifact {
@@ -79,9 +91,7 @@ export interface ActivityEntry {
 
 export interface OpenClawConfig {
   model?: string;
-  contextLength?: number;
   tools?: string[];
-  systemPrompt?: string;
   channels?: Record<string, unknown>;
   gateway?: Record<string, unknown>;
   memory?: Record<string, unknown>;
@@ -127,6 +137,10 @@ class OpenClawClient {
   /* TPS tracking */
   private _lastTps = 0;
   private _tpsCallbacks: ((tps: number) => void)[] = [];
+
+  /* Session memory tracking */
+  private _sessionMessages: { role: "user" | "assistant"; text: string; ts: number }[] = [];
+  private _lastMemoryCapture = 0;
 
   constructor() {
     this._currentModel = localStorage.getItem("crystal_openclaw_model") || null;
@@ -208,8 +222,8 @@ class OpenClawClient {
 
       const memoryPrompt = escapeShellArg(
         "Review today's conversation history and extract the most important facts, decisions, preferences, and context. " +
-        "Write a concise summary as bullet points. Save it to the file ~/.openclaw/workspace/memory/daily-" +
-        new Date().toISOString().split("T")[0] + ".md using the write_file tool. " +
+        "Write a concise summary as bullet points. Determine today's date and save it to " +
+        "~/.openclaw/workspace/memory/daily-YYYY-MM-DD.md (replacing YYYY-MM-DD with the actual current date) using the write_file tool. " +
         "Focus on: user preferences, project decisions, technical discoveries, action items, and anything the user would want remembered long-term. " +
         "Keep entries factual and concise."
       );
@@ -218,6 +232,31 @@ class OpenClawClient {
         cwd: null,
       });
     } catch { /* non-critical */ }
+  }
+
+  /**
+   * Actively capture a conversation summary into daily memory.
+   * Call this after significant conversations to ensure memory is logged
+   * even if the cron job doesn't fire.
+   */
+  async captureDailyMemory(conversationSummary: string): Promise<void> {
+    if (!conversationSummary.trim()) return;
+    try {
+      const dir = await this.getMemoryDir();
+      const date = new Date().toISOString().split("T")[0];
+      const dailyPath = `${dir}\\daily-${date}.md`;
+      const timestamp = new Date().toLocaleString();
+
+      let existing = "";
+      try { existing = await invoke<string>("read_file", { path: dailyPath }); } catch { /* new file */ }
+
+      const entry = `## Session — ${timestamp}\n${conversationSummary}`;
+      const updated = existing
+        ? existing.trimEnd() + "\n\n" + entry
+        : `# Daily Log: ${date}\n\n${entry}`;
+
+      await invoke("write_file", { path: dailyPath, content: updated });
+    } catch { /* best effort */ }
   }
 
   isGatewayConnected(): boolean {
@@ -232,19 +271,33 @@ class OpenClawClient {
 
   /* ── Chat via OpenClaw agent CLI ── */
 
-  async openclawChat(text: string): Promise<string> {
+  async openclawChat(text: string, sessionId?: string): Promise<string> {
+    this.logActivity({ type: "chat", payload: { text } });
+
     const escaped = text.replace(/"/g, '\\"').replace(/\n/g, ' ');
     const timeoutMs = 120_000;
     const startTime = Date.now();
 
+    let cmd = `${OPENCLAW_CMD} agent --agent main`;
+    if (sessionId) cmd += ` --session-id ${sessionId}`;
+    cmd += ` --message "${escaped}"`;
+
     const cmdPromise = invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-      command: `${OPENCLAW_CMD} agent --agent main --message "${escaped}"`,
+      command: cmd,
       cwd: null,
     });
     const timeoutPromise = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error("OpenClaw timed out after 120s")), timeoutMs)
     );
-    const result = await Promise.race([cmdPromise, timeoutPromise]);
+
+    let result;
+    try {
+      result = await Promise.race([cmdPromise, timeoutPromise]);
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      this.logActivity({ type: "error", payload: { text: errMsg } });
+      throw e;
+    }
 
     let output = result.stdout || "";
     const stderr = result.stderr || "";
@@ -261,7 +314,26 @@ class OpenClawClient {
     if (elapsed > 0) this.emitTps(Math.round(wordCount / elapsed * 4));
 
     this.logActivity({ type: "response", payload: { text: output } });
+
+    this._sessionMessages.push({ role: "user", text, ts: Date.now() });
+    this._sessionMessages.push({ role: "assistant", text: output.trim().slice(0, 500), ts: Date.now() });
+    if (this._sessionMessages.length > 40) this._sessionMessages = this._sessionMessages.slice(-30);
+    this._maybeFlushMemory();
+
     return output.trim();
+  }
+
+  private async _maybeFlushMemory(): Promise<void> {
+    const MIN_INTERVAL = 10 * 60 * 1000;
+    const MIN_MESSAGES = 6;
+    if (this._sessionMessages.length < MIN_MESSAGES) return;
+    if (Date.now() - this._lastMemoryCapture < MIN_INTERVAL) return;
+    this._lastMemoryCapture = Date.now();
+
+    const summary = this._sessionMessages
+      .map(m => `- [${m.role}] ${m.text.slice(0, 200)}`)
+      .join("\n");
+    this.captureDailyMemory(summary);
   }
 
   /* ── Gateway: Status ── */
@@ -304,6 +376,9 @@ class OpenClawClient {
     };
     this.messageLog.unshift(entry);
     if (this.messageLog.length > 500) this.messageLog.length = 500;
+
+    this.listeners.get(msg.type)?.forEach(fn => fn(msg));
+    this.listeners.get("*")?.forEach(fn => fn(msg));
   }
 
   getActivityLog(): ActivityEntry[] { return [...this.messageLog]; }
@@ -537,6 +612,7 @@ class OpenClawClient {
   async setModel(m: string): Promise<void> {
     this._currentModel = m;
     localStorage.setItem("crystal_openclaw_model", m);
+    this._modelsCache = null;
     try {
       await invoke("execute_command", {
         command: `${OPENCLAW_CMD} models set "${m}"`,
@@ -546,6 +622,82 @@ class OpenClawClient {
   }
 
   getModel(): string { return this._currentModel || "default"; }
+
+  /* ── Agents ── */
+
+  async listAgents(): Promise<{ id: string; workspace: string; agentDir: string; model: string; bindings: number; isDefault: boolean; routes: string[] }[]> {
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} agents list --json`, cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        const data = JSON.parse(result.stdout);
+        return Array.isArray(data) ? data : [];
+      }
+    } catch { /* ignore */ }
+    return [];
+  }
+
+  async dispatchToAgent(agentId: string, message: string): Promise<{ stdout: string; stderr: string; code: number }> {
+    const escaped = message.replace(/"/g, '\\"').replace(/\n/g, ' ');
+    return invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+      command: `${OPENCLAW_CMD} agent --agent "${agentId}" --message "${escaped}"`,
+      cwd: null,
+    });
+  }
+
+  async getAgentSessions(agentId?: string): Promise<{ key: string; sessionId: string; model: string; modelProvider: string; inputTokens: number; outputTokens: number; totalTokens: number; contextTokens: number; agentId: string; updatedAt: number; ageMs: number; kind: string }[]> {
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} sessions --json`, cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        const data = JSON.parse(result.stdout);
+        const sessions = data.sessions || [];
+        if (agentId) return sessions.filter((s: { agentId: string }) => s.agentId === agentId);
+        return sessions;
+      }
+    } catch { /* ignore */ }
+    return [];
+  }
+
+  async listNodes(): Promise<{ id: string; name?: string; label?: string; status?: string; type?: string }[]> {
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} nodes list --json`, cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        const data = JSON.parse(result.stdout);
+        return Array.isArray(data) ? data : data.nodes ?? [];
+      }
+    } catch { /* ignore */ }
+    return [];
+  }
+
+  async nodeAction(nodeId: string, action: "run" | "invoke", input: string): Promise<{ stdout: string; code: number }> {
+    const escaped = escapeShellArg(input);
+    return invoke<{ stdout: string; code: number }>("execute_command", {
+      command: `${OPENCLAW_CMD} nodes ${action} ${escapeShellArg(nodeId)} "${escaped}"`, cwd: null,
+    });
+  }
+
+  async notifyAllNodes(message: string): Promise<{ stdout: string; code: number }> {
+    return invoke<{ stdout: string; code: number }>("execute_command", {
+      command: `${OPENCLAW_CMD} nodes notify ${message.trim()}`, cwd: null,
+    });
+  }
+
+  async getChannelStatus(): Promise<{ channels: Record<string, { configured: boolean; running: boolean; lastError: string | null }>; channelMeta: { id: string; label: string }[]; channelAccounts: Record<string, { accountId: string; connected: boolean; bot?: { username: string }; lastInboundAt: number | null }[]> }> {
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} channels status --json`, cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        return JSON.parse(result.stdout);
+      }
+    } catch { /* ignore */ }
+    return { channels: {}, channelMeta: [], channelAccounts: {} };
+  }
 
   /* ── Gateway lifecycle ── */
 

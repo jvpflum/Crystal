@@ -51,46 +51,57 @@ export function SecurityView() {
   const [memoryStats, setMemoryStats] = useState<Record<string, unknown> | null>(null);
   const [memoryStatsLoading, setMemoryStatsLoading] = useState(false);
 
+  const parseAuditOutput = (stdout: string): AuditResult => {
+    if (!stdout.trim()) return { items: [], summary: { pass: 0, fail: 0, warn: 0 } };
+    try {
+      const parsed = JSON.parse(stdout);
+      if (Array.isArray(parsed)) {
+        const items = parsed as AuditItem[];
+        return { items, summary: { pass: items.filter(i => i.status === "pass").length, fail: items.filter(i => i.status === "fail").length, warn: items.filter(i => i.status === "warn").length } };
+      }
+      const items: AuditItem[] = parsed.items ?? parsed.results ?? parsed.checks ?? [];
+      return { items, summary: parsed.summary ?? { pass: items.filter(i => i.status === "pass").length, fail: items.filter(i => i.status === "fail").length, warn: items.filter(i => i.status === "warn").length } };
+    } catch {
+      return { items: [], summary: { pass: 0, fail: 0, warn: 0 } };
+    }
+  };
+
+  const runAgentFallbackAudit = useCallback(async (deep: boolean): Promise<AuditResult> => {
+    const prompt = deep
+      ? `Run a deep security audit on this system. Check: Windows Defender status, firewall, open ports (netstat), outdated packages, exposed credentials in common config files, recent login attempts, disk encryption status. Return ONLY a JSON array where each item has: "check" (string), "status" ("pass"|"fail"|"warn"), "message" (string), "fixable" (boolean). No markdown, no explanation, just the JSON array.`
+      : `Run a quick security scan on this system. Check: Windows Defender status, firewall status, open ports, and any obvious security issues. Return ONLY a JSON array where each item has: "check" (string), "status" ("pass"|"fail"|"warn"), "message" (string), "fixable" (boolean). No markdown, no explanation, just the JSON array.`;
+    const escaped = prompt.replace(/"/g, '\\"');
+    const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+      command: `openclaw agent --agent main --message "${escaped}"`,
+      cwd: null,
+    });
+    const jsonMatch = result.stdout.match(/\[[\s\S]*\]/);
+    if (jsonMatch) return parseAuditOutput(jsonMatch[0]);
+    return { items: [{ check: "Agent Scan", status: "warn", message: result.stdout.trim() || "Scan completed but output was not structured", fixable: false }], summary: { pass: 0, fail: 0, warn: 1 } };
+  }, []);
+
   const runAudit = useCallback(async (deep = false) => {
     setLoading(true);
     setError(null);
     try {
-      const cmd = deep
-        ? "openclaw security audit --deep --json"
-        : "openclaw security audit --json";
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: cmd,
-        cwd: null,
-      });
-      if (result.stdout.trim()) {
-        const parsed = JSON.parse(result.stdout);
-        if (Array.isArray(parsed)) {
-          const items = parsed as AuditItem[];
-          const summary = {
-            pass: items.filter((i) => i.status === "pass").length,
-            fail: items.filter((i) => i.status === "fail").length,
-            warn: items.filter((i) => i.status === "warn").length,
-          };
-          setAudit({ items, summary });
-        } else {
-          const items: AuditItem[] = parsed.items ?? parsed.results ?? parsed.checks ?? [];
-          setAudit({
-            items,
-            summary: parsed.summary ?? {
-              pass: items.filter((i) => i.status === "pass").length,
-              fail: items.filter((i) => i.status === "fail").length,
-              warn: items.filter((i) => i.status === "warn").length,
-            },
-          });
-        }
+      const cmd = deep ? "openclaw security audit --deep --json" : "openclaw security audit --json";
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", { command: cmd, cwd: null });
+      if (result.code === 0 && result.stdout.trim()) {
+        setAudit(parseAuditOutput(result.stdout));
       } else {
-        setAudit({ items: [], summary: { pass: 0, fail: 0, warn: 0 } });
+        const fallback = await runAgentFallbackAudit(deep);
+        setAudit(fallback);
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to run security audit");
+    } catch {
+      try {
+        const fallback = await runAgentFallbackAudit(deep);
+        setAudit(fallback);
+      } catch (e2) {
+        setError(e2 instanceof Error ? e2.message : "Failed to run security audit");
+      }
     }
     setLoading(false);
-  }, []);
+  }, [runAgentFallbackAudit]);
 
   const loadConfig = useCallback(async () => {
     try {

@@ -97,7 +97,10 @@ function ActivityFeedTab() {
     const unsub = openclawClient.on("*", () => {
       setEntries(openclawClient.getActivityLog());
     });
-    return unsub;
+    const poll = setInterval(() => {
+      setEntries(openclawClient.getActivityLog());
+    }, 5_000);
+    return () => { unsub(); clearInterval(poll); };
   }, [live]);
 
   useEffect(() => {
