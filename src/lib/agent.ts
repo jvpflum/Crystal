@@ -75,7 +75,7 @@ class AgentService {
     const outDir = "$env:USERPROFILE\\.openclaw\\workspace\\images";
     const skillPath = "$env:APPDATA\\npm\\node_modules\\openclaw\\skills\\openai-image-gen\\scripts\\gen.py";
     const apiKeyCmd = `$env:OPENAI_API_KEY = (Get-Content "$env:USERPROFILE\\.openclaw\\agents\\main\\agent\\auth-profiles.json" | ConvertFrom-Json).profiles.'openai:default'.key`;
-    const cmd = `${apiKeyCmd}; New-Item -ItemType Directory -Force -Path "${outDir}" | Out-Null; python3 "${skillPath}" --prompt "${escaped}" --count 1 --out-dir "${outDir}"`;
+    const cmd = `${apiKeyCmd}; New-Item -ItemType Directory -Force -Path "${outDir}" | Out-Null; python "${skillPath}" --prompt "${escaped}" --count 1 --out-dir "${outDir}"`;
 
     const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
       command: cmd, cwd: null,
@@ -94,16 +94,11 @@ class AgentService {
 
     if (imagePath) {
       try {
-        const b64Result = await invoke<{ stdout: string; code: number }>("execute_command", {
-          command: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("${imagePath}"))`,
-          cwd: null,
-        });
-        if (b64Result.code === 0 && b64Result.stdout?.trim()) {
-          const dataUrl = `data:image/png;base64,${b64Result.stdout.trim()}`;
-          return `Here's your generated image:\n\n![${prompt}](${dataUrl})\n\n*Saved to: \`${imagePath}\`*`;
-        }
-      } catch { /* fall through to path-only response */ }
-      return `Image generated successfully!\n\n*Saved to: \`${imagePath}\`*\n\n(Open the file to view it)`;
+        const dataUrl = await invoke<string>("read_file_base64", { path: imagePath });
+        return `Here's your generated image:\n\n![${prompt}](${dataUrl})\n\n*Saved to: \`${imagePath}\`*`;
+      } catch {
+        return `Here's your generated image:\n\n![${prompt}](${imagePath})\n\n*Saved to: \`${imagePath}\`*`;
+      }
     }
 
     return `Image generated in the workspace images folder.`;

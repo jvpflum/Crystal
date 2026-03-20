@@ -1650,22 +1650,7 @@ function MessageBubble({ message, isLatest, meta, onImageClick }: { message: Mes
               rehypePlugins={[rehypeHighlight]}
               components={{
                 img: ({ src, alt }) => (
-                  <div style={{ margin: "12px 0" }}>
-                    <img
-                      src={src}
-                      alt={alt || "Generated image"}
-                      onClick={() => src && onImageClick?.(src, alt || "image")}
-                      style={{
-                        maxWidth: "100%",
-                        maxHeight: 512,
-                        borderRadius: 12,
-                        border: "1px solid var(--border)",
-                        boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
-                        display: "block",
-                        cursor: "pointer",
-                      }}
-                    />
-                  </div>
+                  <LocalImage src={src} alt={alt} onImageClick={onImageClick} />
                 ),
                 pre: ({ children }) => <pre>{children}</pre>,
                 code: ({ className, children, ...props }) => {
@@ -1723,6 +1708,88 @@ function MessageBubble({ message, isLatest, meta, onImageClick }: { message: Mes
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ── Local image resolver — converts file paths to data URLs via Tauri ── */
+function isLocalPath(src: string): boolean {
+  if (!src) return false;
+  if (src.startsWith("data:") || src.startsWith("http://") || src.startsWith("https://") || src.startsWith("blob:")) return false;
+  if (/^[A-Za-z]:[\\/]/.test(src)) return true;
+  if (src.startsWith("/") || src.startsWith("~") || src.startsWith("\\\\")) return true;
+  if (src.startsWith("file://")) return true;
+  return false;
+}
+
+function LocalImage({ src, alt, onImageClick }: { src?: string; alt?: string; onImageClick?: (src: string, name: string) => void }) {
+  const [resolvedSrc, setResolvedSrc] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (!src) return;
+    if (isLocalPath(src)) {
+      const filePath = src.startsWith("file://") ? src.replace(/^file:\/\/\/?/, "") : src;
+      invoke<string>("read_file_base64", { path: filePath })
+        .then(dataUrl => setResolvedSrc(dataUrl))
+        .catch(() => setError(true));
+    } else {
+      setResolvedSrc(src);
+    }
+  }, [src]);
+
+  if (error) {
+    return (
+      <div style={{
+        margin: "12px 0", padding: "12px 16px", borderRadius: 12,
+        background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.15)",
+        display: "flex", alignItems: "center", gap: 8,
+      }}>
+        <ImageIcon style={{ width: 16, height: 16, color: "#f87171", flexShrink: 0 }} />
+        <div>
+          <span style={{ fontSize: 12, color: "var(--text-secondary)", display: "block" }}>
+            Could not load image
+          </span>
+          {src && (
+            <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
+              {src}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (!resolvedSrc) {
+    return (
+      <div style={{
+        margin: "12px 0", padding: 20, borderRadius: 12,
+        background: "var(--bg-elevated)", border: "1px solid var(--border)",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+        minHeight: 120,
+      }}>
+        <Loader2 style={{ width: 16, height: 16, color: "var(--accent)", animation: "spin 1s linear infinite" }} />
+        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading image...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ margin: "12px 0" }}>
+      <img
+        src={resolvedSrc}
+        alt={alt || "Generated image"}
+        onClick={() => onImageClick?.(resolvedSrc, alt || "image")}
+        style={{
+          maxWidth: "100%",
+          maxHeight: 512,
+          borderRadius: 12,
+          border: "1px solid var(--border)",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+          display: "block",
+          cursor: "pointer",
+        }}
+      />
     </div>
   );
 }

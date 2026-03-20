@@ -253,6 +253,31 @@ fn read_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn read_file_base64(path: String) -> Result<String, String> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let resolved = resolve_path(&path);
+    let bytes = fs::read(&resolved)
+        .map_err(|e| format!("Failed to read file '{}': {}", resolved, e))?;
+    let ext = Path::new(&resolved)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        _ => "application/octet-stream",
+    };
+    let b64 = STANDARD.encode(&bytes);
+    Ok(format!("data:{};base64,{}", mime, b64))
+}
+
+#[tauri::command]
 fn write_file(path: String, content: String) -> Result<(), String> {
     let resolved = resolve_path(&path);
     if let Some(parent) = Path::new(&resolved).parent() {
@@ -927,6 +952,7 @@ pub fn run() {
             get_gpu_stats,
             get_sys_stats,
             read_file,
+            read_file_base64,
             write_file,
             list_directory,
             get_server_status,
