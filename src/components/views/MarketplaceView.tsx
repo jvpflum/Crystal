@@ -858,7 +858,7 @@ function PowerUpTab() {
     s.push({
       id: "reindex",
       label: "Reindex memory",
-      command: "openclaw memory reindex",
+      command: "openclaw memory index --force",
       status: "pending",
     });
     return s;

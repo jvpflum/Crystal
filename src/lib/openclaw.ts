@@ -271,7 +271,7 @@ class OpenClawClient {
 
   /* ── Chat via OpenClaw agent CLI ── */
 
-  async openclawChat(text: string, sessionId?: string): Promise<string> {
+  async openclawChat(text: string, sessionId?: string, thinking?: string): Promise<string> {
     this.logActivity({ type: "chat", payload: { text } });
 
     const escaped = text.replace(/"/g, '\\"').replace(/\n/g, ' ');
@@ -280,6 +280,7 @@ class OpenClawClient {
 
     let cmd = `${OPENCLAW_CMD} agent --agent main`;
     if (sessionId) cmd += ` --session-id ${sessionId}`;
+    if (thinking) cmd += ` --thinking ${thinking}`;
     cmd += ` --message "${escaped}"`;
 
     const cmdPromise = invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
@@ -638,10 +639,13 @@ class OpenClawClient {
     return [];
   }
 
-  async dispatchToAgent(agentId: string, message: string): Promise<{ stdout: string; stderr: string; code: number }> {
+  async dispatchToAgent(agentId: string, message: string, thinking?: string): Promise<{ stdout: string; stderr: string; code: number }> {
     const escaped = message.replace(/"/g, '\\"').replace(/\n/g, ' ');
+    let cmd = `${OPENCLAW_CMD} agent --agent "${agentId}"`;
+    if (thinking) cmd += ` --thinking ${thinking}`;
+    cmd += ` --message "${escaped}"`;
     return invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-      command: `${OPENCLAW_CMD} agent --agent "${agentId}" --message "${escaped}"`,
+      command: cmd,
       cwd: null,
     });
   }
@@ -677,13 +681,16 @@ class OpenClawClient {
   async nodeAction(nodeId: string, action: "run" | "invoke", input: string): Promise<{ stdout: string; code: number }> {
     const escaped = escapeShellArg(input);
     return invoke<{ stdout: string; code: number }>("execute_command", {
-      command: `${OPENCLAW_CMD} nodes ${action} ${escapeShellArg(nodeId)} "${escaped}"`, cwd: null,
+      command: action === "run"
+        ? `${OPENCLAW_CMD} nodes run --node ${escapeShellArg(nodeId)} -- ${escaped}`
+        : `${OPENCLAW_CMD} nodes invoke --node ${escapeShellArg(nodeId)} --command "${escaped}"`,
+      cwd: null,
     });
   }
 
   async notifyAllNodes(message: string): Promise<{ stdout: string; code: number }> {
     return invoke<{ stdout: string; code: number }>("execute_command", {
-      command: `${OPENCLAW_CMD} nodes notify ${message.trim()}`, cwd: null,
+      command: `${OPENCLAW_CMD} nodes notify --body "${escapeShellArg(message.trim())}"`, cwd: null,
     });
   }
 

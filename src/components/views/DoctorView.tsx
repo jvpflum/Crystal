@@ -9,10 +9,11 @@ import {
   AlertTriangle,
   Wrench,
   Heart,
+  Archive,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 
-type CommandId = "doctor" | "deep" | "fix" | "full-fix" | "status" | "health" | "validate" | "memory-reindex";
+type CommandId = "doctor" | "deep" | "fix" | "full-fix" | "status" | "health" | "validate" | "memory-reindex" | "backup-create" | "backup-verify";
 
 interface OutputBlock {
   id: string;
@@ -38,14 +39,16 @@ const LINE_COLORS: Record<ReturnType<typeof classifyLine>, string> = {
 };
 
 const COMMANDS: Record<CommandId, { cmd: string; label: string }> = {
-  doctor:         { cmd: "openclaw doctor",                  label: "Doctor" },
-  deep:           { cmd: "openclaw doctor --deep --yes",       label: "Deep Scan" },
-  fix:            { cmd: "openclaw doctor --fix",              label: "Auto Fix" },
-  "full-fix":     { cmd: "openclaw doctor --deep --yes --fix", label: "Deep Fix (Auto)" },
-  status:         { cmd: "openclaw status",                    label: "Status" },
-  health:         { cmd: "openclaw health",                     label: "Gateway Health" },
-  validate:       { cmd: "openclaw config validate",            label: "Config Validate" },
-  "memory-reindex": { cmd: "openclaw memory index --all",       label: "Reindex Memory" },
+  doctor:           { cmd: "openclaw doctor",                              label: "Doctor" },
+  deep:             { cmd: "openclaw doctor --deep --yes",                 label: "Deep Scan" },
+  fix:              { cmd: "openclaw doctor --fix --non-interactive",      label: "Auto Fix" },
+  "full-fix":       { cmd: "openclaw doctor --deep --yes --fix",           label: "Deep Fix (Auto)" },
+  status:           { cmd: "openclaw status",                              label: "Status" },
+  health:           { cmd: "openclaw health",                              label: "Gateway Health" },
+  validate:         { cmd: "openclaw config validate --json",              label: "Config Validate" },
+  "memory-reindex": { cmd: "openclaw memory index --all",                  label: "Reindex Memory" },
+  "backup-create":  { cmd: "openclaw backup create --json",               label: "Create Backup" },
+  "backup-verify":  { cmd: "openclaw backup verify --json",               label: "Verify Backup" },
 };
 
 export function DoctorView() {
@@ -143,10 +146,12 @@ export function DoctorView() {
       </div>
 
       {/* Quick Actions */}
-      <div style={{ padding: "0 20px 10px", display: "flex", gap: 6, flexShrink: 0 }}>
+      <div style={{ padding: "0 20px 10px", display: "flex", gap: 6, flexShrink: 0, flexWrap: "wrap" }}>
         <QuickAction label="Status" running={running === "status"} onClick={() => run("status")} disabled={running !== null} />
         <QuickAction label="Gateway Health" running={running === "health"} onClick={() => run("health")} disabled={running !== null} />
         <QuickAction label="Reindex Memory" running={running === "memory-reindex"} onClick={() => run("memory-reindex")} disabled={running !== null} />
+        <QuickAction label="Create Backup" running={running === "backup-create"} onClick={() => run("backup-create")} disabled={running !== null} icon={Archive} />
+        <QuickAction label="Verify Backup" running={running === "backup-verify"} onClick={() => run("backup-verify")} disabled={running !== null} icon={Archive} />
       </div>
 
       {/* Body */}
@@ -297,7 +302,7 @@ function Badge({ color, count, label }: { color: string; count: number; label: s
   );
 }
 
-function QuickAction({ label, running, onClick, disabled }: { label: string; running: boolean; onClick: () => void; disabled: boolean }) {
+function QuickAction({ label, running, onClick, disabled, icon: Icon = Heart }: { label: string; running: boolean; onClick: () => void; disabled: boolean; icon?: React.ElementType }) {
   return (
     <button onClick={onClick} disabled={disabled} style={{
       display: "flex", alignItems: "center", gap: 4, padding: "3px 10px",
@@ -305,7 +310,7 @@ function QuickAction({ label, running, onClick, disabled }: { label: string; run
       background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)",
       fontSize: 10, cursor: "pointer",
     }}>
-      {running ? <Loader2 style={{ width: 10, height: 10 }} className="animate-spin" /> : <Heart style={{ width: 10, height: 10 }} />}
+      {running ? <Loader2 style={{ width: 10, height: 10 }} className="animate-spin" /> : <Icon style={{ width: 10, height: 10 }} />}
       {label}
     </button>
   );

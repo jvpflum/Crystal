@@ -34,6 +34,8 @@ export type VoiceState =
   | "speaking"
   | "error";
 
+export type ThinkingLevel = "auto" | "minimal" | "medium" | "high";
+
 interface AppState {
   currentView: AppView;
   setView: (view: AppView) => void;
@@ -49,6 +51,10 @@ interface AppState {
 
   gatewayConnected: boolean;
   setGatewayConnected: (c: boolean) => void;
+
+  thinkingLevel: ThinkingLevel | undefined;
+  setThinkingLevel: (level: ThinkingLevel | undefined) => void;
+  cycleThinkingLevel: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -66,4 +72,19 @@ export const useAppStore = create<AppState>((set) => ({
 
   gatewayConnected: false,
   setGatewayConnected: (c) => set({ gatewayConnected: c }),
+
+  thinkingLevel: (localStorage.getItem("crystal_thinking_level") as ThinkingLevel) || undefined,
+  setThinkingLevel: (level) => {
+    if (level) localStorage.setItem("crystal_thinking_level", level);
+    else localStorage.removeItem("crystal_thinking_level");
+    set({ thinkingLevel: level });
+  },
+  cycleThinkingLevel: () => set(state => {
+    const order: (ThinkingLevel | undefined)[] = [undefined, "auto", "minimal", "medium", "high"];
+    const idx = order.indexOf(state.thinkingLevel);
+    const next = order[(idx + 1) % order.length];
+    if (next) localStorage.setItem("crystal_thinking_level", next);
+    else localStorage.removeItem("crystal_thinking_level");
+    return { thinkingLevel: next };
+  }),
 }));

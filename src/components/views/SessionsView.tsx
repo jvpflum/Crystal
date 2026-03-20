@@ -1,9 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Loader2, RefreshCw, Trash2, AlertTriangle, Clock,
-  Cpu, MessageSquare, Zap,
+  Cpu, MessageSquare, Zap, Filter, Settings2,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+
+interface MaintenanceConfig {
+  mode: string;
+  [key: string]: unknown;
+}
 
 interface Session {
   key: string;
@@ -24,13 +29,23 @@ export function SessionsView() {
   const [error, setError] = useState<string | null>(null);
   const [cleaning, setCleaning] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState(false);
+  const [maintenance, setMaintenance] = useState<MaintenanceConfig | null>(null);
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
-  const loadSessions = useCallback(async () => {
+  useEffect(() => {
+    if (feedback) { const t = setTimeout(() => setFeedback(null), 4000); return () => clearTimeout(t); }
+  }, [feedback]);
+
+  const loadSessions = useCallback(async (useActive?: boolean | React.MouseEvent) => {
     setLoading(true);
     setError(null);
+    const active = (typeof useActive === "boolean" ? useActive : undefined) ?? activeFilter;
     try {
+      const cmd = active ? "openclaw sessions --json --active 24h" : "openclaw sessions --json";
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "openclaw sessions --json",
+        command: cmd,
         cwd: null,
       });
       if (result.code !== 0) {
@@ -50,18 +65,44 @@ export function SessionsView() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { loadSessions(); }, [loadSessions]);
+  const loadMaintenance = useCallback(async () => {
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: "openclaw config get session.maintenance --json", cwd: null,
+      });
+      if (result.code === 0) {
+        const data = JSON.parse(result.stdout);
+        setMaintenance(data.value || data);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { loadSessions(); loadMaintenance(); }, [loadSessions, loadMaintenance]);
 
   const cleanup = async () => {
     setCleaning(true);
     try {
       await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "openclaw sessions cleanup",
+        command: "openclaw sessions cleanup --enforce",
         cwd: null,
       });
       await loadSessions();
     } catch { /* ignore */ }
     setCleaning(false);
+  };
+
+  const setMaintenanceMode = async (mode: string) => {
+    setMaintenanceLoading(true);
+    try {
+      await invoke("execute_command", {
+        command: `openclaw config set session.maintenance.mode "${mode}"`, cwd: null,
+      });
+      setMaintenance(prev => prev ? { ...prev, mode } : { mode });
+      setFeedback({ type: "success", msg: `Maintenance mode set to ${mode}` });
+    } catch (e) {
+      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Failed to set mode" });
+    }
+    setMaintenanceLoading(false);
   };
 
   const deleteSession = async (sessionId: string) => {
@@ -111,6 +152,18 @@ export function SessionsView() {
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button
+              onClick={() => { const next = !activeFilter; setActiveFilter(next); loadSessions(next); }}
+              style={{
+                display: "flex", alignItems: "center", gap: 4, padding: "4px 10px",
+                borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
+                background: activeFilter ? "rgba(59,130,246,0.2)" : "rgba(59,130,246,0.08)",
+                color: "var(--accent)", fontWeight: activeFilter ? 600 : 400,
+              }}
+            >
+              <Filter style={{ width: 10, height: 10 }} />
+              Active (24h)
+            </button>
+            <button
               onClick={cleanup}
               disabled={cleaning}
               style={{
@@ -127,7 +180,7 @@ export function SessionsView() {
               Cleanup
             </button>
             <button
-              onClick={loadSessions}
+              onClick={() => loadSessions()}
               disabled={loading}
               style={{
                 display: "flex", alignItems: "center", gap: 4, padding: "4px 10px",
@@ -140,6 +193,19 @@ export function SessionsView() {
             </button>
           </div>
         </div>
+
+        {/* Feedback */}
+        {feedback && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 6, marginTop: 8,
+            background: feedback.type === "success" ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
+            border: `1px solid ${feedback.type === "success" ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)"}`,
+          }}>
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: feedback.type === "success" ? "#4ade80" : "#f87171" }} />
+            <span style={{ fontSize: 10, color: feedback.type === "success" ? "#4ade80" : "#f87171", flex: 1 }}>{feedback.msg}</span>
+            <button onClick={() => setFeedback(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 11 }}>×</button>
+          </div>
+        )}
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "0 20px 16px" }}>
@@ -178,6 +244,46 @@ export function SessionsView() {
             ))}
           </div>
         )}
+
+        {/* Session Maintenance Config */}
+        <div style={{
+          marginTop: 16, padding: "10px 12px", borderRadius: 10,
+          background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+            <Settings2 style={{ width: 12, height: 12, color: "var(--text-muted)" }} />
+            <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>Maintenance Settings</span>
+            <button onClick={loadMaintenance} style={{ marginLeft: "auto", background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 9, display: "flex", alignItems: "center", gap: 3 }}>
+              <RefreshCw style={{ width: 8, height: 8 }} /> reload
+            </button>
+          </div>
+          {maintenance ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>Mode:</span>
+              <div style={{ display: "flex", gap: 4 }}>
+                {["warn", "enforce"].map(mode => (
+                  <button
+                    key={mode}
+                    onClick={() => setMaintenanceMode(mode)}
+                    disabled={maintenanceLoading || maintenance.mode === mode}
+                    style={{
+                      padding: "4px 12px", borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
+                      fontWeight: maintenance.mode === mode ? 600 : 400,
+                      background: maintenance.mode === mode ? "var(--accent-bg)" : "var(--bg-hover)",
+                      color: maintenance.mode === mode ? "var(--accent)" : "var(--text-muted)",
+                      opacity: maintenanceLoading ? 0.5 : 1,
+                    }}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+              {maintenanceLoading && <Loader2 style={{ width: 10, height: 10, color: "var(--accent)", animation: "spin 1s linear infinite" }} />}
+            </div>
+          ) : (
+            <p style={{ fontSize: 10, color: "var(--text-muted)", margin: 0 }}>Could not load maintenance config</p>
+          )}
+        </div>
       </div>
     </div>
   );

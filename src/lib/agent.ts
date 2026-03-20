@@ -109,7 +109,7 @@ class AgentService {
     return `Image generated in the workspace images folder.`;
   }
 
-  async *streamChat(userMessage: string, sessionId?: string): AsyncGenerator<string> {
+  async *streamChat(userMessage: string, sessionId?: string, thinking?: string): AsyncGenerator<string> {
     this.emitStep({ action: { type: "thinking" }, timestamp: new Date() });
 
     const imagePrompt = this.isImageRequest(userMessage);
@@ -119,7 +119,7 @@ class AgentService {
       this.emitStep({ action: { type: "tool_call", tool: "openai-image-gen", args: { prompt: imagePrompt } }, timestamp: new Date() });
       response = await this.generateImage(imagePrompt);
     } else {
-      response = await openclawClient.openclawChat(userMessage, sessionId);
+      response = await openclawClient.openclawChat(userMessage, sessionId, thinking);
     }
 
     const cleaned = this.extractAndEmitActions(response);
@@ -135,8 +135,8 @@ class AgentService {
     }
   }
 
-  async chat(userMessage: string, sessionId?: string): Promise<string> {
-    const response = await openclawClient.openclawChat(userMessage, sessionId);
+  async chat(userMessage: string, sessionId?: string, thinking?: string): Promise<string> {
+    const response = await openclawClient.openclawChat(userMessage, sessionId, thinking);
     return this.extractAndEmitActions(response);
   }
 

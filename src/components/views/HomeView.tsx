@@ -12,7 +12,7 @@ import {
   AlertTriangle, ShieldAlert, Database, Percent, Loader2,
   Cpu, MemoryStick, HardDrive, Bolt, Trash2, Wifi, BatteryFull,
   Gauge, RefreshCw, Power, RotateCcw, FolderCog, ShieldCheck,
-  MonitorDown, Layers,
+  MonitorDown, Layers, Users,
 } from "lucide-react";
 
 // Global caches so data survives tab switches without re-fetching
@@ -157,7 +157,7 @@ export function HomeView() {
       color: "var(--warning)",
       action: () => runAction("briefing", async () => {
         const r = await invoke<{ stdout: string }>("execute_command", {
-          command: 'openclaw chat send "Give me a morning briefing: today\'s date, top priorities, and any alerts." --json',
+          command: 'openclaw agent --agent main --message "Give me a morning briefing: today\'s date, top priorities, and any alerts." --json',
           cwd: null,
         });
         const parsed = safeParse(r.stdout);
@@ -248,6 +248,9 @@ export function HomeView() {
         <MetricCard icon={Percent} label="Tokens" value={loading ? "…" : `${data.tokenPercentUsed}%`} color="#a855f7" />
         <MetricCard icon={Database} label="Memory" value={loading ? "…" : data.memoryChunks} color="var(--success)" />
       </div>
+
+      {/* ── System Presence ── */}
+      <SystemPresence />
 
       {/* ── Quick Actions ── */}
       <SectionLabel text="Quick Actions" />
@@ -577,6 +580,82 @@ function SystemMonitor() {
         </p>
       </div>
     </div>
+  );
+}
+
+/* ─── System Presence ─── */
+
+interface PresenceEntry {
+  id: string;
+  name: string;
+  status: string;
+  since?: string;
+}
+
+function SystemPresence() {
+  const [entries, setEntries] = useState<PresenceEntry[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+          command: "openclaw system presence --json", cwd: null,
+        });
+        if (result.code === 0 && result.stdout.trim()) {
+          const data = JSON.parse(result.stdout);
+          const list = (data.entries ?? data.presence ?? data ?? []) as Record<string, unknown>[];
+          setEntries(list.map((e, i) => ({
+            id: String(e.id ?? i),
+            name: String(e.name ?? e.agent ?? e.service ?? "unknown"),
+            status: String(e.status ?? e.state ?? "active"),
+            since: e.since ? String(e.since) : e.connectedAt ? String(e.connectedAt) : undefined,
+          })));
+        }
+      } catch { /* presence may not be available */ }
+      setLoaded(true);
+    })();
+  }, []);
+
+  if (!loaded || entries.length === 0) return null;
+
+  return (
+    <>
+      <SectionLabel text="System Presence" />
+      <div
+        onMouseEnter={hoverIn}
+        onMouseLeave={hoverOut}
+        style={{
+          ...card({ padding: "12px 16px", marginBottom: 16 }),
+          display: "flex", alignItems: "center", gap: 12,
+        }}
+      >
+        <div style={{
+          width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+          background: "color-mix(in srgb, var(--accent) 12%, transparent)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <Users style={{ width: 16, height: 16, color: "var(--accent)" }} />
+        </div>
+        <div style={{ flex: 1, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {entries.map(e => (
+            <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <span style={{
+                width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                background: e.status === "active" || e.status === "online" ? "var(--success)" : e.status === "idle" ? "var(--warning)" : "var(--text-muted)",
+              }} />
+              <span style={{ fontSize: 11, color: "var(--text)", fontWeight: 500 }}>{e.name}</span>
+              {e.since && (
+                <span style={{ fontSize: 9, color: "var(--text-muted)" }}>
+                  {e.since.includes("T") ? new Date(e.since).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : e.since}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+        <span style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }}>{entries.length} connected</span>
+      </div>
+    </>
   );
 }
 

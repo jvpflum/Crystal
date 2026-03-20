@@ -5,7 +5,7 @@ import { cachedCommand } from "@/lib/cache";
 import { useOpenClaw } from "@/hooks/useOpenClaw";
 import { useVoice } from "@/hooks/useVoice";
 import { openclawClient } from "@/lib/openclaw";
-import { useAppStore } from "@/stores/appStore";
+import { useAppStore, type ThinkingLevel } from "@/stores/appStore";
 import { useThemeStore, THEMES } from "@/stores/themeStore";
 import { LobsterIcon } from "@/components/LobsterIcon";
 
@@ -124,6 +124,10 @@ export function SettingsView() {
   const [updateChannel, setUpdateChannel] = useState<"stable" | "beta" | "dev">("stable");
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [updateOutput, setUpdateOutput] = useState<string | null>(null);
+  const [updateSuccess, setUpdateSuccess] = useState<boolean | null>(null);
+  const [restarting, setRestarting] = useState(false);
 
   const [configText, setConfigText] = useState("");
   const [loadingConfig, setLoadingConfig] = useState(false);
@@ -139,6 +143,25 @@ export function SettingsView() {
   const [configKey, setConfigKey] = useState("");
   const [configValue, setConfigValue] = useState("");
   const [configOutput, setConfigOutput] = useState("");
+
+  /* OpenClaw Configuration panel state */
+  const [ocExpanded, setOcExpanded] = useState<Record<string, boolean>>({});
+  const [ocValidating, setOcValidating] = useState(false);
+  const [ocValidateResult, setOcValidateResult] = useState<{ valid: boolean; errors?: string[] } | null>(null);
+  const [ocMemoryConfig, setOcMemoryConfig] = useState<Record<string, unknown> | null>(null);
+  const [ocMemoryLoading, setOcMemoryLoading] = useState(false);
+  const [ocReindexing, setOcReindexing] = useState(false);
+  const [ocReindexResult, setOcReindexResult] = useState<string | null>(null);
+  const [ocSessionConfig, setOcSessionConfig] = useState<Record<string, unknown> | null>(null);
+  const [ocSessionLoading, setOcSessionLoading] = useState(false);
+  const [ocHeartbeatConfig, setOcHeartbeatConfig] = useState<Record<string, unknown> | null>(null);
+  const [ocHeartbeatLoading, setOcHeartbeatLoading] = useState(false);
+  const [ocMaintenanceToggling, setOcMaintenanceToggling] = useState(false);
+
+  const thinkingLevel = useAppStore(s => s.thinkingLevel);
+  const setThinkingLevel = useAppStore(s => s.setThinkingLevel);
+
+  const toggleOcSection = (key: string) => setOcExpanded(prev => ({ ...prev, [key]: !prev[key] }));
 
   /* ── effects ── */
 
@@ -254,6 +277,46 @@ export function SettingsView() {
     setCheckingUpdates(false);
   };
 
+  const runUpdate = async () => {
+    setUpdating(true);
+    setUpdateOutput(null);
+    setUpdateSuccess(null);
+    try {
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: "openclaw update --json", cwd: null,
+      });
+      const output = result.stdout?.trim() || result.stderr?.trim() || "";
+      setUpdateSuccess(result.code === 0);
+      if (result.code === 0) {
+        try {
+          const data = JSON.parse(output);
+          const from = data.previousVersion ?? data.from ?? "";
+          const to = data.newVersion ?? data.version ?? data.to ?? "";
+          setUpdateOutput(from && to ? `Updated: v${from} → v${to}` : data.message ?? "Update completed successfully");
+        } catch {
+          setUpdateOutput(output || "Update completed");
+        }
+      } else {
+        setUpdateOutput(output || "Update failed");
+      }
+    } catch (e) {
+      setUpdateSuccess(false);
+      setUpdateOutput(e instanceof Error ? e.message : "Update command failed");
+    }
+    setUpdating(false);
+  };
+
+  const restartGatewayAfterUpdate = async () => {
+    setRestarting(true);
+    try {
+      await invoke("execute_command", { command: "openclaw gateway restart", cwd: null });
+      setUpdateOutput(prev => (prev ? prev + "\nGateway restarted successfully." : "Gateway restarted."));
+    } catch {
+      setUpdateOutput(prev => (prev ? prev + "\nFailed to restart gateway." : "Failed to restart gateway."));
+    }
+    setRestarting(false);
+  };
+
   const saveAISettings = () => {
     localStorage.setItem("crystal_ai_temperature", temperature.toString());
     localStorage.setItem("crystal_ai_max_tokens", maxTokens);
@@ -264,7 +327,7 @@ export function SettingsView() {
   const checkDaemonStatus = async () => {
     try {
       const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw daemon status", cwd: null,
+        command: "openclaw gateway status", cwd: null,
       });
       setDaemonInstalled(result.code === 0 && !result.stdout.includes("not installed"));
     } catch { setDaemonInstalled(false); }
@@ -275,7 +338,7 @@ export function SettingsView() {
     setDaemonOutput("");
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `openclaw daemon ${cmd}`, cwd: null,
+        command: `openclaw gateway ${cmd}`, cwd: null,
       });
       setDaemonOutput(result.stdout || result.stderr);
       await checkDaemonStatus();
@@ -308,6 +371,103 @@ export function SettingsView() {
       const result = await invoke<{ stdout: string; code: number }>("execute_command", { command: `openclaw config unset ${configKey.trim()}`, cwd: null });
       setConfigOutput(result.stdout.trim() || "Value unset");
     } catch { setConfigOutput("Failed to unset config value"); }
+  };
+
+  /* ── OpenClaw Configuration helpers ── */
+
+  const runConfigValidate = async () => {
+    setOcValidating(true);
+    setOcValidateResult(null);
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: "openclaw config validate --json", cwd: null,
+      });
+      if (result.code === 0) {
+        try {
+          const data = JSON.parse(result.stdout);
+          setOcValidateResult({ valid: data.valid !== false, errors: data.errors });
+        } catch {
+          setOcValidateResult({ valid: true });
+        }
+      } else {
+        try {
+          const data = JSON.parse(result.stdout);
+          setOcValidateResult({ valid: false, errors: data.errors || [result.stdout.trim()] });
+        } catch {
+          setOcValidateResult({ valid: false, errors: [result.stdout.trim() || "Validation failed"] });
+        }
+      }
+    } catch {
+      setOcValidateResult({ valid: false, errors: ["Failed to run config validate"] });
+    }
+    setOcValidating(false);
+  };
+
+  const loadMemoryConfig = async () => {
+    setOcMemoryLoading(true);
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: "openclaw config get memory --json", cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        setOcMemoryConfig(JSON.parse(result.stdout));
+      }
+    } catch { /* ignore */ }
+    setOcMemoryLoading(false);
+  };
+
+  const runReindex = async () => {
+    setOcReindexing(true);
+    setOcReindexResult(null);
+    try {
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: "openclaw memory index --force", cwd: null,
+      });
+      setOcReindexResult(result.code === 0 ? (result.stdout.trim() || "Reindex complete") : (result.stderr?.trim() || result.stdout?.trim() || "Reindex failed"));
+    } catch {
+      setOcReindexResult("Reindex command failed");
+    }
+    setOcReindexing(false);
+  };
+
+  const loadSessionConfig = async () => {
+    setOcSessionLoading(true);
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: "openclaw config get session --json", cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        setOcSessionConfig(JSON.parse(result.stdout));
+      }
+    } catch { /* ignore */ }
+    setOcSessionLoading(false);
+  };
+
+  const toggleMaintenanceMode = async () => {
+    if (!ocSessionConfig) return;
+    setOcMaintenanceToggling(true);
+    const current = String(ocSessionConfig.maintenanceMode || "off");
+    const next = current === "off" ? "warn" : current === "warn" ? "enforce" : "off";
+    try {
+      await invoke("execute_command", {
+        command: `openclaw config set session.maintenanceMode ${next}`, cwd: null,
+      });
+      setOcSessionConfig(prev => prev ? { ...prev, maintenanceMode: next } : prev);
+    } catch { /* ignore */ }
+    setOcMaintenanceToggling(false);
+  };
+
+  const loadHeartbeatConfig = async () => {
+    setOcHeartbeatLoading(true);
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: "openclaw config get agents.defaults.heartbeat --json", cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        setOcHeartbeatConfig(JSON.parse(result.stdout));
+      }
+    } catch { /* ignore */ }
+    setOcHeartbeatLoading(false);
   };
 
   /* ── render ── */
@@ -558,10 +718,42 @@ export function SettingsView() {
             </div>
             <div style={{ padding: "8px 14px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid var(--border)" }}>
               {updateStatus ? <span style={{ fontSize: 11, color: updateStatus.includes("available") ? "var(--warning)" : "var(--success)" }}>{updateStatus}</span> : <span />}
-              <button onClick={checkForUpdates} disabled={checkingUpdates} style={BTN_PRIMARY}>
-                {checkingUpdates ? <IconRefresh spin /> : null} {checkingUpdates ? "Checking..." : "Check for Updates"}
-              </button>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={checkForUpdates} disabled={checkingUpdates} style={BTN_PRIMARY}>
+                  {checkingUpdates ? <IconRefresh spin /> : null} {checkingUpdates ? "Checking..." : "Check for Updates"}
+                </button>
+                {updateStatus?.includes("available") && (
+                  <button onClick={runUpdate} disabled={updating} style={{ ...BTN_BASE, background: "var(--accent)", color: "#fff" }}>
+                    {updating ? <IconRefresh spin /> : null} {updating ? "Updating..." : "Update Now"}
+                  </button>
+                )}
+              </div>
             </div>
+            {(updateOutput || updating) && (
+              <div style={{ padding: "8px 14px 10px", borderTop: "1px solid var(--border)" }}>
+                <div style={{
+                  padding: "8px 12px", borderRadius: 6,
+                  background: updateSuccess === true ? "rgba(74,222,128,0.08)" : updateSuccess === false ? "rgba(248,113,113,0.08)" : "var(--bg-elevated)",
+                  border: `1px solid ${updateSuccess === true ? "rgba(74,222,128,0.2)" : updateSuccess === false ? "rgba(248,113,113,0.2)" : "var(--border)"}`,
+                }}>
+                  {updating ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ display: "inline-flex", animation: "_spin .8s linear infinite" }}><IconRefresh /></span>
+                      <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>Updating OpenClaw...</span>
+                    </div>
+                  ) : (
+                    <pre style={{ margin: 0, fontSize: 11, color: updateSuccess ? "var(--success)" : "var(--error)", whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "'JetBrains Mono', monospace" }}>
+                      {updateOutput}
+                    </pre>
+                  )}
+                </div>
+                {updateSuccess === true && (
+                  <button onClick={restartGatewayAfterUpdate} disabled={restarting} style={{ ...BTN_PRIMARY, marginTop: 8 }}>
+                    {restarting ? <IconRefresh spin /> : null} {restarting ? "Restarting..." : "Restart Gateway"}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </Section>
 
@@ -602,6 +794,207 @@ export function SettingsView() {
               </div>
             </div>
             {configOutput && <pre style={{ margin: 0, padding: "8px 14px", fontSize: 10, ...MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 80, overflowY: "auto", borderTop: "1px solid var(--border)" }}>{configOutput}</pre>}
+          </div>
+        </Section>
+
+        {/* ───────── OPENCLAW CONFIGURATION ───────── */}
+        <Section title="OPENCLAW CONFIGURATION">
+          {/* Config Validate */}
+          <div style={{ ...CARD, marginBottom: 8 }}>
+            <button onClick={() => toggleOcSection("validate")} style={{ ...ROW, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d={ocExpanded.validate ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} /></svg>
+                <span style={{ ...LABEL, margin: 0 }}>Config Validate</span>
+              </div>
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Check config integrity</span>
+            </button>
+            {ocExpanded.validate && (
+              <div style={{ padding: "8px 14px 12px" }}>
+                <button onClick={runConfigValidate} disabled={ocValidating} style={BTN_PRIMARY}>
+                  {ocValidating ? <IconRefresh spin /> : null} {ocValidating ? "Validating..." : "Validate Config"}
+                </button>
+                {ocValidateResult && (
+                  <div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 6, background: ocValidateResult.valid ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)", border: `1px solid ${ocValidateResult.valid ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)"}` }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={dot(ocValidateResult.valid ? "var(--success)" : "var(--error)")} />
+                      <span style={{ fontSize: 11, fontWeight: 600, color: ocValidateResult.valid ? "var(--success)" : "var(--error)" }}>
+                        {ocValidateResult.valid ? "Valid" : "Invalid"}
+                      </span>
+                    </div>
+                    {ocValidateResult.errors && ocValidateResult.errors.length > 0 && (
+                      <pre style={{ margin: "6px 0 0", fontSize: 10, ...MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                        {ocValidateResult.errors.join("\n")}
+                      </pre>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Memory Config */}
+          <div style={{ ...CARD, marginBottom: 8 }}>
+            <button onClick={() => { toggleOcSection("memory"); if (!ocExpanded.memory && !ocMemoryConfig) loadMemoryConfig(); }} style={{ ...ROW, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d={ocExpanded.memory ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} /></svg>
+                <span style={{ ...LABEL, margin: 0 }}>Memory Config</span>
+              </div>
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Embedding & index settings</span>
+            </button>
+            {ocExpanded.memory && (
+              <div style={{ padding: "0 14px 12px" }}>
+                {ocMemoryLoading ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 0" }}>
+                    <IconRefresh spin /> <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading...</span>
+                  </div>
+                ) : ocMemoryConfig ? (
+                  <>
+                    <div style={{ ...ROW, padding: "8px 0" }}>
+                      <span style={LABEL}>Embedding Provider</span>
+                      <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{String(ocMemoryConfig.embeddingProvider || ocMemoryConfig.provider || "—")}</span>
+                    </div>
+                    <div style={{ ...ROW, padding: "8px 0" }}>
+                      <span style={LABEL}>Index Status</span>
+                      <span style={{ ...VALUE, fontSize: 11, color: ocMemoryConfig.indexed ? "var(--success)" : "var(--text-muted)" }}>
+                        {ocMemoryConfig.indexed ? "Indexed" : (ocMemoryConfig.indexStatus ? String(ocMemoryConfig.indexStatus) : "Unknown")}
+                      </span>
+                    </div>
+                    {ocMemoryConfig.totalEntries !== undefined && (
+                      <div style={{ ...ROW, padding: "8px 0" }}>
+                        <span style={LABEL}>Total Entries</span>
+                        <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{String(ocMemoryConfig.totalEntries)}</span>
+                      </div>
+                    )}
+                    <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                      <button onClick={runReindex} disabled={ocReindexing} style={BTN_PRIMARY}>
+                        {ocReindexing ? <IconRefresh spin /> : null} {ocReindexing ? "Reindexing..." : "Reindex"}
+                      </button>
+                      <button onClick={loadMemoryConfig} style={BTN_GHOST}><IconRefresh /> Refresh</button>
+                    </div>
+                    {ocReindexResult && (
+                      <pre style={{ marginTop: 6, fontSize: 10, ...MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap" }}>{ocReindexResult}</pre>
+                    )}
+                  </>
+                ) : (
+                  <button onClick={loadMemoryConfig} style={{ ...BTN_GHOST, marginTop: 4 }}>Load Memory Config</button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Session Config */}
+          <div style={{ ...CARD, marginBottom: 8 }}>
+            <button onClick={() => { toggleOcSection("session"); if (!ocExpanded.session && !ocSessionConfig) loadSessionConfig(); }} style={{ ...ROW, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d={ocExpanded.session ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} /></svg>
+                <span style={{ ...LABEL, margin: 0 }}>Session Config</span>
+              </div>
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>DM scope, reset & maintenance</span>
+            </button>
+            {ocExpanded.session && (
+              <div style={{ padding: "0 14px 12px" }}>
+                {ocSessionLoading ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 0" }}>
+                    <IconRefresh spin /> <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading...</span>
+                  </div>
+                ) : ocSessionConfig ? (
+                  <>
+                    <div style={{ ...ROW, padding: "8px 0" }}>
+                      <span style={LABEL}>DM Scope</span>
+                      <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{String(ocSessionConfig.dmScope ?? "—")}</span>
+                    </div>
+                    <div style={{ ...ROW, padding: "8px 0" }}>
+                      <span style={LABEL}>Reset Mode</span>
+                      <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{String(ocSessionConfig.resetMode ?? "—")}</span>
+                    </div>
+                    <div style={{ ...ROW, padding: "8px 0" }}>
+                      <span style={LABEL}>Maintenance Mode</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{
+                          fontSize: 11, fontWeight: 600, ...MONO,
+                          color: String(ocSessionConfig.maintenanceMode || "off") === "off" ? "var(--success)" : String(ocSessionConfig.maintenanceMode) === "warn" ? "var(--warning)" : "var(--error)",
+                        }}>
+                          {String(ocSessionConfig.maintenanceMode || "off")}
+                        </span>
+                        <button onClick={toggleMaintenanceMode} disabled={ocMaintenanceToggling} style={{ ...BTN_GHOST, padding: "2px 8px", fontSize: 9 }}>
+                          {ocMaintenanceToggling ? "..." : "Toggle"}
+                        </button>
+                      </div>
+                    </div>
+                    <button onClick={loadSessionConfig} style={{ ...BTN_GHOST, marginTop: 4 }}><IconRefresh /> Refresh</button>
+                  </>
+                ) : (
+                  <button onClick={loadSessionConfig} style={{ ...BTN_GHOST, marginTop: 4 }}>Load Session Config</button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Heartbeat Config */}
+          <div style={{ ...CARD, marginBottom: 8 }}>
+            <button onClick={() => { toggleOcSection("heartbeat"); if (!ocExpanded.heartbeat && !ocHeartbeatConfig) loadHeartbeatConfig(); }} style={{ ...ROW, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d={ocExpanded.heartbeat ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} /></svg>
+                <span style={{ ...LABEL, margin: 0 }}>Heartbeat Config</span>
+              </div>
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Read-only summary</span>
+            </button>
+            {ocExpanded.heartbeat && (
+              <div style={{ padding: "0 14px 12px" }}>
+                {ocHeartbeatLoading ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 0" }}>
+                    <IconRefresh spin /> <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading...</span>
+                  </div>
+                ) : ocHeartbeatConfig ? (
+                  <>
+                    <div style={{ ...ROW, padding: "8px 0" }}>
+                      <span style={LABEL}>Interval</span>
+                      <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{String(ocHeartbeatConfig.interval ?? ocHeartbeatConfig.intervalMs ?? "—")}</span>
+                    </div>
+                    <div style={{ ...ROW, padding: "8px 0" }}>
+                      <span style={LABEL}>Target</span>
+                      <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{String(ocHeartbeatConfig.target ?? "—")}</span>
+                    </div>
+                    <div style={{ ...ROW, padding: "8px 0", flexDirection: "column", alignItems: "stretch", gap: 4 }}>
+                      <span style={LABEL}>Prompt</span>
+                      <span style={{ ...VALUE, ...MONO, fontSize: 10, color: "var(--text-muted)", lineHeight: 1.5, maxHeight: 48, overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {String(ocHeartbeatConfig.prompt ?? "—").slice(0, 200)}{String(ocHeartbeatConfig.prompt ?? "").length > 200 ? "..." : ""}
+                      </span>
+                    </div>
+                    {ocHeartbeatConfig.activeHours && (
+                      <div style={{ ...ROW, padding: "8px 0" }}>
+                        <span style={LABEL}>Active Hours</span>
+                        <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{typeof ocHeartbeatConfig.activeHours === "object" ? JSON.stringify(ocHeartbeatConfig.activeHours) : String(ocHeartbeatConfig.activeHours)}</span>
+                      </div>
+                    )}
+                    <button onClick={loadHeartbeatConfig} style={{ ...BTN_GHOST, marginTop: 4 }}><IconRefresh /> Refresh</button>
+                  </>
+                ) : (
+                  <button onClick={loadHeartbeatConfig} style={{ ...BTN_GHOST, marginTop: 4 }}>Load Heartbeat Config</button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Thinking Level */}
+          <div style={{ ...CARD, marginBottom: 8 }}>
+            <div style={ROW}>
+              <span style={LABEL}>Thinking Level</span>
+              <div style={{ display: "flex", gap: 4 }}>
+                {([undefined, "auto", "minimal", "medium", "high"] as (ThinkingLevel | undefined)[]).map(level => {
+                  const label = level ?? "default";
+                  const active = thinkingLevel === level;
+                  return (
+                    <button key={label} onClick={() => setThinkingLevel(level)} style={{
+                      padding: "3px 10px", borderRadius: 5, fontSize: 10, fontWeight: 500, cursor: "pointer", textTransform: "capitalize",
+                      border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
+                      background: active ? "var(--accent-bg)" : "var(--bg-elevated)",
+                      color: active ? "var(--accent)" : "var(--text-muted)", transition: "all .15s ease",
+                    }}>{label}</button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </Section>
 

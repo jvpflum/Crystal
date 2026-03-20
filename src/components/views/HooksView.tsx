@@ -93,7 +93,7 @@ export function HooksView() {
     setDetailLoading(true);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `openclaw hooks info ${name}`,
+        command: `openclaw hooks info ${name} --json`,
         cwd: null,
       });
       if (result.stdout.trim()) {

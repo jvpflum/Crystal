@@ -163,7 +163,7 @@ export function SecurityView() {
     setMemoryReindexStatus(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "openclaw memory reindex",
+        command: "openclaw memory index --force",
         cwd: null,
       });
       setMemoryReindexStatus(result.code === 0 ? "Reindex completed" : (result.stderr || "Reindex failed"));

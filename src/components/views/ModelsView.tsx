@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Loader2, RefreshCw, Star, Cloud, HardDrive, Check, AlertTriangle,
   Search, ChevronDown, Cpu, Download, Trash2, X, MemoryStick, Play,
+  ScanSearch, ShieldCheck, Brain, Plus, Minus, KeyRound,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { cachedCommand } from "@/lib/cache";
@@ -16,6 +17,16 @@ interface Model {
   tags: string[];
   contextWindow: number;
 }
+
+interface ProviderStatus {
+  provider: string;
+  configured: boolean;
+  authenticated: boolean;
+  error?: string;
+}
+
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+type ThinkingLevel = typeof THINKING_LEVELS[number];
 
 interface RunningModel {
   name: string;
@@ -86,6 +97,15 @@ export function ModelsView() {
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanResults, setScanResults] = useState<string | null>(null);
+  const [fallbacks, setFallbacks] = useState<string[]>([]);
+  const [fallbackInput, setFallbackInput] = useState("");
+  const [fallbackLoading, setFallbackLoading] = useState(false);
+  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("medium");
+  const [thinkingLoading, setThinkingLoading] = useState(false);
+  const [providerStatuses, setProviderStatuses] = useState<ProviderStatus[]>([]);
+  const [statusLoading, setStatusLoading] = useState(false);
   const currentView = useAppStore(s => s.currentView);
 
   const loadModels = useCallback(async () => {
@@ -114,7 +134,102 @@ export function ModelsView() {
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { loadModels(); loadRunning(); }, [loadModels, loadRunning]);
+  const scanModels = useCallback(async () => {
+    setScanning(true);
+    setScanResults(null);
+    try {
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: "openclaw models scan --no-input --json", cwd: null,
+      });
+      setScanResults(result.code === 0 ? result.stdout : (result.stderr || "Scan failed"));
+      if (result.code === 0) await loadModels();
+    } catch (e) {
+      setScanResults(e instanceof Error ? e.message : "Scan failed");
+    }
+    setScanning(false);
+  }, [loadModels]);
+
+  const loadFallbacks = useCallback(async () => {
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: "openclaw models fallbacks list --json", cwd: null,
+      });
+      if (result.code === 0) {
+        const data = JSON.parse(result.stdout);
+        setFallbacks(data.fallbacks || []);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const addFallback = async () => {
+    const model = fallbackInput.trim();
+    if (!model) return;
+    setFallbackLoading(true);
+    try {
+      await invoke("execute_command", { command: `openclaw models fallbacks add ${model}`, cwd: null });
+      setFallbackInput("");
+      await loadFallbacks();
+      setFeedback({ type: "success", msg: `Added ${model} to fallbacks` });
+    } catch (e) {
+      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Failed to add fallback" });
+    }
+    setFallbackLoading(false);
+  };
+
+  const removeFallback = async (model: string) => {
+    setFallbackLoading(true);
+    try {
+      await invoke("execute_command", { command: `openclaw models fallbacks remove ${model}`, cwd: null });
+      await loadFallbacks();
+      setFeedback({ type: "success", msg: `Removed ${model} from fallbacks` });
+    } catch (e) {
+      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Failed to remove fallback" });
+    }
+    setFallbackLoading(false);
+  };
+
+  const loadThinkingLevel = useCallback(async () => {
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: 'openclaw config get agents.defaults.thinking --json', cwd: null,
+      });
+      if (result.code === 0) {
+        const data = JSON.parse(result.stdout);
+        const val = (data.value || "medium") as ThinkingLevel;
+        if (THINKING_LEVELS.includes(val)) setThinkingLevel(val);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const setThinkingLevelValue = async (level: ThinkingLevel) => {
+    setThinkingLoading(true);
+    try {
+      await invoke("execute_command", {
+        command: `openclaw config set agents.defaults.thinking "${level}"`, cwd: null,
+      });
+      setThinkingLevel(level);
+      setFeedback({ type: "success", msg: `Thinking level set to ${level}` });
+    } catch (e) {
+      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Failed to set thinking level" });
+    }
+    setThinkingLoading(false);
+  };
+
+  const loadProviderStatus = useCallback(async () => {
+    setStatusLoading(true);
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: "openclaw models status --json", cwd: null,
+      });
+      if (result.code === 0) {
+        const data = JSON.parse(result.stdout);
+        setProviderStatuses(data.providers || []);
+      }
+    } catch { /* ignore */ }
+    setStatusLoading(false);
+  }, []);
+
+  useEffect(() => { loadModels(); loadRunning(); loadFallbacks(); loadThinkingLevel(); loadProviderStatus(); }, [loadModels, loadRunning, loadFallbacks, loadThinkingLevel, loadProviderStatus]);
 
   useEffect(() => {
     if (currentView !== "models") return;
@@ -337,6 +452,99 @@ export function ModelsView() {
             <button onClick={() => setPullOutput(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}><X style={{ width: 10, height: 10 }} /></button>
           </div>
         )}
+
+        {/* Scan / Thinking / Providers row */}
+        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+          {/* Scan button */}
+          <button onClick={scanModels} disabled={scanning}
+            style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 8, border: "none", fontSize: 11, cursor: "pointer", background: "var(--accent-bg)", color: "var(--accent)", fontWeight: 500, opacity: scanning ? 0.6 : 1 }}>
+            {scanning ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <ScanSearch style={{ width: 12, height: 12 }} />}
+            Scan for Models
+          </button>
+
+          {/* Thinking Level Selector */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 8, background: "var(--bg-elevated)", border: "1px solid var(--border)" }}>
+            <Brain style={{ width: 12, height: 12, color: "var(--text-muted)", flexShrink: 0 }} />
+            <span style={{ fontSize: 10, color: "var(--text-muted)", whiteSpace: "nowrap" }}>Thinking:</span>
+            <select
+              value={thinkingLevel}
+              disabled={thinkingLoading}
+              onChange={e => setThinkingLevelValue(e.target.value as ThinkingLevel)}
+              style={{ fontSize: 11, padding: "2px 4px", borderRadius: 4, border: "1px solid var(--border)", background: "var(--bg-base)", color: "var(--text)", cursor: "pointer", outline: "none" }}
+            >
+              {THINKING_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+            {thinkingLoading && <Loader2 style={{ width: 10, height: 10, color: "var(--accent)", animation: "spin 1s linear infinite" }} />}
+          </div>
+        </div>
+
+        {/* Scan Results */}
+        {scanResults && (
+          <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", maxHeight: 120, overflowY: "auto" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600 }}>Scan Results</span>
+              <button onClick={() => setScanResults(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}><X style={{ width: 10, height: 10 }} /></button>
+            </div>
+            <pre style={{ fontSize: 10, color: "var(--text-secondary)", fontFamily: "monospace", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{scanResults}</pre>
+          </div>
+        )}
+
+        {/* Provider Auth Status */}
+        {providerStatuses.length > 0 && (
+          <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {providerStatuses.map(ps => (
+              <div key={ps.provider} style={{
+                display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8,
+                background: ps.authenticated ? "rgba(74,222,128,0.06)" : "rgba(248,113,113,0.06)",
+                border: `1px solid ${ps.authenticated ? "rgba(74,222,128,0.15)" : "rgba(248,113,113,0.15)"}`,
+              }}>
+                {ps.authenticated
+                  ? <ShieldCheck style={{ width: 11, height: 11, color: "#4ade80" }} />
+                  : <KeyRound style={{ width: 11, height: 11, color: "#f87171" }} />
+                }
+                <span style={{ fontSize: 10, color: "var(--text)", fontWeight: 500 }}>{ps.provider}</span>
+                <span style={{ fontSize: 9, color: ps.authenticated ? "#4ade80" : "#f87171" }}>
+                  {ps.authenticated ? "Active" : ps.configured ? "No Auth" : "Not Configured"}
+                </span>
+              </div>
+            ))}
+            <button onClick={loadProviderStatus} disabled={statusLoading}
+              style={{ display: "flex", alignItems: "center", gap: 3, padding: "4px 8px", borderRadius: 6, border: "none", background: "var(--bg-hover)", color: "var(--text-muted)", fontSize: 9, cursor: "pointer" }}>
+              <RefreshCw style={{ width: 9, height: 9, ...(statusLoading ? { animation: "spin 1s linear infinite" } : {}) }} /> Refresh
+            </button>
+          </div>
+        )}
+
+        {/* Fallbacks */}
+        <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 10, background: "var(--bg-elevated)", border: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>Fallback Models</span>
+          </div>
+          {fallbacks.length === 0 ? (
+            <p style={{ fontSize: 10, color: "var(--text-muted)", margin: "0 0 6px" }}>No fallbacks configured</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
+              {fallbacks.map(fb => (
+                <div key={fb} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", borderRadius: 6, background: "var(--bg-base)" }}>
+                  <span style={{ flex: 1, fontSize: 11, color: "var(--text)", fontFamily: "monospace" }}>{fb}</span>
+                  <button onClick={() => removeFallback(fb)} disabled={fallbackLoading}
+                    style={{ display: "flex", alignItems: "center", padding: "2px 6px", borderRadius: 4, border: "none", background: "rgba(248,113,113,0.1)", color: "#f87171", cursor: "pointer", opacity: fallbackLoading ? 0.5 : 1 }}>
+                    <Minus style={{ width: 10, height: 10 }} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 4 }}>
+            <input type="text" placeholder="model key..." value={fallbackInput} onChange={e => setFallbackInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addFallback()}
+              style={{ flex: 1, padding: "5px 8px", borderRadius: 6, background: "var(--bg-base)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 11, outline: "none" }} />
+            <button onClick={addFallback} disabled={fallbackLoading || !fallbackInput.trim()}
+              style={{ display: "flex", alignItems: "center", gap: 3, padding: "5px 10px", borderRadius: 6, border: "none", background: "var(--accent-bg)", color: "var(--accent)", fontSize: 10, cursor: "pointer", fontWeight: 600, opacity: !fallbackInput.trim() ? 0.4 : 1 }}>
+              <Plus style={{ width: 10, height: 10 }} /> Add
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Model List */}

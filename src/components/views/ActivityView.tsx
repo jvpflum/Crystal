@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Activity, Trash2, Terminal, MessageSquare, AlertTriangle, Heart, Zap, Radio, Search, Copy, Check, RefreshCw, ArrowDown, ScrollText } from "lucide-react";
+import { Activity, Trash2, Terminal, MessageSquare, AlertTriangle, Heart, Zap, Radio, Search, Copy, Check, RefreshCw, ArrowDown, ScrollText, Pause, Play } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { openclawClient, ActivityEntry } from "@/lib/openclaw";
 import { useAppStore } from "@/stores/appStore";
@@ -18,15 +18,6 @@ const TYPE_META: Record<string, { icon: React.ElementType; color: string; label:
 
 type TabId = "activity" | "logs";
 
-/* ── Log level color mapping ── */
-function getLogLineStyle(line: string): React.CSSProperties {
-  const upper = line.toUpperCase();
-  if (upper.includes("ERROR") || upper.includes("[ERR")) return { color: "#f87171" };
-  if (upper.includes("WARN") || upper.includes("[WRN")) return { color: "#fbbf24" };
-  if (upper.includes("INFO") || upper.includes("[INF")) return { color: "#60a5fa" };
-  if (upper.includes("DEBUG") || upper.includes("[DBG")) return { color: "rgba(255,255,255,0.35)" };
-  return { color: "rgba(255,255,255,0.55)" };
-}
 
 export function ActivityView() {
   const [activeTab, setActiveTab] = useState<TabId>("activity");
@@ -212,10 +203,52 @@ function ActivityFeedTab() {
    Gateway Logs Tab
    ═══════════════════════════════════════════════════════ */
 
+interface LogEntry {
+  timestamp: string;
+  level: string;
+  message: string;
+  raw?: string;
+}
+
+function parseLogEntries(stdout: string): LogEntry[] {
+  const lines = stdout.split("\n").filter(l => l.trim());
+  const entries: LogEntry[] = [];
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line);
+      entries.push({
+        timestamp: parsed.timestamp ?? parsed.ts ?? parsed.time ?? "",
+        level: (parsed.level ?? parsed.lvl ?? "info").toUpperCase(),
+        message: parsed.message ?? parsed.msg ?? parsed.text ?? line,
+        raw: line,
+      });
+    } catch {
+      const match = line.match(/^(\S+\s+\S+)?\s*\[?(\w+)\]?\s*(.*)$/);
+      entries.push({
+        timestamp: match?.[1] ?? "",
+        level: (match?.[2] ?? "INFO").toUpperCase(),
+        message: match?.[3] ?? line,
+        raw: line,
+      });
+    }
+  }
+  return entries;
+}
+
+function getLevelColor(level: string): string {
+  switch (level) {
+    case "ERROR": case "ERR": case "FATAL": return "#f87171";
+    case "WARN": case "WRN": case "WARNING": return "#fbbf24";
+    case "INFO": case "INF": return "#60a5fa";
+    case "DEBUG": case "DBG": case "TRACE": return "rgba(255,255,255,0.35)";
+    default: return "rgba(255,255,255,0.55)";
+  }
+}
+
 function GatewayLogsTab() {
-  const [logs, setLogs] = useState<string[]>([]);
+  const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [following, setFollowing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -223,57 +256,74 @@ function GatewayLogsTab() {
 
   const logsEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const seenKeys = useRef<Set<string>>(new Set());
 
-  const fetchLogs = useCallback(async () => {
-    setLoading(true);
+  const fetchLogs = useCallback(async (append = false) => {
+    if (!append) setLoading(true);
     setError(null);
     try {
+      const limit = append ? 50 : 200;
       const result = await invoke<string>("execute_command", {
-        command: "openclaw logs --limit 100 --plain --no-color",
+        command: `openclaw logs --limit ${limit} --json --no-color`,
       });
       const raw = typeof result === "string" ? result : (result as { stdout?: string })?.stdout || "";
-      const lines = raw.split("\n").filter((l: string) => l.trim());
-      setLogs(lines);
+      const entries = parseLogEntries(raw);
+
+      if (append && logEntries.length > 0) {
+        const newEntries = entries.filter(e => {
+          const key = `${e.timestamp}|${e.message}`;
+          if (seenKeys.current.has(key)) return false;
+          seenKeys.current.add(key);
+          return true;
+        });
+        if (newEntries.length > 0) {
+          setLogEntries(prev => [...prev, ...newEntries]);
+        }
+      } else {
+        seenKeys.current = new Set(entries.map(e => `${e.timestamp}|${e.message}`));
+        setLogEntries(entries);
+      }
       setLastFetch(new Date());
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (!append) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (!append) setLoading(false);
     }
-  }, []);
+  }, [logEntries.length]);
 
   useEffect(() => {
     fetchLogs();
-  }, [fetchLogs]);
+  }, []);
 
   const currentView = useAppStore(s => s.currentView);
   const isActivityVisible = currentView === "activity";
 
   useEffect(() => {
-    if (!autoRefresh || !isActivityVisible) return;
-    const interval = setInterval(fetchLogs, 5000);
+    if (!following || !isActivityVisible) return;
+    const interval = setInterval(() => fetchLogs(true), 3000);
     return () => clearInterval(interval);
-  }, [autoRefresh, isActivityVisible, fetchLogs]);
+  }, [following, isActivityVisible, fetchLogs]);
 
   useEffect(() => {
-    if (autoRefresh) {
+    if (following) {
       logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [logs, autoRefresh]);
+  }, [logEntries, following]);
 
   const scrollToBottom = () => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   const copyAllLogs = () => {
-    navigator.clipboard.writeText(filteredLogs.join("\n"));
+    const text = filteredEntries.map(e => `${e.timestamp} [${e.level}] ${e.message}`).join("\n");
+    navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const filteredLogs = searchQuery
-    ? logs.filter(l => l.toLowerCase().includes(searchQuery.toLowerCase()))
-    : logs;
+  const filteredEntries = searchQuery
+    ? logEntries.filter(e => `${e.timestamp} ${e.level} ${e.message}`.toLowerCase().includes(searchQuery.toLowerCase()))
+    : logEntries;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
@@ -283,29 +333,29 @@ function GatewayLogsTab() {
           <div>
             <h2 style={{ color: "white", fontSize: 15, fontWeight: 600, margin: 0 }}>Gateway Logs</h2>
             <p style={{ margin: "2px 0 0", fontSize: 10, color: "rgba(255,255,255,0.4)" }}>
-              {filteredLogs.length} lines
+              {filteredEntries.length} entries
               {lastFetch && <> &middot; fetched {lastFetch.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</>}
+              {following && <> &middot; <span style={{ color: "#4ade80" }}>following</span></>}
             </p>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button
-              onClick={() => setAutoRefresh(!autoRefresh)}
+              onClick={() => setFollowing(!following)}
               style={{
                 display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6,
                 border: "none", fontSize: 10, cursor: "pointer",
-                background: autoRefresh ? "rgba(74,222,128,0.15)" : "rgba(255,255,255,0.06)",
-                color: autoRefresh ? "#4ade80" : "rgba(255,255,255,0.5)",
+                background: following ? "rgba(74,222,128,0.15)" : "rgba(255,255,255,0.06)",
+                color: following ? "#4ade80" : "rgba(255,255,255,0.5)",
                 transition: "all 0.15s",
               }}
             >
-              <RefreshCw style={{
-                width: 10, height: 10,
-                animation: autoRefresh ? "spin 2s linear infinite" : "none",
-              }} />
-              {autoRefresh ? "Auto" : "Manual"}
+              {following
+                ? <><Pause style={{ width: 10, height: 10 }} /> Following</>
+                : <><Play style={{ width: 10, height: 10 }} /> Follow</>
+              }
             </button>
             <button
-              onClick={fetchLogs}
+              onClick={() => fetchLogs(false)}
               disabled={loading}
               style={{
                 display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6,
@@ -371,13 +421,13 @@ function GatewayLogsTab() {
           />
           {searchQuery && (
             <span style={{ fontSize: 9, color: "rgba(255,255,255,0.3)", flexShrink: 0 }}>
-              {filteredLogs.length} match{filteredLogs.length !== 1 ? "es" : ""}
+              {filteredEntries.length} match{filteredEntries.length !== 1 ? "es" : ""}
             </span>
           )}
         </div>
       </div>
 
-      {/* Terminal output */}
+      {/* Log entries */}
       <div
         ref={containerRef}
         style={{
@@ -403,7 +453,7 @@ function GatewayLogsTab() {
               {error}
             </p>
             <button
-              onClick={fetchLogs}
+              onClick={() => fetchLogs(false)}
               style={{
                 marginTop: 8, padding: "6px 14px", borderRadius: 6,
                 border: "1px solid rgba(59,130,246,0.3)",
@@ -414,34 +464,58 @@ function GatewayLogsTab() {
               Retry
             </button>
           </div>
-        ) : filteredLogs.length === 0 ? (
+        ) : filteredEntries.length === 0 ? (
           <div style={{
             display: "flex", flexDirection: "column", alignItems: "center",
             padding: 40, gap: 8,
           }}>
             <Terminal style={{ width: 24, height: 24, color: "rgba(255,255,255,0.15)" }} />
             <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0 }}>
-              {loading ? "Fetching logs..." : searchQuery ? "No matching log lines" : "No log entries found"}
+              {loading ? "Fetching logs..." : searchQuery ? "No matching log entries" : "No log entries found"}
             </p>
           </div>
         ) : (
           <div style={{ padding: "8px 12px" }}>
-            {filteredLogs.map((line, i) => (
-              <div
-                key={i}
-                style={{
-                  padding: "1px 0",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-all",
-                  ...getLogLineStyle(line),
-                }}
-              >
-                <span style={{ color: "rgba(255,255,255,0.15)", userSelect: "none", marginRight: 8, display: "inline-block", width: 32, textAlign: "right" }}>
-                  {i + 1}
-                </span>
-                {searchQuery ? highlightMatch(line, searchQuery) : line}
-              </div>
-            ))}
+            {filteredEntries.map((entry, i) => {
+              const levelColor = getLevelColor(entry.level);
+              return (
+                <div
+                  key={i}
+                  style={{
+                    padding: "2px 0",
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "flex-start",
+                    borderBottom: "1px solid rgba(255,255,255,0.03)",
+                  }}
+                >
+                  <span style={{ color: "rgba(255,255,255,0.15)", userSelect: "none", width: 28, textAlign: "right", flexShrink: 0, fontSize: 10 }}>
+                    {i + 1}
+                  </span>
+                  {entry.timestamp && (
+                    <span style={{ color: "rgba(255,255,255,0.3)", flexShrink: 0, fontSize: 10, minWidth: 70 }}>
+                      {entry.timestamp.includes("T")
+                        ? new Date(entry.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+                        : entry.timestamp.slice(0, 19)}
+                    </span>
+                  )}
+                  <span style={{
+                    color: levelColor, fontWeight: 600, flexShrink: 0,
+                    minWidth: 38, fontSize: 10,
+                    padding: "0 4px", borderRadius: 3,
+                    background: `${levelColor}15`,
+                  }}>
+                    {entry.level.slice(0, 5)}
+                  </span>
+                  <span style={{
+                    color: levelColor === "rgba(255,255,255,0.35)" ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.7)",
+                    whiteSpace: "pre-wrap", wordBreak: "break-word", flex: 1,
+                  }}>
+                    {searchQuery ? highlightMatch(entry.message, searchQuery) : entry.message}
+                  </span>
+                </div>
+              );
+            })}
             <div ref={logsEndRef} />
           </div>
         )}

@@ -200,6 +200,8 @@ export function ConversationView() {
 
   const gatewayConnected = useAppStore(s => s.gatewayConnected);
   const setView = useAppStore(s => s.setView);
+  const thinkingLevel = useAppStore(s => s.thinkingLevel);
+  const cycleThinkingLevel = useAppStore(s => s.cycleThinkingLevel);
   const modelKey = openclawClient.getModel();
   const model = openclawClient.getModelDisplayName(modelKey);
   const [liveTps, setLiveTps] = useState(0);
@@ -233,6 +235,32 @@ export function ConversationView() {
     { cmd: "/new", label: "New Chat", description: "Start a fresh conversation", action: () => handleNewChat() },
     { cmd: "/clear", label: "Clear", description: "Clear current chat", action: () => clearConversation() },
     { cmd: "/search", label: "Search", description: "Open command palette (Ctrl+K)", action: () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true })) },
+    // OpenClaw agent commands — sent as chat messages
+    ...(["/status", "/compact", "/new", "/stop", "/context list", "/reasoning on", "/reasoning off"] as const).map(cmdText => ({
+      cmd: cmdText,
+      label: ({
+        "/status": "OC Status", "/compact": "OC Compact", "/new": "OC New Session",
+        "/stop": "OC Stop", "/context list": "OC Context", "/reasoning on": "OC Reasoning On", "/reasoning off": "OC Reasoning Off",
+      } as Record<string, string>)[cmdText]!,
+      description: ({
+        "/status": "Quick diagnostics (session, model, context)",
+        "/compact": "Summarize old context to free window space",
+        "/new": "Reset session and start fresh",
+        "/stop": "Abort current agent run",
+        "/context list": "Show what's in the system prompt",
+        "/reasoning on": "Show model reasoning in responses",
+        "/reasoning off": "Hide model reasoning",
+      } as Record<string, string>)[cmdText]!,
+      action: () => {
+        setTimeout(() => {
+          setInput(cmdText);
+          setTimeout(() => {
+            const btn = document.querySelector("[data-send-btn]") as HTMLButtonElement;
+            btn?.click();
+          }, 50);
+        }, 10);
+      },
+    })),
   ];
 
   const filteredSlashCommands = slashCommands.filter(c =>
@@ -512,7 +540,7 @@ export function ConversationView() {
       let tokenCount = 0;
       const streamStart = Date.now();
       const FLUSH_INTERVAL = 40;
-      for await (const token of agentService.streamChat(messageToSend, sessionId)) {
+      for await (const token of agentService.streamChat(messageToSend, sessionId, thinkingLevel)) {
         if (abortRef.current) {
           accumulated += "\n\n*[Cancelled by user]*";
           break;
@@ -1271,6 +1299,32 @@ export function ConversationView() {
                     : "var(--text-muted)",
                 transition: "color 0.2s",
               }} />
+            </button>
+            <button
+              onClick={cycleThinkingLevel}
+              title={`Thinking level: ${thinkingLevel || "default"} (click to cycle)`}
+              style={{
+                padding: "3px 7px", borderRadius: 6, flexShrink: 0,
+                border: thinkingLevel ? "1px solid rgba(139,92,246,0.3)" : "1px solid transparent",
+                cursor: "pointer",
+                background: thinkingLevel ? "rgba(139,92,246,0.1)" : "transparent",
+                color: thinkingLevel ? "rgba(139,92,246,0.9)" : "var(--text-muted)",
+                display: "flex", alignItems: "center", gap: 3,
+                transition: "all 0.2s",
+                fontSize: 9, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace",
+                letterSpacing: 0.3,
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = "rgba(139,92,246,0.15)";
+                e.currentTarget.style.borderColor = "rgba(139,92,246,0.4)";
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = thinkingLevel ? "rgba(139,92,246,0.1)" : "transparent";
+                e.currentTarget.style.borderColor = thinkingLevel ? "rgba(139,92,246,0.3)" : "transparent";
+              }}
+            >
+              <Brain style={{ width: 11, height: 11 }} />
+              {thinkingLevel ? thinkingLevel.slice(0, 3).toUpperCase() : "DEF"}
             </button>
             {isLoading ? (
               <button

@@ -47,7 +47,7 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
     { id: "heartbeat",    icon: HeartPulse,     label: "Heartbeat",       description: "Send heartbeat ping",         category: "Actions", action: () => invoke("execute_command", { command: "openclaw system heartbeat", cwd: null }).catch(console.error) },
     { id: "sec-audit",    icon: ShieldCheck,   label: "Security audit",  description: "Run a full security audit",   category: "Actions", action: () => setView("security" as AppView) },
     { id: "health",       icon: Thermometer,   label: "Check health",    description: "Run system health check",     category: "Actions", action: () => setView("doctor" as AppView) },
-    { id: "restart-gw",   icon: RotateCcw,     label: "Restart gateway", description: "Restart OpenClaw gateway",    category: "OpenClaw", action: () => invoke("execute_command", { command: "openclaw gateway --force --port 18789", cwd: null }).catch(console.error) },
+    { id: "restart-gw",   icon: RotateCcw,     label: "Restart gateway", description: "Restart OpenClaw gateway",    category: "OpenClaw", action: () => invoke("execute_command", { command: "openclaw gateway restart", cwd: null }).catch(console.error) },
   ], [setView]);
 
   const fuzzyMatch = useCallback((text: string, pattern: string) => {

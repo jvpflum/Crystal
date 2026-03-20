@@ -72,7 +72,9 @@ export function NodesView() {
     setOutput(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `openclaw nodes ${action} ${escapeShellArg(nodeId)} "${escapeShellArg(input)}"`,
+        command: action === "run"
+          ? `openclaw nodes run --node ${escapeShellArg(nodeId)} -- ${escapeShellArg(input)}`
+          : `openclaw nodes invoke --node ${escapeShellArg(nodeId)} --command "${escapeShellArg(input)}"`,
         cwd: null,
       });
       setOutput(result.code === 0 ? result.stdout || "Done." : result.stderr || "Command failed.");
@@ -88,7 +90,7 @@ export function NodesView() {
     setOutput(null);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `openclaw nodes notify ${notifyMessage.trim()}`,
+        command: `openclaw nodes notify --body "${escapeShellArg(notifyMessage.trim())}"`,
         cwd: null,
       });
       setOutput(result.code === 0 ? result.stdout || "Notification sent." : result.stderr || "Notify failed.");

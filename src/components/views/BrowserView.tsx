@@ -152,8 +152,18 @@ export function BrowserView() {
     setActionRunning("screenshot");
     setOutput(null);
     try {
-      const result = await browserCmd("screenshot");
-      setOutput(result.code === 0 ? result.stdout || "Screenshot captured." : result.stderr || "Screenshot failed.");
+      const result = await browserCmd("screenshot --json");
+      if (result.code === 0 && result.stdout.trim()) {
+        try {
+          const parsed = JSON.parse(result.stdout);
+          const path = parsed.path ?? parsed.file ?? parsed.screenshot;
+          setOutput(path ? `Screenshot saved: ${path}` : JSON.stringify(parsed, null, 2));
+        } catch {
+          setOutput(result.stdout || "Screenshot captured.");
+        }
+      } else {
+        setOutput(result.stderr || "Screenshot failed.");
+      }
     } catch (e) {
       setOutput(e instanceof Error ? e.message : "Screenshot failed");
     }

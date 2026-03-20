@@ -9,6 +9,7 @@ import {
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Copy,
   Shield, Save, Layers, Heart, HeartPulse,
   Sun, Mail, HardDrive, Activity, XCircle, X,
+  History, Send,
 } from "lucide-react";
 
 /* ── Shared Types ── */
@@ -884,6 +885,12 @@ function WorkflowsTab() {
    TAB 3 — Scheduled Jobs (Cron)
    ══════════════════════════════════════════════════════════════ */
 
+interface CronRunEntry {
+  timestamp: string;
+  status: string;
+  duration: string;
+}
+
 function ScheduledTab() {
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -896,6 +903,12 @@ function ScheduledTab() {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runResult, setRunResult] = useState<{ id: string; text: string; ok: boolean } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState<string | null>(null);
+  const [historyData, setHistoryData] = useState<Record<string, CronRunEntry[]>>({});
+  const [historyLoading, setHistoryLoading] = useState<string | null>(null);
+  const [eventText, setEventText] = useState("");
+  const [sendingEvent, setSendingEvent] = useState(false);
+  const [eventResult, setEventResult] = useState<{ ok: boolean; text: string } | null>(null);
   const getCronJobs = useDataStore(s => s.getCronJobs);
 
   const loadJobs = useCallback(async (force = false) => {
@@ -947,6 +960,51 @@ function ScheduledTab() {
       else setError(result.stderr || "Failed to add job");
     } catch (e) { setError(e instanceof Error ? e.message : "Failed to add job"); }
     setAdding(false);
+  };
+
+  const fetchHistory = async (jobId: string) => {
+    if (historyOpen === jobId) { setHistoryOpen(null); return; }
+    setHistoryOpen(jobId);
+    setHistoryLoading(jobId);
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `openclaw cron runs --id ${jobId} --json --limit 5`, cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        const parsed = JSON.parse(result.stdout);
+        const runs: CronRunEntry[] = (parsed.runs ?? parsed ?? []).map((r: Record<string, unknown>) => ({
+          timestamp: String(r.timestamp ?? r.startedAt ?? r.ts ?? "—"),
+          status: String(r.status ?? r.result ?? "unknown"),
+          duration: String(r.duration ?? r.durationMs ? `${r.durationMs}ms` : "—"),
+        }));
+        setHistoryData(prev => ({ ...prev, [jobId]: runs }));
+      } else {
+        setHistoryData(prev => ({ ...prev, [jobId]: [] }));
+      }
+    } catch {
+      setHistoryData(prev => ({ ...prev, [jobId]: [] }));
+    }
+    setHistoryLoading(null);
+  };
+
+  const sendSystemEvent = async () => {
+    if (!eventText.trim()) return;
+    setSendingEvent(true);
+    setEventResult(null);
+    try {
+      const escaped = escapeShellArg(eventText);
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: `openclaw system event --text "${escaped}" --mode now`, cwd: null,
+      });
+      setEventResult({
+        ok: result.code === 0,
+        text: result.stdout?.trim() || result.stderr?.trim() || "Event sent",
+      });
+      if (result.code === 0) setEventText("");
+    } catch (e) {
+      setEventResult({ ok: false, text: e instanceof Error ? e.message : "Failed to send event" });
+    }
+    setSendingEvent(false);
   };
 
   return (
@@ -1034,6 +1092,9 @@ function ScheduledTab() {
                         <span style={{ fontSize: 9, color: "#a855f7", fontWeight: 500, padding: "4px 10px", borderRadius: 6, background: "rgba(168,85,247,0.1)" }}>Managed in Heartbeat tab</span>
                       ) : (
                         <>
+                          <button onClick={() => fetchHistory(job.id)} title="History" style={{ ...smallBtnStyle, color: historyOpen === job.id ? "var(--accent)" : "var(--text-muted)", background: historyOpen === job.id ? "var(--accent-bg)" : "var(--bg-elevated)" }}>
+                            {historyLoading === job.id ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <History style={{ width: 12, height: 12 }} />}
+                          </button>
                           <button onClick={() => runNow(job.id)} disabled={runningId === job.id} title="Run now" style={smallBtnStyle}>
                             {runningId === job.id ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <Play style={{ width: 12, height: 12 }} />}
                           </button>
@@ -1050,11 +1111,61 @@ function ScheduledTab() {
                       {runResult.text}
                     </div>
                   )}
+                  {historyOpen === job.id && (
+                    <div style={{ marginTop: 6, padding: "8px 10px", borderRadius: 8, background: "var(--bg-base)", border: "1px solid var(--border)" }}>
+                      <span style={{ fontSize: 9, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5, display: "block", marginBottom: 6 }}>Last Runs</span>
+                      {historyLoading === job.id ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: 4 }}>
+                          <Loader2 style={{ width: 10, height: 10, color: "var(--text-muted)", animation: "spin 1s linear infinite" }} />
+                          <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Loading...</span>
+                        </div>
+                      ) : (historyData[job.id] ?? []).length === 0 ? (
+                        <span style={{ fontSize: 10, color: "var(--text-muted)", fontStyle: "italic" }}>No run history available</span>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                          {(historyData[job.id] ?? []).map((run, ri) => (
+                            <div key={ri} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 6px", borderRadius: 4, background: "var(--bg-elevated)", fontSize: 10 }}>
+                              <span style={{ color: run.status === "success" || run.status === "ok" ? "#4ade80" : run.status === "running" ? "var(--accent)" : "#f87171", fontWeight: 600, minWidth: 50 }}>{run.status}</span>
+                              <span style={{ color: "var(--text-secondary)", flex: 1 }}>{run.timestamp}</span>
+                              <span style={{ color: "var(--text-muted)", fontFamily: "monospace", fontSize: 9 }}>{run.duration}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
         )}
+
+        {/* Send System Event */}
+        <div style={{ marginBottom: 16, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+            <Send style={{ width: 12, height: 12, color: "var(--accent)" }} />
+            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>Send System Event</span>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input
+              value={eventText}
+              onChange={e => setEventText(e.target.value)}
+              placeholder="Event text to enqueue..."
+              onKeyDown={e => { if (e.key === "Enter") sendSystemEvent(); }}
+              style={inputStyle}
+            />
+            <button onClick={sendSystemEvent} disabled={sendingEvent || !eventText.trim()}
+              style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "var(--accent)", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, opacity: sendingEvent || !eventText.trim() ? 0.5 : 1, flexShrink: 0 }}>
+              {sendingEvent ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <Send style={{ width: 12, height: 12 }} />}
+              Send
+            </button>
+          </div>
+          {eventResult && (
+            <div style={{ marginTop: 6, padding: "5px 8px", borderRadius: 6, fontSize: 10, background: eventResult.ok ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)", border: `1px solid ${eventResult.ok ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)"}`, color: eventResult.ok ? "#4ade80" : "#f87171" }}>
+              {eventResult.text}
+            </div>
+          )}
+        </div>
 
         {/* Quick Templates */}
         <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 8 }}>Quick Templates</span>
@@ -1096,178 +1207,162 @@ const HEARTBEAT_INTERVALS = [
 ] as const;
 
 const HEARTBEAT_PRESETS = [
-  "Monitor my inbox and summarize unread emails",
-  "Check GitHub for new issues and PRs on my repos",
-  "Review my calendar and remind me of upcoming events",
-  "Check system health and alert if disk usage > 90%",
-  "Monitor running processes and flag high resource usage",
-  "Check for new security advisories relevant to my projects",
+  "# Heartbeat checklist\n\n- Check inbox for urgent messages\n- Review calendar for events in next 2 hours\n- If a background task finished, summarize results",
+  "# Heartbeat checklist\n\n- Check GitHub for new issues and PRs\n- Monitor CI/CD pipeline status\n- Review any failed deployments",
+  "# Heartbeat checklist\n\n- Check system health and resource usage\n- Monitor disk space and alert if > 90%\n- Review running processes for anomalies",
+  "# Heartbeat checklist\n\n- Scan for new security advisories\n- Check dependency update status\n- Review any pending approvals",
 ];
 
 interface HeartbeatStatus {
   enabled: boolean;
-  cronJobId: string | null;
-  intervalMinutes: number;
+  every: string;
+  prompt: string;
+  target: string;
   lastRun?: string;
-  message: string;
+  activeHours?: { start: string; end: string };
+  lightContext?: boolean;
+  isolatedSession?: boolean;
 }
-
-const HEARTBEAT_JOB_NAME = "crystal-heartbeat";
 
 function HeartbeatTab() {
   const [status, setStatus] = useState<HeartbeatStatus>({
-    enabled: false, cronJobId: null, intervalMinutes: 30, message: "",
+    enabled: false, every: "30m", prompt: "", target: "none",
   });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
-  const [prompt, setPrompt] = useState("");
-  const [intervalMinutes, setIntervalMinutes] = useState<number>(30);
-  const [saved, setSaved] = useState(false);
-  const invalidate = useDataStore(s => s.invalidate);
+  const [saved, setSaved] = useState<string | null>(null);
 
-  const fetchStatus = useCallback(async () => {
-    let enabled = false;
-    let cronJobId: string | null = null;
-    let jobInterval = 30;
-    let jobMessage = "";
-    let lastRun: string | undefined;
+  const [editInterval, setEditInterval] = useState(30);
+  const [editPrompt, setEditPrompt] = useState("");
+  const [editTarget, setEditTarget] = useState("none");
+  const [activeHoursOn, setActiveHoursOn] = useState(false);
+  const [ahStart, setAhStart] = useState("08:00");
+  const [ahEnd, setAhEnd] = useState("22:00");
 
+  const [checklist, setChecklist] = useState("");
+  const [checklistDirty, setChecklistDirty] = useState(false);
+
+  const hbPath = useRef("");
+
+  const resolvePath = useCallback(async () => {
     try {
-      const hbResult = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw system heartbeat last --json", cwd: null,
-      });
-      if (hbResult.code === 0 && hbResult.stdout.trim()) {
-        try {
-          const parsed = JSON.parse(hbResult.stdout);
-          lastRun = parsed.timestamp ?? parsed.ts ?? parsed.lastRun;
-        } catch { /* ignore parse errors */ }
-      }
-    } catch { /* heartbeat last may not be available */ }
-
-    try {
-      const cronResult = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw cron list --json --all", cwd: null,
-      });
-      if (cronResult.code === 0 && cronResult.stdout.trim()) {
-        const parsed = JSON.parse(cronResult.stdout);
-        const jobs = Array.isArray(parsed) ? parsed : parsed.jobs ?? [];
-        const hbJob = jobs.find((j: Record<string, unknown>) =>
-          j.name === HEARTBEAT_JOB_NAME ||
-          (typeof j.name === "string" && j.name.toLowerCase().includes("heartbeat"))
-        );
-        if (hbJob) {
-          cronJobId = String(hbJob.id ?? "");
-          enabled = hbJob.enabled !== false && hbJob.disabled !== true;
-          jobMessage = String(hbJob.message ?? hbJob.agentMessage ?? "");
-          const sched = String(hbJob.schedule ?? hbJob.every ?? "");
-          const everyMatch = sched.match(/^(\d+)\s*m/i);
-          if (everyMatch) {
-            jobInterval = parseInt(everyMatch[1], 10);
-          } else if (typeof hbJob.intervalMinutes === "number") {
-            jobInterval = hbJob.intervalMinutes;
-          } else {
-            const cronMatch = String(hbJob.cron ?? hbJob.schedule ?? "").match(/^\*\/(\d+)/);
-            if (cronMatch) jobInterval = parseInt(cronMatch[1], 10);
-          }
-        }
-      }
-    } catch { /* cron list may fail if gateway is down */ }
-
-    setStatus({ enabled, cronJobId, intervalMinutes: jobInterval, lastRun, message: jobMessage });
-    setIntervalMinutes(jobInterval);
-    setPrompt(jobMessage);
-    setLoading(false);
+      const { homeDir, join } = await import("@tauri-apps/api/path");
+      const home = await homeDir();
+      hbPath.current = await join(home, ".openclaw", "workspace", "HEARTBEAT.md");
+    } catch {
+      hbPath.current = "";
+    }
   }, []);
 
-  useEffect(() => { fetchStatus(); }, [fetchStatus]);
-
-  const ensureCronJob = async (minutes: number, message: string, enable: boolean): Promise<string | null> => {
-    const escaped = message.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-    if (status.cronJobId) {
-      const parts = [
-        `openclaw cron edit ${status.cronJobId}`,
-        `--every ${minutes}m`,
-        `--message "${escaped}"`,
-        `--name ${HEARTBEAT_JOB_NAME}`,
-        enable ? "--enable" : "--disable",
-      ];
-      await invoke("execute_command", { command: parts.join(" "), cwd: null });
-      return status.cronJobId;
-    } else {
-      const parts = [
-        "openclaw cron add",
-        `--every ${minutes}m`,
-        `--message "${escaped}"`,
-        `--name ${HEARTBEAT_JOB_NAME}`,
-        "--json",
-        enable ? "" : "--disabled",
-      ].filter(Boolean);
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: parts.join(" "), cwd: null,
+  const fetchConfig = useCallback(async () => {
+    try {
+      const r = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: "openclaw config get agents.defaults.heartbeat --json", cwd: null,
       });
-      if (result.code === 0 && result.stdout.trim()) {
-        try {
-          const parsed = JSON.parse(result.stdout);
-          return String(parsed.id ?? parsed.jobId ?? "");
-        } catch { /* ignore */ }
+      if (r.code === 0 && r.stdout.trim()) {
+        const cfg = JSON.parse(r.stdout);
+        const every = cfg.every || "30m";
+        const m = every.match(/^(\d+)/);
+        const minutes = m ? parseInt(m[1]) : 30;
+        setEditInterval(minutes);
+        setEditPrompt(cfg.prompt || "");
+        setEditTarget(cfg.target || "none");
+        if (cfg.activeHours) {
+          setActiveHoursOn(true);
+          setAhStart(cfg.activeHours.start || "08:00");
+          setAhEnd(cfg.activeHours.end || "22:00");
+        }
+        setStatus(prev => ({
+          ...prev, every, prompt: cfg.prompt || "", target: cfg.target || "none",
+          activeHours: cfg.activeHours, lightContext: cfg.lightContext,
+          isolatedSession: cfg.isolatedSession,
+        }));
       }
-      return null;
-    }
-  };
+    } catch { /* config may not exist yet */ }
+  }, []);
+
+  const fetchLast = useCallback(async () => {
+    try {
+      const r = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: "openclaw system heartbeat last --json", cwd: null,
+      });
+      if (r.code === 0 && r.stdout.trim()) {
+        const p = JSON.parse(r.stdout);
+        const ts = p.timestamp ?? p.ts ?? p.lastRun ?? p.last;
+        if (ts) setStatus(prev => ({ ...prev, lastRun: ts }));
+        if (typeof p.enabled === "boolean") setStatus(prev => ({ ...prev, enabled: p.enabled }));
+      }
+    } catch { /* may not have run yet */ }
+  }, []);
+
+  const loadChecklist = useCallback(async () => {
+    if (!hbPath.current) return;
+    try {
+      const content = await invoke<string>("read_file", { path: hbPath.current });
+      setChecklist(content || "");
+    } catch { setChecklist(""); }
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      await resolvePath();
+      await Promise.all([fetchConfig(), fetchLast()]);
+      await loadChecklist();
+      setLoading(false);
+    })();
+  }, [resolvePath, fetchConfig, fetchLast, loadChecklist]);
 
   const toggleHeartbeat = async () => {
-    const wasEnabled = status.enabled;
-    setStatus(prev => ({ ...prev, enabled: !wasEnabled }));
+    const was = status.enabled;
+    setStatus(prev => ({ ...prev, enabled: !was }));
     setBusy("toggle");
     try {
-      if (wasEnabled) {
-        if (status.cronJobId) {
-          await invoke("execute_command", {
-            command: `openclaw cron edit ${status.cronJobId} --disable`, cwd: null,
-          });
-        }
-        await invoke("execute_command", {
-          command: "openclaw system heartbeat disable", cwd: null,
-        });
-      } else {
-        const msg = prompt.trim() || "Check on system health, summarize any important changes or notifications.";
-        const jobId = await ensureCronJob(intervalMinutes, msg, true);
-        if (jobId) setStatus(prev => ({ ...prev, cronJobId: jobId }));
-        await invoke("execute_command", {
-          command: "openclaw system heartbeat enable", cwd: null,
-        });
-      }
-      invalidate("cronJobs");
-    } catch {
-      setStatus(prev => ({ ...prev, enabled: wasEnabled }));
-    } finally { setBusy(null); }
+      await invoke("execute_command", {
+        command: was ? "openclaw system heartbeat disable" : "openclaw system heartbeat enable",
+        cwd: null,
+      });
+    } catch { setStatus(prev => ({ ...prev, enabled: was })); }
+    finally { setBusy(null); }
   };
 
-  const setHeartbeatIntervalAction = async (minutes: number) => {
-    if (minutes === intervalMinutes) return;
-    setIntervalMinutes(minutes);
-    if (!status.cronJobId) return;
-    setBusy("interval");
+  const saveConfig = async () => {
+    setBusy("config");
     try {
       await invoke("execute_command", {
-        command: `openclaw cron edit ${status.cronJobId} --every ${minutes}m`, cwd: null,
+        command: `openclaw config set agents.defaults.heartbeat.every "${editInterval}m"`, cwd: null,
       });
-      setStatus(prev => ({ ...prev, intervalMinutes: minutes }));
-      invalidate("cronJobs");
-    } catch {
-      setIntervalMinutes(status.intervalMinutes);
-    } finally { setBusy(null); }
+      if (editPrompt.trim()) {
+        const esc = editPrompt.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
+        await invoke("execute_command", {
+          command: `openclaw config set agents.defaults.heartbeat.prompt "${esc}"`, cwd: null,
+        });
+      }
+      await invoke("execute_command", {
+        command: `openclaw config set agents.defaults.heartbeat.target "${editTarget}"`, cwd: null,
+      });
+      if (activeHoursOn) {
+        const ahJson = JSON.stringify({ start: ahStart, end: ahEnd });
+        const escaped = ahJson.replace(/"/g, '\\"');
+        await invoke("execute_command", {
+          command: `openclaw config set agents.defaults.heartbeat.activeHours "${escaped}"`, cwd: null,
+        });
+      }
+      setStatus(prev => ({
+        ...prev, every: `${editInterval}m`, prompt: editPrompt, target: editTarget,
+        activeHours: activeHoursOn ? { start: ahStart, end: ahEnd } : undefined,
+      }));
+      setSaved("config"); setTimeout(() => setSaved(null), 2000);
+    } catch { /* ignore */ }
+    finally { setBusy(null); }
   };
 
-  const savePrompt = async () => {
-    if (!prompt.trim()) return;
-    setBusy("save");
+  const saveChecklist = async () => {
+    if (!hbPath.current) return;
+    setBusy("checklist");
     try {
-      const jobId = await ensureCronJob(intervalMinutes, prompt.trim(), status.enabled);
-      if (jobId) setStatus(prev => ({ ...prev, cronJobId: jobId, message: prompt.trim() }));
-      invalidate("cronJobs");
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      await invoke("write_file", { path: hbPath.current, contents: checklist });
+      setChecklistDirty(false);
+      setSaved("checklist"); setTimeout(() => setSaved(null), 2000);
     } catch { /* ignore */ }
     finally { setBusy(null); }
   };
@@ -1275,31 +1370,23 @@ function HeartbeatTab() {
   const triggerNow = async () => {
     setBusy("trigger");
     try {
-      if (status.cronJobId) {
-        await invoke("execute_command", {
-          command: `openclaw cron run ${status.cronJobId}`, cwd: null,
-        });
-      } else {
-        const msg = prompt.trim() || "Check on system health, summarize any important changes or notifications.";
-        const escaped = msg.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-        await invoke("execute_command", {
-          command: `openclaw agent --agent main --message "${escaped}"`, cwd: null,
-        });
-      }
+      await invoke("execute_command", {
+        command: `openclaw system event --text "Manual heartbeat check" --mode now`, cwd: null,
+      });
     } catch { /* ignore */ }
     finally { setBusy(null); }
   };
-
-  const isEnabled = status.enabled;
 
   if (loading) {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", gap: 8 }}>
         <Loader2 style={{ width: 16, height: 16, color: "var(--accent)", animation: "spin 1s linear infinite" }} />
-        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Loading heartbeat status...</span>
+        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Loading heartbeat config...</span>
       </div>
     );
   }
+
+  const isEnabled = status.enabled;
 
   return (
     <div style={{ height: "100%", overflow: "auto", padding: "20px 24px" }}>
@@ -1325,16 +1412,12 @@ function HeartbeatTab() {
             {isEnabled ? (
               <>
                 <span style={{ color: "#a855f7", fontWeight: 600 }}>Active</span>
-                {" "}&middot; Every {intervalMinutes} min
-                {status.lastRun ? <> &middot; Last: {status.lastRun}</> : ""}
+                {" "}&middot; Every {status.every}
+                {status.lastRun && <> &middot; Last: {status.lastRun}</>}
+                {status.activeHours && <> &middot; {status.activeHours.start}–{status.activeHours.end}</>}
               </>
             ) : "Disabled — enable to start autonomous monitoring"}
           </p>
-          {status.cronJobId && (
-            <p style={{ margin: "2px 0 0", fontSize: 9, color: "rgba(168,85,247,0.4)", fontFamily: "monospace" }}>
-              cron job: {status.cronJobId.slice(0, 12)}
-            </p>
-          )}
         </div>
         <button onClick={triggerNow} disabled={busy === "trigger"}
           style={{
@@ -1345,8 +1428,7 @@ function HeartbeatTab() {
           }}>
           {busy === "trigger"
             ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />
-            : <Play style={{ width: 12, height: 12 }} />
-          }
+            : <Play style={{ width: 12, height: 12 }} />}
           Run Now
         </button>
         <button onClick={toggleHeartbeat} disabled={busy === "toggle"}
@@ -1363,42 +1445,22 @@ function HeartbeatTab() {
         </button>
       </div>
 
-      {/* Schedule info */}
-      <div style={{
-        padding: "12px 16px", borderRadius: 10, marginBottom: 20,
-        background: "var(--bg-elevated)", border: "1px solid var(--border)",
-        display: "flex", alignItems: "center", gap: 12,
-      }}>
-        <Clock style={{ width: 14, height: 14, color: "var(--text-muted)", flexShrink: 0 }} />
-        <div style={{ flex: 1 }}>
-          <span style={{ fontSize: 12, color: "var(--text)" }}>
-            Scheduled as: <code style={{ fontSize: 11, color: "#a855f7", background: "rgba(168,85,247,0.1)", padding: "2px 6px", borderRadius: 4 }}>every {intervalMinutes}m</code>
-          </span>
-          <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 8 }}>
-            Runs every {intervalMinutes} minute{intervalMinutes > 1 ? "s" : ""} — visible on the Calendar tab
-          </span>
-        </div>
-      </div>
-
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-        {/* Left column — Interval + Prompt */}
+        {/* Left — Configuration */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div>
             <label style={labelStyle}>Interval</label>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {HEARTBEAT_INTERVALS.map(({ label, minutes }) => {
-                const active = intervalMinutes === minutes;
+                const active = editInterval === minutes;
                 return (
-                  <button key={minutes} onClick={() => setHeartbeatIntervalAction(minutes)}
+                  <button key={minutes} onClick={() => setEditInterval(minutes)}
                     style={{
-                      padding: "6px 14px", borderRadius: 8, fontSize: 11,
-                      cursor: "pointer",
+                      padding: "6px 14px", borderRadius: 8, fontSize: 11, cursor: "pointer",
                       border: active ? "1px solid #a855f7" : "1px solid var(--border)",
                       background: active ? "rgba(168,85,247,0.15)" : "var(--bg-elevated)",
                       color: active ? "#c084fc" : "var(--text-secondary)",
-                      fontWeight: active ? 600 : 400,
-                      transition: "all 0.12s ease",
-                      transform: active ? "scale(1.04)" : "scale(1)",
+                      fontWeight: active ? 600 : 400, transition: "all 0.12s ease",
                     }}>
                     {label}
                   </button>
@@ -1408,51 +1470,130 @@ function HeartbeatTab() {
           </div>
 
           <div>
-            <label style={labelStyle}>Monitoring Prompt</label>
-            <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
-              placeholder="What should Crystal monitor for you?"
-              rows={4}
-              style={{
-                ...inputStyle, resize: "vertical", minHeight: 80, maxHeight: 200,
-                fontFamily: "inherit", marginBottom: 8,
-              }}
-            />
-            <button onClick={savePrompt} disabled={busy === "save" || !prompt.trim()}
-              style={{
-                padding: "8px 18px", borderRadius: 8, border: "none",
-                background: saved ? "rgba(74,222,128,0.15)" : "#a855f7",
-                color: saved ? "#4ade80" : "#fff",
-                fontSize: 11, fontWeight: 600, cursor: "pointer",
-                display: "flex", alignItems: "center", gap: 6,
-                opacity: busy === "save" || !prompt.trim() ? 0.6 : 1,
-              }}>
-              {busy === "save" ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />
-                : saved ? <CheckCircle2 style={{ width: 12, height: 12 }} />
-                : <Save style={{ width: 12, height: 12 }} />}
-              {saved ? "Saved" : "Save Prompt"}
-            </button>
+            <label style={labelStyle}>Heartbeat Prompt</label>
+            <textarea value={editPrompt} onChange={e => setEditPrompt(e.target.value)}
+              placeholder="Instructions for the agent during heartbeats..."
+              rows={3}
+              style={{ ...inputStyle, resize: "vertical", minHeight: 60, maxHeight: 160, fontFamily: "inherit" }} />
           </div>
+
+          <div>
+            <label style={labelStyle}>Delivery Target</label>
+            <div style={{ display: "flex", gap: 6 }}>
+              {(["none", "last"] as const).map(t => (
+                <button key={t} onClick={() => setEditTarget(t)}
+                  style={{
+                    padding: "6px 14px", borderRadius: 8, fontSize: 11, cursor: "pointer",
+                    border: editTarget === t ? "1px solid #a855f7" : "1px solid var(--border)",
+                    background: editTarget === t ? "rgba(168,85,247,0.15)" : "var(--bg-elevated)",
+                    color: editTarget === t ? "#c084fc" : "var(--text-secondary)",
+                    fontWeight: editTarget === t ? 600 : 400,
+                  }}>
+                  {t === "none" ? "None (silent)" : "Last conversation"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, cursor: "pointer" }}
+              onClick={() => setActiveHoursOn(!activeHoursOn)}>
+              <input type="checkbox" checked={activeHoursOn}
+                onChange={e => setActiveHoursOn(e.target.checked)} style={{ margin: 0 }} />
+              <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 500 }}>Active Hours</span>
+            </div>
+            {activeHoursOn && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
+                <input type="time" value={ahStart} onChange={e => setAhStart(e.target.value)}
+                  style={{ ...inputStyle, width: 120 }} />
+                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>to</span>
+                <input type="time" value={ahEnd} onChange={e => setAhEnd(e.target.value)}
+                  style={{ ...inputStyle, width: 120 }} />
+              </div>
+            )}
+          </div>
+
+          <button onClick={saveConfig} disabled={busy === "config"}
+            style={{
+              padding: "8px 18px", borderRadius: 8, border: "none",
+              background: saved === "config" ? "rgba(74,222,128,0.15)" : "#a855f7",
+              color: saved === "config" ? "#4ade80" : "#fff",
+              fontSize: 11, fontWeight: 600, cursor: "pointer",
+              display: "flex", alignItems: "center", gap: 6,
+              opacity: busy === "config" ? 0.6 : 1, alignSelf: "flex-start",
+            }}>
+            {busy === "config" ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />
+              : saved === "config" ? <CheckCircle2 style={{ width: 12, height: 12 }} />
+              : <Save style={{ width: 12, height: 12 }} />}
+            {saved === "config" ? "Saved" : "Save Config"}
+          </button>
         </div>
 
-        {/* Right column — Presets */}
-        <div>
-          <label style={labelStyle}>Quick Presets</label>
+        {/* Right — HEARTBEAT.md */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <label style={{ ...labelStyle, marginBottom: 0 }}>HEARTBEAT.md Checklist</label>
+            {checklistDirty && <span style={{ fontSize: 9, color: "#fbbf24" }}>unsaved</span>}
+          </div>
+          <textarea value={checklist}
+            onChange={e => { setChecklist(e.target.value); setChecklistDirty(true); }}
+            placeholder={"# Heartbeat checklist\n\n- Check inbox for urgent messages\n- Review calendar for upcoming events"}
+            rows={10}
+            style={{
+              ...inputStyle, resize: "vertical", minHeight: 160, maxHeight: 400,
+              fontFamily: "'Cascadia Code', 'Fira Code', monospace", fontSize: 11, lineHeight: 1.6,
+            }} />
+          <button onClick={saveChecklist} disabled={busy === "checklist" || !checklistDirty}
+            style={{
+              padding: "8px 18px", borderRadius: 8, border: "none",
+              background: saved === "checklist" ? "rgba(74,222,128,0.15)" : "#a855f7",
+              color: saved === "checklist" ? "#4ade80" : "#fff",
+              fontSize: 11, fontWeight: 600, cursor: "pointer",
+              display: "flex", alignItems: "center", gap: 6,
+              opacity: busy === "checklist" || !checklistDirty ? 0.6 : 1, alignSelf: "flex-start",
+            }}>
+            {busy === "checklist" ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />
+              : saved === "checklist" ? <CheckCircle2 style={{ width: 12, height: 12 }} />
+              : <Save style={{ width: 12, height: 12 }} />}
+            {saved === "checklist" ? "Saved" : "Save Checklist"}
+          </button>
+
+          <label style={labelStyle}>Checklist Presets</label>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {HEARTBEAT_PRESETS.map(preset => (
-              <button key={preset} onClick={() => setPrompt(preset)}
-                style={{
-                  textAlign: "left", padding: "10px 14px", borderRadius: 8,
-                  border: prompt === preset ? "1px solid #a855f7" : "1px solid var(--border)",
-                  background: prompt === preset ? "rgba(168,85,247,0.08)" : "var(--bg-elevated)",
-                  color: prompt === preset ? "#a855f7" : "var(--text-secondary)",
-                  fontSize: 11, cursor: "pointer", transition: "all 0.15s",
-                }}>
-                {preset}
-              </button>
-            ))}
+            {HEARTBEAT_PRESETS.map((preset, i) => {
+              const title = preset.split("\n")[0];
+              const itemCount = preset.split("\n").filter(l => l.startsWith("- ")).length;
+              return (
+                <button key={i} onClick={() => { setChecklist(preset); setChecklistDirty(true); }}
+                  style={{
+                    textAlign: "left", padding: "8px 12px", borderRadius: 8,
+                    border: "1px solid var(--border)", background: "var(--bg-elevated)",
+                    color: "var(--text-secondary)", fontSize: 10, cursor: "pointer",
+                    transition: "all 0.15s",
+                  }}>
+                  {title}
+                  <span style={{ display: "block", fontSize: 9, color: "var(--text-muted)", marginTop: 2 }}>
+                    {itemCount} item{itemCount !== 1 ? "s" : ""}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
+
+      {status.lastRun && (
+        <div style={{
+          marginTop: 20, padding: "12px 16px", borderRadius: 10,
+          background: "var(--bg-elevated)", border: "1px solid var(--border)",
+          display: "flex", alignItems: "center", gap: 12,
+        }}>
+          <Clock style={{ width: 14, height: 14, color: "var(--text-muted)", flexShrink: 0 }} />
+          <span style={{ fontSize: 12, color: "var(--text)" }}>
+            Last heartbeat: <span style={{ color: "#a855f7", fontWeight: 500 }}>{status.lastRun}</span>
+          </span>
+        </div>
+      )}
 
       <style>{`
         @keyframes heartbeat-pulse {
