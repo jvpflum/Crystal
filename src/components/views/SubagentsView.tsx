@@ -4,7 +4,7 @@ import {
   FileText, Navigation, Send, Bot, ChevronDown, ChevronRight,
   Terminal, Settings, XCircle,
 } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { openclawClient } from "@/lib/openclaw";
 
 interface SubAgent {
   id: string;
@@ -66,14 +66,6 @@ const INPUT: React.CSSProperties = {
 };
 const MONO: React.CSSProperties = { fontFamily: "'JetBrains Mono', 'Fira Code', monospace" };
 
-function escapeMsg(msg: string): string {
-  return msg.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-async function runCmd(command: string): Promise<{ stdout: string; stderr: string; code: number }> {
-  return invoke<{ stdout: string; stderr: string; code: number }>("execute_command", { command, cwd: null });
-}
-
 export function SubagentsView() {
   const [subagents, setSubagents] = useState<SubAgent[]>([]);
   const [loading, setLoading] = useState(false);
@@ -106,7 +98,7 @@ export function SubagentsView() {
   const [sendInputs, setSendInputs] = useState<Record<string, string>>({});
 
   const sendAgentMessage = useCallback(async (message: string): Promise<{ stdout: string; code: number }> => {
-    const result = await runCmd(`openclaw agent --agent main --message "${escapeMsg(message)}" --json`);
+    const result = await openclawClient.dispatchToAgent("main", message);
     return { stdout: result.stdout || result.stderr, code: result.code };
   }, []);
 
@@ -162,32 +154,24 @@ export function SubagentsView() {
 
   const loadAgents = useCallback(async () => {
     try {
-      const result = await runCmd("openclaw agents list --json");
-      if (result.code === 0 && result.stdout.trim()) {
-        const data = JSON.parse(result.stdout);
-        setAgents(Array.isArray(data) ? data : (data.agents ?? data.items ?? []));
-      }
+      const list = await openclawClient.listAgents();
+      setAgents(list);
     } catch { /* best-effort */ }
   }, []);
 
   const loadModels = useCallback(async () => {
     try {
-      const result = await runCmd("openclaw models list --json");
-      if (result.code === 0 && result.stdout.trim()) {
-        const data = JSON.parse(result.stdout);
-        setModels(data.models ?? []);
-      }
+      const keys = await openclawClient.getModels();
+      setModels(keys.map(k => ({ key: k, name: openclawClient.getModelDisplayName(k) })));
     } catch { /* best-effort */ }
   }, []);
 
   const loadConfig = useCallback(async () => {
     try {
-      const result = await runCmd("openclaw config get acp --json");
-      if (result.stdout.trim()) {
-        const parsed = JSON.parse(result.stdout);
-        if (parsed.defaultRuntime && RUNTIMES.includes(parsed.defaultRuntime)) {
-          setDefaultRuntime(parsed.defaultRuntime as Runtime);
-        }
+      const cfg = await openclawClient.getConfig();
+      const rt = cfg?.acp?.defaultRuntime as string | undefined;
+      if (rt && RUNTIMES.includes(rt as Runtime)) {
+        setDefaultRuntime(rt as Runtime);
       }
     } catch { /* optional */ }
   }, []);
@@ -269,9 +253,8 @@ export function SubagentsView() {
   const saveDefaultRuntime = async () => {
     setSavingConfig(true);
     try {
-      const result = await runCmd(`openclaw config set acp.defaultRuntime "${defaultRuntime}"`);
-      if (result.code !== 0 && result.stderr) setError(result.stderr);
-      else setFeedback({ type: "success", msg: "Default runtime updated" });
+      await openclawClient.updateConfig({ acp: { defaultRuntime } });
+      setFeedback({ type: "success", msg: "Default runtime updated" });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update config");
     }

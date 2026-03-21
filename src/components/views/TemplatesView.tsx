@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { escapeShellArg } from "@/lib/tools";
+import { openclawClient } from "@/lib/openclaw";
+import { BUILTIN_WORKFLOWS, CATEGORY_COLORS, loadCustomWorkflows, saveCustomWorkflows, type WorkflowDefinition } from "@/lib/workflows";
 import {
   Play,
   Loader2,
@@ -24,25 +24,7 @@ import {
 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 
-interface WorkflowStep {
-  id: string;
-  message: string;
-  agentId?: string;
-}
-
-interface Workflow {
-  id: string;
-  name: string;
-  description: string;
-  icon: string;
-  category: "Productivity" | "Development" | "System";
-  estimatedTime: string;
-  steps: WorkflowStep[];
-  isBuiltIn: boolean;
-  needsInput?: boolean;
-  inputLabel?: string;
-  inputPlaceholder?: string;
-}
+type Workflow = WorkflowDefinition;
 
 interface StepResult {
   stepId: string;
@@ -50,146 +32,11 @@ interface StepResult {
   success: boolean;
 }
 
-const BUILTIN_WORKFLOWS: Workflow[] = [
-  {
-    id: "morning-briefing",
-    name: "Morning Briefing",
-    description: "Get weather, calendar summary, and top news headlines",
-    icon: "☀️",
-    category: "Productivity",
-    estimatedTime: "~2 min",
-    isBuiltIn: true,
-    steps: [
-      { id: "weather", message: "What's the weather forecast for today? Give a brief summary." },
-      { id: "calendar", message: "Summarize my calendar events for today and any upcoming deadlines." },
-      { id: "news", message: "Give me a brief summary of the top 5 news headlines today." },
-    ],
-  },
-  {
-    id: "code-review",
-    name: "Code Review",
-    description: "Automated code review with best practices analysis",
-    icon: "🔍",
-    category: "Development",
-    estimatedTime: "~3 min",
-    isBuiltIn: true,
-    needsInput: true,
-    inputLabel: "Project or file path",
-    inputPlaceholder: "e.g. C:\\Users\\jarro\\project or describe what to review...",
-    steps: [
-      { id: "structure", message: "Analyze the project structure at {{INPUT}} and identify the main modules." },
-      { id: "issues", message: "Review the codebase at {{INPUT}} for common issues: unused imports, potential bugs, and code smells." },
-      { id: "security", message: "Check {{INPUT}} for any security vulnerabilities or sensitive data exposure." },
-      { id: "summary", message: "Provide a summary of the code review findings with priority recommendations for {{INPUT}}." },
-    ],
-  },
-  {
-    id: "research-topic",
-    name: "Research Topic",
-    description: "Deep multi-angle research on any topic",
-    icon: "🔬",
-    category: "Productivity",
-    estimatedTime: "~4 min",
-    isBuiltIn: true,
-    needsInput: true,
-    inputLabel: "Research topic",
-    inputPlaceholder: "e.g. Quantum computing, AI ethics, Solar energy...",
-    steps: [
-      { id: "overview", message: "Provide a comprehensive overview of '{{INPUT}}', including key concepts and terminology." },
-      { id: "pros-cons", message: "Analyze the pros and cons, trade-offs, and different perspectives on '{{INPUT}}'." },
-      { id: "sources", message: "Find and summarize the most authoritative and recent information about '{{INPUT}}'." },
-      { id: "synthesis", message: "Synthesize all findings about '{{INPUT}}' into a structured research brief with actionable conclusions." },
-    ],
-  },
-  {
-    id: "system-health",
-    name: "System Health",
-    description: "Run diagnostics, security audit, and check all services",
-    icon: "🏥",
-    category: "System",
-    estimatedTime: "~3 min",
-    isBuiltIn: true,
-    steps: [
-      { id: "doctor", message: "Run a full system diagnostic check and report any issues found." },
-      { id: "security", message: "Perform a security audit: check for outdated dependencies, exposed ports, and vulnerabilities." },
-      { id: "services", message: "Check the status of all configured services and connections." },
-      { id: "report", message: "Generate a system health report card with scores and recommended actions." },
-    ],
-  },
-  {
-    id: "daily-digest",
-    name: "Daily Digest",
-    description: "Summarize messages, emails, and notifications",
-    icon: "📋",
-    category: "Productivity",
-    estimatedTime: "~2 min",
-    isBuiltIn: true,
-    steps: [
-      { id: "messages", message: "Summarize any unread messages and conversations from today." },
-      { id: "emails", message: "Summarize important emails and highlight action items." },
-      { id: "digest", message: "Compile everything into a concise daily digest with priority items at the top." },
-    ],
-  },
-  {
-    id: "write-email",
-    name: "Write Email",
-    description: "Draft a professional email on any topic",
-    icon: "✉️",
-    category: "Productivity",
-    estimatedTime: "~1 min",
-    isBuiltIn: true,
-    needsInput: true,
-    inputLabel: "Email topic / instructions",
-    inputPlaceholder: "e.g. Follow up with client about project timeline...",
-    steps: [
-      { id: "draft", message: "Write a professional email about: {{INPUT}}. Make it concise and well-structured." },
-      { id: "polish", message: "Review and polish the email draft. Check for tone, grammar, and clarity." },
-    ],
-  },
-  {
-    id: "explain-code",
-    name: "Explain Code",
-    description: "Get a detailed explanation of any code or concept",
-    icon: "💡",
-    category: "Development",
-    estimatedTime: "~2 min",
-    isBuiltIn: true,
-    needsInput: true,
-    inputLabel: "Code or concept to explain",
-    inputPlaceholder: "Paste code or describe a concept...",
-    steps: [
-      { id: "explain", message: "Explain the following in detail, including what it does, how it works, and any key patterns:\n\n{{INPUT}}" },
-      { id: "improve", message: "Suggest improvements, best practices, and potential issues for the code or concept above." },
-    ],
-  },
-];
-
-const CATEGORY_COLORS: Record<string, string> = {
-  Productivity: "#fbbf24",
-  Development: "#a855f7",
-  System: "#3B82F6",
-};
-
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   Productivity: <Zap style={{ width: 14, height: 14 }} />,
   Development: <Code2 style={{ width: 14, height: 14 }} />,
   System: <Activity style={{ width: 14, height: 14 }} />,
 };
-
-const STORAGE_KEY = "crystal-custom-workflows";
-
-function loadCustomWorkflows(): Workflow[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveCustomWorkflows(workflows: Workflow[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(workflows));
-}
 
 export function TemplatesView() {
   const [customWorkflows, setCustomWorkflows] = useState<Workflow[]>([]);
@@ -214,14 +61,9 @@ export function TemplatesView() {
 
   const loadAgents = useCallback(async () => {
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw agents list --json", cwd: null,
-      });
-      if (result.code === 0 && result.stdout) {
-        const data = JSON.parse(result.stdout);
-        const ids = Array.isArray(data) ? data.map((a: { id: string }) => a.id) : ["main"];
-        setAvailableAgents(ids.length > 0 ? ids : ["main"]);
-      }
+      const list = await openclawClient.listAgents();
+      const ids = list.map((a: { id: string }) => a.id);
+      setAvailableAgents(ids.length > 0 ? ids : ["main"]);
     } catch {
       setAvailableAgents(["main"]);
     }
@@ -264,13 +106,8 @@ export function TemplatesView() {
       }
 
       try {
-        const escaped = escapeShellArg(msg);
         const agent = step.agentId || "main";
-        const command = `openclaw agent --agent "${agent}" --session-id ${sessionId} --message "${escaped}"`;
-        const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-          command,
-          cwd: null,
-        });
+        const result = await openclawClient.dispatchToAgent(agent, msg, { sessionId });
         const output = result.stdout?.trim() || result.stderr?.trim() || "(no output)";
         const stepResult: StepResult = { stepId: step.id, output, success: result.code === 0 };
         collectedResults.push(stepResult);

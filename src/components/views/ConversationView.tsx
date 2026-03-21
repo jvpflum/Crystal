@@ -623,9 +623,19 @@ export function ConversationView() {
       const streamDuration = Date.now() - streamStart;
       setResponseMeta(prev => ({ ...prev, [msgId]: { tokens: tokenCount, durationMs: streamDuration } }));
       const finalContent = accumulated;
+      const finalToolCalls = toolSteps
+        .filter(s => s.action.type === "tool_call")
+        .map(s => ({
+          tool: s.action.tool || "",
+          args: (s.action.args || {}) as Record<string, unknown>,
+          status: (s.result ? (s.result.success ? "completed" : "error") : "completed") as "executing" | "completed" | "error",
+          output: s.result?.output,
+        }));
       updateConversation(activeId, c => ({
         ...c,
-        messages: c.messages.map(m => m.id === msgId ? { ...m, content: finalContent } : m),
+        messages: c.messages.map(m => m.id === msgId
+          ? { ...m, content: finalContent, toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined }
+          : m),
         updatedAt: Date.now(),
       }));
 
@@ -1683,6 +1693,15 @@ function MessageBubble({ message, isLatest, meta, onImageClick }: { message: Mes
           </div>
         )}
 
+        {/* Persisted tool calls */}
+        {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 8 }}>
+            {message.toolCalls.map((tc, i) => (
+              <PersistedToolBadge key={i} tool={tc.tool} args={tc.args} status={tc.status} />
+            ))}
+          </div>
+        )}
+
         {/* Timestamp + surface + performance meta */}
         <div style={{
           fontSize: 9, color: isUser ? "rgba(255,255,255,0.5)" : "var(--text-muted)",
@@ -1948,6 +1967,56 @@ function ToolCallBubble({ step }: { step: AgentStep }) {
           {step.result.output?.slice(0, 1000) || step.result.error}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ── Persisted tool badge (shown in chat history) ── */
+function PersistedToolBadge({ tool, args, status }: { tool: string; args: Record<string, unknown>; status: string }) {
+  const icon = (() => {
+    if (tool === "write_file" || tool === "create_file") return "\uD83D\uDCDD";
+    if (tool === "read_file") return "\uD83D\uDCC4";
+    if (tool === "bash" || tool === "shell" || tool === "execute_command") return "\u26A1";
+    if (tool === "search" || tool === "grep" || tool === "find") return "\uD83D\uDD0D";
+    if (tool === "edit_file" || tool === "patch") return "\u270F\uFE0F";
+    if (tool === "delete_file") return "\uD83D\uDDD1\uFE0F";
+    if (tool === "code_block") return "\uD83D\uDCBB";
+    return "\u2699\uFE0F";
+  })();
+
+  const detail = (() => {
+    const a = args as Record<string, string>;
+    if (a.path) return (a.path as string).split(/[/\\]/).pop() || a.path;
+    if (a.command) return (a.command as string).length > 50 ? (a.command as string).slice(0, 50) + "\u2026" : a.command;
+    if (a.query) return a.query;
+    if (a.language) return `.${a.language}`;
+    return null;
+  })();
+
+  return (
+    <div style={{
+      display: "inline-flex", alignItems: "center", gap: 5,
+      padding: "3px 10px", borderRadius: 6,
+      background: "rgba(139,92,246,0.06)",
+      fontSize: 10, maxWidth: "100%",
+    }}>
+      <span>{icon}</span>
+      <span style={{ color: "var(--accent-hover)", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, fontSize: 10 }}>{tool}</span>
+      {detail && (
+        <span style={{
+          color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 250, fontSize: 9,
+        }}>
+          {detail}
+        </span>
+      )}
+      <span style={{
+        fontSize: 8, fontWeight: 600, padding: "1px 4px", borderRadius: 3,
+        background: status === "error" ? "rgba(248,113,113,0.1)" : "rgba(74,222,128,0.1)",
+        color: status === "error" ? "var(--error)" : "var(--success)",
+      }}>
+        {status === "error" ? "err" : "\u2713"}
+      </span>
     </div>
   );
 }

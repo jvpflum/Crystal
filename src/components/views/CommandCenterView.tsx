@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { escapeShellArg } from "@/lib/tools";
 import { openclawClient } from "@/lib/openclaw";
 import { useDataStore } from "@/stores/dataStore";
+import { BUILTIN_WORKFLOWS, CATEGORY_COLORS, loadCustomWorkflows, saveCustomWorkflows, type WorkflowDefinition, type WorkflowStep } from "@/lib/workflows";
 import {
   Calendar as CalendarIcon, Workflow, Clock, Plus, Play, Trash2,
   RefreshCw, Loader2, AlertTriangle, CheckCircle2,
@@ -27,13 +28,7 @@ interface CronJob {
   atIso?: string;
 }
 
-interface WorkflowStep { id: string; message: string; parallel?: boolean; }
-interface WorkflowDef {
-  id: string; name: string; description: string; icon: string;
-  category: "Productivity" | "Development" | "System";
-  estimatedTime: string; steps: WorkflowStep[]; isBuiltIn: boolean;
-  needsInput?: boolean; inputLabel?: string; inputPlaceholder?: string;
-}
+type WorkflowDef = WorkflowDefinition;
 interface StepResult { stepId: string; output: string; success: boolean; }
 
 type TabId = "calendar" | "workflows" | "scheduled" | "heartbeat";
@@ -55,47 +50,6 @@ const QUICK_TEMPLATES = [
   { icon: Activity, name: "Health Check", schedule: "*/30 * * * *", message: "Check all services status: gateway, LLM, and system resources. Alert if anything is down.", color: "#06b6d4", desc: "Every 30 min" },
 ];
 
-const BUILTIN_WORKFLOWS: WorkflowDef[] = [
-  { id: "morning-briefing", name: "Morning Briefing", description: "Get weather, calendar summary, and news", icon: "☀️", category: "Productivity", estimatedTime: "~1 min", isBuiltIn: true, steps: [
-    { id: "weather", message: "What's the weather forecast for today? Give a brief summary.", parallel: true },
-    { id: "calendar", message: "Summarize my calendar events for today and any upcoming deadlines.", parallel: true },
-    { id: "news", message: "Give me a brief summary of the top 5 news headlines today.", parallel: true },
-  ]},
-  { id: "code-review", name: "Code Review", description: "Automated code review with best practices", icon: "🔍", category: "Development", estimatedTime: "~2 min", isBuiltIn: true, needsInput: true, inputLabel: "Project or file path", inputPlaceholder: "e.g. C:\\project or describe what to review...", steps: [
-    { id: "structure", message: "Analyze the project structure at {{INPUT}} and identify the main modules.", parallel: true },
-    { id: "issues", message: "Review the codebase at {{INPUT}} for common issues: unused imports, potential bugs, and code smells.", parallel: true },
-    { id: "security", message: "Check {{INPUT}} for any security vulnerabilities or sensitive data exposure.", parallel: true },
-    { id: "summary", message: "Provide a summary of the code review findings with priority recommendations for {{INPUT}}." },
-  ]},
-  { id: "research-topic", name: "Research Topic", description: "Deep multi-angle research on any topic", icon: "🔬", category: "Productivity", estimatedTime: "~2 min", isBuiltIn: true, needsInput: true, inputLabel: "Research topic", inputPlaceholder: "e.g. Quantum computing, AI ethics...", steps: [
-    { id: "overview", message: "Provide a comprehensive overview of '{{INPUT}}', including key concepts and terminology.", parallel: true },
-    { id: "pros-cons", message: "Analyze the pros and cons, trade-offs, and different perspectives on '{{INPUT}}'.", parallel: true },
-    { id: "sources", message: "Find and summarize the most authoritative and recent information about '{{INPUT}}'.", parallel: true },
-    { id: "synthesis", message: "Synthesize all findings about '{{INPUT}}' into a structured research brief with actionable conclusions." },
-  ]},
-  { id: "system-health", name: "System Health", description: "Run diagnostics, security audit, check services", icon: "🏥", category: "System", estimatedTime: "~1 min", isBuiltIn: true, steps: [
-    { id: "doctor", message: "Run a full system diagnostic check and report any issues found.", parallel: true },
-    { id: "security", message: "Perform a security audit: check for outdated dependencies, exposed ports, and vulnerabilities.", parallel: true },
-    { id: "services", message: "Check the status of all configured services and connections.", parallel: true },
-    { id: "report", message: "Generate a system health report card with scores and recommended actions." },
-  ]},
-  { id: "daily-digest", name: "Daily Digest", description: "Summarize messages, emails, notifications", icon: "📋", category: "Productivity", estimatedTime: "~1 min", isBuiltIn: true, steps: [
-    { id: "messages", message: "Summarize any unread messages and conversations from today.", parallel: true },
-    { id: "emails", message: "Summarize important emails and highlight action items.", parallel: true },
-    { id: "digest", message: "Compile everything into a concise daily digest with priority items at the top." },
-  ]},
-  { id: "write-email", name: "Write Email", description: "Draft a professional email", icon: "✉️", category: "Productivity", estimatedTime: "~1 min", isBuiltIn: true, needsInput: true, inputLabel: "Email topic", inputPlaceholder: "e.g. Follow up with client about timeline...", steps: [
-    { id: "draft", message: "Write a professional email about: {{INPUT}}. Make it concise and well-structured." },
-    { id: "polish", message: "Review and polish the email draft. Check for tone, grammar, and clarity." },
-  ]},
-  { id: "explain-code", name: "Explain Code", description: "Detailed explanation of code or concepts", icon: "💡", category: "Development", estimatedTime: "~1 min", isBuiltIn: true, needsInput: true, inputLabel: "Code or concept", inputPlaceholder: "Paste code or describe a concept...", steps: [
-    { id: "explain", message: "Explain the following in detail, including what it does, how it works, and any key patterns:\n\n{{INPUT}}" },
-    { id: "improve", message: "Suggest improvements, best practices, and potential issues for the code or concept above." },
-  ]},
-];
-
-const WF_STORAGE = "crystal-custom-workflows";
-const CATEGORY_COLORS: Record<string, string> = { Productivity: "#fbbf24", Development: "#a855f7", System: "#3B82F6" };
 
 /* ── Helpers ── */
 
@@ -529,9 +483,7 @@ function CalendarTab() {
    ══════════════════════════════════════════════════════════════ */
 
 function WorkflowsTab() {
-  const [customWorkflows, setCustomWorkflows] = useState<WorkflowDef[]>(() => {
-    try { const raw = localStorage.getItem(WF_STORAGE); return raw ? JSON.parse(raw) : []; } catch { return []; }
-  });
+  const [customWorkflows, setCustomWorkflows] = useState<WorkflowDef[]>(() => loadCustomWorkflows());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState(0);
@@ -649,14 +601,14 @@ function WorkflowsTab() {
       steps: validSteps.map((s, i) => ({ id: `step-${i}`, message: s.message.trim(), ...(s.parallel ? { parallel: true } : {}) })),
     };
     const updated = [...customWorkflows, wf];
-    setCustomWorkflows(updated); localStorage.setItem(WF_STORAGE, JSON.stringify(updated));
+    setCustomWorkflows(updated); saveCustomWorkflows(updated);
     setNewName(""); setNewDesc(""); setNewSteps([{ message: "" }]); setNewNeedsInput(false); setNewInputLabel("");
     setShowCreate(false); setSelectedId(wf.id);
   };
 
   const deleteWorkflow = (id: string) => {
     const updated = customWorkflows.filter(w => w.id !== id);
-    setCustomWorkflows(updated); localStorage.setItem(WF_STORAGE, JSON.stringify(updated));
+    setCustomWorkflows(updated); saveCustomWorkflows(updated);
     if (selectedId === id) setSelectedId(null);
   };
 
@@ -1233,14 +1185,13 @@ function HeartbeatTab() {
   const [saved, setSaved] = useState<string | null>(null);
 
   const [editInterval, setEditInterval] = useState(30);
-  const [editPrompt, setEditPrompt] = useState("");
   const [editTarget, setEditTarget] = useState("none");
   const [activeHoursOn, setActiveHoursOn] = useState(false);
   const [ahStart, setAhStart] = useState("08:00");
   const [ahEnd, setAhEnd] = useState("22:00");
 
-  const [checklist, setChecklist] = useState("");
-  const [checklistDirty, setChecklistDirty] = useState(false);
+  const [instructions, setInstructions] = useState("");
+  const [instructionsDirty, setInstructionsDirty] = useState(false);
 
   const hbPath = useRef("");
 
@@ -1265,7 +1216,6 @@ function HeartbeatTab() {
         const m = every.match(/^(\d+)/);
         const minutes = m ? parseInt(m[1]) : 30;
         setEditInterval(minutes);
-        setEditPrompt(cfg.prompt || "");
         setEditTarget(cfg.target || "none");
         if (cfg.activeHours) {
           setActiveHoursOn(true);
@@ -1295,22 +1245,22 @@ function HeartbeatTab() {
     } catch { /* may not have run yet */ }
   }, []);
 
-  const loadChecklist = useCallback(async () => {
+  const loadInstructions = useCallback(async () => {
     if (!hbPath.current) return;
     try {
       const content = await invoke<string>("read_file", { path: hbPath.current });
-      setChecklist(content || "");
-    } catch { setChecklist(""); }
+      setInstructions(content || "");
+    } catch { setInstructions(""); }
   }, []);
 
   useEffect(() => {
     (async () => {
       await resolvePath();
       await Promise.all([fetchConfig(), fetchLast()]);
-      await loadChecklist();
+      await loadInstructions();
       setLoading(false);
     })();
-  }, [resolvePath, fetchConfig, fetchLast, loadChecklist]);
+  }, [resolvePath, fetchConfig, fetchLast, loadInstructions]);
 
   const toggleHeartbeat = async () => {
     const was = status.enabled;
@@ -1325,18 +1275,15 @@ function HeartbeatTab() {
     finally { setBusy(null); }
   };
 
-  const saveConfig = async () => {
-    setBusy("config");
+  const saveAll = async () => {
+    setBusy("save");
     try {
       await invoke("execute_command", {
         command: `openclaw config set agents.defaults.heartbeat.every "${editInterval}m"`, cwd: null,
       });
-      if (editPrompt.trim()) {
-        const esc = editPrompt.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
-        await invoke("execute_command", {
-          command: `openclaw config set agents.defaults.heartbeat.prompt "${esc}"`, cwd: null,
-        });
-      }
+      await invoke("execute_command", {
+        command: `openclaw config set agents.defaults.heartbeat.prompt "Follow the instructions in HEARTBEAT.md"`, cwd: null,
+      });
       await invoke("execute_command", {
         command: `openclaw config set agents.defaults.heartbeat.target "${editTarget}"`, cwd: null,
       });
@@ -1347,22 +1294,15 @@ function HeartbeatTab() {
           command: `openclaw config set agents.defaults.heartbeat.activeHours "${escaped}"`, cwd: null,
         });
       }
+      if (hbPath.current) {
+        await invoke("write_file", { path: hbPath.current, contents: instructions });
+      }
       setStatus(prev => ({
-        ...prev, every: `${editInterval}m`, prompt: editPrompt, target: editTarget,
+        ...prev, every: `${editInterval}m`, target: editTarget,
         activeHours: activeHoursOn ? { start: ahStart, end: ahEnd } : undefined,
       }));
-      setSaved("config"); setTimeout(() => setSaved(null), 2000);
-    } catch { /* ignore */ }
-    finally { setBusy(null); }
-  };
-
-  const saveChecklist = async () => {
-    if (!hbPath.current) return;
-    setBusy("checklist");
-    try {
-      await invoke("write_file", { path: hbPath.current, contents: checklist });
-      setChecklistDirty(false);
-      setSaved("checklist"); setTimeout(() => setSaved(null), 2000);
+      setInstructionsDirty(false);
+      setSaved("all"); setTimeout(() => setSaved(null), 2000);
     } catch { /* ignore */ }
     finally { setBusy(null); }
   };
@@ -1445,142 +1385,127 @@ function HeartbeatTab() {
         </button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-        {/* Left — Configuration */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div>
-            <label style={labelStyle}>Interval</label>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {HEARTBEAT_INTERVALS.map(({ label, minutes }) => {
-                const active = editInterval === minutes;
-                return (
-                  <button key={minutes} onClick={() => setEditInterval(minutes)}
-                    style={{
-                      padding: "6px 14px", borderRadius: 8, fontSize: 11, cursor: "pointer",
-                      border: active ? "1px solid #a855f7" : "1px solid var(--border)",
-                      background: active ? "rgba(168,85,247,0.15)" : "var(--bg-elevated)",
-                      color: active ? "#c084fc" : "var(--text-secondary)",
-                      fontWeight: active ? 600 : 400, transition: "all 0.12s ease",
-                    }}>
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <label style={labelStyle}>Heartbeat Prompt</label>
-            <textarea value={editPrompt} onChange={e => setEditPrompt(e.target.value)}
-              placeholder="Instructions for the agent during heartbeats..."
-              rows={3}
-              style={{ ...inputStyle, resize: "vertical", minHeight: 60, maxHeight: 160, fontFamily: "inherit" }} />
-          </div>
-
-          <div>
-            <label style={labelStyle}>Delivery Target</label>
-            <div style={{ display: "flex", gap: 6 }}>
-              {(["none", "last"] as const).map(t => (
-                <button key={t} onClick={() => setEditTarget(t)}
+      {/* Settings row */}
+      <div style={{ display: "flex", gap: 20, marginBottom: 20, flexWrap: "wrap" }}>
+        <div>
+          <label style={labelStyle}>Interval</label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {HEARTBEAT_INTERVALS.map(({ label, minutes }) => {
+              const active = editInterval === minutes;
+              return (
+                <button key={minutes} onClick={() => setEditInterval(minutes)}
                   style={{
                     padding: "6px 14px", borderRadius: 8, fontSize: 11, cursor: "pointer",
-                    border: editTarget === t ? "1px solid #a855f7" : "1px solid var(--border)",
-                    background: editTarget === t ? "rgba(168,85,247,0.15)" : "var(--bg-elevated)",
-                    color: editTarget === t ? "#c084fc" : "var(--text-secondary)",
-                    fontWeight: editTarget === t ? 600 : 400,
+                    border: active ? "1px solid #a855f7" : "1px solid var(--border)",
+                    background: active ? "rgba(168,85,247,0.15)" : "var(--bg-elevated)",
+                    color: active ? "#c084fc" : "var(--text-secondary)",
+                    fontWeight: active ? 600 : 400, transition: "all 0.12s ease",
                   }}>
-                  {t === "none" ? "None (silent)" : "Last conversation"}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, cursor: "pointer" }}
-              onClick={() => setActiveHoursOn(!activeHoursOn)}>
-              <input type="checkbox" checked={activeHoursOn}
-                onChange={e => setActiveHoursOn(e.target.checked)} style={{ margin: 0 }} />
-              <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 500 }}>Active Hours</span>
-            </div>
-            {activeHoursOn && (
-              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
-                <input type="time" value={ahStart} onChange={e => setAhStart(e.target.value)}
-                  style={{ ...inputStyle, width: 120 }} />
-                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>to</span>
-                <input type="time" value={ahEnd} onChange={e => setAhEnd(e.target.value)}
-                  style={{ ...inputStyle, width: 120 }} />
-              </div>
-            )}
-          </div>
-
-          <button onClick={saveConfig} disabled={busy === "config"}
-            style={{
-              padding: "8px 18px", borderRadius: 8, border: "none",
-              background: saved === "config" ? "rgba(74,222,128,0.15)" : "#a855f7",
-              color: saved === "config" ? "#4ade80" : "#fff",
-              fontSize: 11, fontWeight: 600, cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 6,
-              opacity: busy === "config" ? 0.6 : 1, alignSelf: "flex-start",
-            }}>
-            {busy === "config" ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />
-              : saved === "config" ? <CheckCircle2 style={{ width: 12, height: 12 }} />
-              : <Save style={{ width: 12, height: 12 }} />}
-            {saved === "config" ? "Saved" : "Save Config"}
-          </button>
-        </div>
-
-        {/* Right — HEARTBEAT.md */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <label style={{ ...labelStyle, marginBottom: 0 }}>HEARTBEAT.md Checklist</label>
-            {checklistDirty && <span style={{ fontSize: 9, color: "#fbbf24" }}>unsaved</span>}
-          </div>
-          <textarea value={checklist}
-            onChange={e => { setChecklist(e.target.value); setChecklistDirty(true); }}
-            placeholder={"# Heartbeat checklist\n\n- Check inbox for urgent messages\n- Review calendar for upcoming events"}
-            rows={10}
-            style={{
-              ...inputStyle, resize: "vertical", minHeight: 160, maxHeight: 400,
-              fontFamily: "'Cascadia Code', 'Fira Code', monospace", fontSize: 11, lineHeight: 1.6,
-            }} />
-          <button onClick={saveChecklist} disabled={busy === "checklist" || !checklistDirty}
-            style={{
-              padding: "8px 18px", borderRadius: 8, border: "none",
-              background: saved === "checklist" ? "rgba(74,222,128,0.15)" : "#a855f7",
-              color: saved === "checklist" ? "#4ade80" : "#fff",
-              fontSize: 11, fontWeight: 600, cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 6,
-              opacity: busy === "checklist" || !checklistDirty ? 0.6 : 1, alignSelf: "flex-start",
-            }}>
-            {busy === "checklist" ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />
-              : saved === "checklist" ? <CheckCircle2 style={{ width: 12, height: 12 }} />
-              : <Save style={{ width: 12, height: 12 }} />}
-            {saved === "checklist" ? "Saved" : "Save Checklist"}
-          </button>
-
-          <label style={labelStyle}>Checklist Presets</label>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {HEARTBEAT_PRESETS.map((preset, i) => {
-              const title = preset.split("\n")[0];
-              const itemCount = preset.split("\n").filter(l => l.startsWith("- ")).length;
-              return (
-                <button key={i} onClick={() => { setChecklist(preset); setChecklistDirty(true); }}
-                  style={{
-                    textAlign: "left", padding: "8px 12px", borderRadius: 8,
-                    border: "1px solid var(--border)", background: "var(--bg-elevated)",
-                    color: "var(--text-secondary)", fontSize: 10, cursor: "pointer",
-                    transition: "all 0.15s",
-                  }}>
-                  {title}
-                  <span style={{ display: "block", fontSize: 9, color: "var(--text-muted)", marginTop: 2 }}>
-                    {itemCount} item{itemCount !== 1 ? "s" : ""}
-                  </span>
+                  {label}
                 </button>
               );
             })}
           </div>
         </div>
+
+        <div>
+          <label style={labelStyle}>Delivery</label>
+          <div style={{ display: "flex", gap: 6 }}>
+            {(["none", "last"] as const).map(t => (
+              <button key={t} onClick={() => setEditTarget(t)}
+                style={{
+                  padding: "6px 14px", borderRadius: 8, fontSize: 11, cursor: "pointer",
+                  border: editTarget === t ? "1px solid #a855f7" : "1px solid var(--border)",
+                  background: editTarget === t ? "rgba(168,85,247,0.15)" : "var(--bg-elevated)",
+                  color: editTarget === t ? "#c084fc" : "var(--text-secondary)",
+                  fontWeight: editTarget === t ? 600 : 400,
+                }}>
+                {t === "none" ? "Silent" : "Last conversation"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, cursor: "pointer" }}
+            onClick={() => setActiveHoursOn(!activeHoursOn)}>
+            <input type="checkbox" checked={activeHoursOn}
+              onChange={e => setActiveHoursOn(e.target.checked)} style={{ margin: 0 }} />
+            <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 500 }}>Active Hours</span>
+          </div>
+          {activeHoursOn && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="time" value={ahStart} onChange={e => setAhStart(e.target.value)}
+                style={{ ...inputStyle, width: 110, padding: "5px 8px" }} />
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>to</span>
+              <input type="time" value={ahEnd} onChange={e => setAhEnd(e.target.value)}
+                style={{ ...inputStyle, width: 110, padding: "5px 8px" }} />
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Instructions — single source of truth: HEARTBEAT.md */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <div>
+            <label style={{ ...labelStyle, marginBottom: 0 }}>Heartbeat Instructions</label>
+            <p style={{ margin: "2px 0 0", fontSize: 10, color: "var(--text-muted)" }}>
+              Saved to <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "var(--accent)" }}>~/.openclaw/workspace/HEARTBEAT.md</span> — the agent reads this file each heartbeat cycle
+            </p>
+          </div>
+          {instructionsDirty && <span style={{ fontSize: 9, color: "#fbbf24", fontWeight: 500 }}>unsaved changes</span>}
+        </div>
+        <textarea value={instructions}
+          onChange={e => { setInstructions(e.target.value); setInstructionsDirty(true); }}
+          placeholder={"# Heartbeat checklist\n\n- Check inbox for urgent messages\n- Review calendar for events in next 2 hours\n- If a background task finished, summarize results\n- Check system health"}
+          rows={10}
+          style={{
+            ...inputStyle, resize: "vertical", minHeight: 180, maxHeight: 400,
+            fontFamily: "'Cascadia Code', 'Fira Code', monospace", fontSize: 11, lineHeight: 1.6,
+          }} />
+      </div>
+
+      {/* Presets */}
+      <div style={{ marginBottom: 20 }}>
+        <label style={labelStyle}>Quick Presets</label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {HEARTBEAT_PRESETS.map((preset, i) => {
+            const title = preset.split("\n")[0].replace(/^#\s*/, "");
+            const itemCount = preset.split("\n").filter(l => l.startsWith("- ")).length;
+            return (
+              <button key={i} onClick={() => { setInstructions(preset); setInstructionsDirty(true); }}
+                style={{
+                  textAlign: "left", padding: "8px 14px", borderRadius: 8,
+                  border: "1px solid var(--border)", background: "var(--bg-elevated)",
+                  color: "var(--text-secondary)", fontSize: 10, cursor: "pointer",
+                  transition: "all 0.15s", flex: "1 1 200px", minWidth: 180,
+                }}>
+                <span style={{ fontWeight: 500 }}>{title}</span>
+                <span style={{ display: "block", fontSize: 9, color: "var(--text-muted)", marginTop: 2 }}>
+                  {itemCount} item{itemCount !== 1 ? "s" : ""}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Save all */}
+      <button onClick={saveAll} disabled={busy === "save"}
+        style={{
+          padding: "10px 24px", borderRadius: 8, border: "none",
+          background: saved === "all" ? "rgba(74,222,128,0.15)" : "#a855f7",
+          color: saved === "all" ? "#4ade80" : "#fff",
+          fontSize: 12, fontWeight: 600, cursor: "pointer",
+          display: "flex", alignItems: "center", gap: 6,
+          opacity: busy === "save" ? 0.6 : 1,
+        }}>
+        {busy === "save" ? <Loader2 style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} />
+          : saved === "all" ? <CheckCircle2 style={{ width: 14, height: 14 }} />
+          : <Save style={{ width: 14, height: 14 }} />}
+        {saved === "all" ? "Saved!" : "Save Heartbeat Config"}
+      </button>
 
       {status.lastRun && (
         <div style={{

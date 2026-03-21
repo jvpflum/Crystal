@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Bot, Loader2, CheckCircle2, AlertCircle, Plus, Clock, Brain, Globe, Terminal, FileText, Shield, Cpu, Copy, ChevronDown, ChevronUp, MessageSquare, ArrowRight } from "lucide-react";
-import { escapeShellArg } from "@/lib/tools";
 import { useAppStore } from "@/stores/appStore";
 import { useDataStore } from "@/stores/dataStore";
+import { openclawClient } from "@/lib/openclaw";
 
 interface SubAgent {
   id: string;
@@ -108,12 +107,7 @@ export function OfficeView() {
       const ocAgent = agent?.openclawAgentId || "main";
       const roleHint = (ocAgent === "main" && agent) ? `You are ${agent.name}, a sub-agent specializing in ${agent.role}.` : "";
       const fullPrompt = `${roleHint} ${task.prompt}`.trim();
-      const escaped = escapeShellArg(fullPrompt);
-      const command = `openclaw agent --agent "${ocAgent}" --session-id ${task.sessionId} --message "${escaped}"`;
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command,
-        cwd: null,
-      });
+      const result = await openclawClient.dispatchToAgent(ocAgent, fullPrompt, { sessionId: task.sessionId });
 
       const output = result.stdout || result.stderr || "Task completed";
       const success = result.code === 0;

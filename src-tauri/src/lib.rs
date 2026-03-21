@@ -48,6 +48,7 @@ struct StreamingProcess {
     stdout_buf: Mutex<String>,
     stderr_buf: Mutex<String>,
     read_cursor: Mutex<usize>,
+    stderr_cursor: Mutex<usize>,
     done: Mutex<bool>,
     exit_code: Mutex<Option<i32>>,
     pid: u32,
@@ -296,6 +297,7 @@ fn start_streaming_command(state: tauri::State<AppState>, command: String, cwd: 
         stdout_buf: Mutex::new(String::new()),
         stderr_buf: Mutex::new(String::new()),
         read_cursor: Mutex::new(0),
+        stderr_cursor: Mutex::new(0),
         done: Mutex::new(false),
         exit_code: Mutex::new(None),
         pid,
@@ -352,6 +354,7 @@ fn poll_streaming_command(state: tauri::State<AppState>, id: String) -> Result<S
     let stdout_buf = proc.stdout_buf.lock().unwrap_or_else(|e| e.into_inner());
     let stderr_buf = proc.stderr_buf.lock().unwrap_or_else(|e| e.into_inner());
     let mut cursor = proc.read_cursor.lock().unwrap_or_else(|e| e.into_inner());
+    let mut stderr_cur = proc.stderr_cursor.lock().unwrap_or_else(|e| e.into_inner());
     let done = *proc.done.lock().unwrap_or_else(|e| e.into_inner());
     let exit_code = *proc.exit_code.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -363,7 +366,13 @@ fn poll_streaming_command(state: tauri::State<AppState>, id: String) -> Result<S
         String::new()
     };
 
-    let new_stderr = stderr_buf.clone();
+    let new_stderr = if *stderr_cur < stderr_buf.len() {
+        let chunk = stderr_buf[*stderr_cur..].to_string();
+        *stderr_cur = stderr_buf.len();
+        chunk
+    } else {
+        String::new()
+    };
 
     Ok(StreamingPollResult { new_output, new_stderr, done, exit_code })
 }

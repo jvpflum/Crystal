@@ -119,11 +119,13 @@ class AgentService {
     }
 
     let fullResponse = "";
+    let gotToolEvents = false;
     for await (const chunk of openclawClient.streamingChat(
       userMessage,
       sessionId,
       thinking,
       (toolEvent) => {
+        gotToolEvents = true;
         this.emitStep({
           action: {
             type: "tool_call",
@@ -141,11 +143,63 @@ class AgentService {
       yield chunk;
     }
 
+    if (!gotToolEvents && fullResponse.length > 50) {
+      this.extractToolsFromResponse(fullResponse);
+    }
+
     const cleaned = this.extractAndEmitActions(fullResponse);
     if (cleaned !== fullResponse) {
       yield "";
     }
     this.emitStep({ action: { type: "response", content: cleaned }, timestamp: new Date() });
+  }
+
+  private extractToolsFromResponse(text: string): void {
+    const lines = text.split("\n");
+    const seen = new Set<string>();
+
+    const emit = (tool: string, args: Record<string, string>) => {
+      const key = `${tool}:${JSON.stringify(args)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      this.emitStep({
+        action: { type: "tool_call", tool, args },
+        result: { success: true, output: "" },
+        timestamp: new Date(),
+      });
+    };
+
+    for (const line of lines) {
+      let m: RegExpMatchArray | null;
+
+      m = line.match(/(?:created|wrote|updated|modified|saved)\s+(?:file\s+)?[`'"]*([^\s`'",:]+\.\w{1,10})[`'"]*\b/i);
+      if (m) { emit("write_file", { path: m[1].split(/[/\\]/).pop() || m[1] }); continue; }
+
+      m = line.match(/(?:read|reading|examined|checked|looked at|reviewed)\s+(?:the\s+)?(?:file\s+|contents?\s+of\s+)?[`'"]*([^\s`'",:]+\.\w{1,10})[`'"]*\b/i);
+      if (m) { emit("read_file", { path: m[1].split(/[/\\]/).pop() || m[1] }); continue; }
+
+      m = line.match(/(?:ran|executed|running)\s+[`'"]+([^`'"]+)[`'"]+/i);
+      if (m) { emit("bash", { command: m[1].length > 60 ? m[1].slice(0, 60) + "..." : m[1] }); continue; }
+
+      m = line.match(/(?:installed|npm\s+install|pip\s+install|yarn\s+add)\s+[`'"]*(\S+)/i);
+      if (m) { emit("bash", { command: `install ${m[1]}` }); continue; }
+
+      m = line.match(/(?:searched|grepped|found)\s+(?:for\s+)?[`'"]+([^`'"]+)[`'"]+/i);
+      if (m) { emit("search", { query: m[1] }); continue; }
+
+      m = line.match(/(?:deleted|removed)\s+(?:file\s+)?[`'"]*([^\s`'",:]+\.\w{1,10})/i);
+      if (m) { emit("delete_file", { path: m[1].split(/[/\\]/).pop() || m[1] }); continue; }
+    }
+
+    const codeBlocks = text.match(/```(\w+)?\n[\s\S]*?```/g);
+    if (codeBlocks && codeBlocks.length > 0 && seen.size === 0) {
+      for (const block of codeBlocks.slice(0, 5)) {
+        const langMatch = block.match(/^```(\w+)/);
+        if (langMatch && langMatch[1] !== "crystal-actions") {
+          emit("code_block", { language: langMatch[1] });
+        }
+      }
+    }
   }
 
   async chat(userMessage: string, sessionId?: string, thinking?: string): Promise<string> {

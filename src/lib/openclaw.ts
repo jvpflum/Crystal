@@ -95,6 +95,8 @@ export interface OpenClawConfig {
   channels?: Record<string, unknown>;
   gateway?: Record<string, unknown>;
   memory?: Record<string, unknown>;
+  acp?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 const OPENCLAW_CMD = "openclaw";
@@ -335,9 +337,10 @@ class OpenClawClient {
     onToolEvent?: (event: ToolCallEvent) => void,
   ): AsyncGenerator<string> {
     this.logActivity({ type: "chat", payload: { text } });
+    this._seenToolKeys.clear();
 
     const escaped = text.replace(/"/g, '\\"').replace(/\n/g, ' ');
-    let cmd = `${OPENCLAW_CMD} agent --agent main`;
+    let cmd = `$env:NODE_NO_READLINE=1; $env:PYTHONUNBUFFERED=1; ${OPENCLAW_CMD} agent --agent main`;
     if (sessionId) cmd += ` --session-id ${sessionId}`;
     if (thinking) cmd += ` --thinking ${thinking}`;
     cmd += ` --message "${escaped}"`;
@@ -347,7 +350,7 @@ class OpenClawClient {
     const TIMEOUT = 180_000;
     const POLL_INTERVAL = 300;
     let fullOutput = "";
-    let lastParsedLen = 0;
+    let fullStderr = "";
 
     try {
       while (true) {
@@ -360,15 +363,17 @@ class OpenClawClient {
         if (poll.new_output) {
           fullOutput += poll.new_output;
           yield poll.new_output;
+        }
 
-          if (onToolEvent) {
-            const newChunk = fullOutput.slice(lastParsedLen);
-            const events = this.parseToolEvents(newChunk);
+        if (onToolEvent) {
+          const combined = (poll.new_output || "") + (poll.new_stderr || "");
+          if (combined) {
+            fullStderr += (poll.new_stderr || "");
+            const events = this.parseToolEvents(combined);
             for (const ev of events) {
               onToolEvent(ev);
               this.logActivity({ type: ev.status === "executing" ? "tool_call" : "tool_result", payload: { tool: ev.tool, args: ev.args } });
             }
-            lastParsedLen = fullOutput.length;
           }
         }
 
@@ -416,51 +421,115 @@ class OpenClawClient {
     await invoke("kill_streaming_command", { id: streamId }).catch(() => {});
   }
 
+  private _seenToolKeys = new Set<string>();
+
   private parseToolEvents(chunk: string): ToolCallEvent[] {
     const events: ToolCallEvent[] = [];
     const lines = chunk.split("\n");
+
+    const emit = (ev: ToolCallEvent) => {
+      const key = `${ev.tool}:${ev.status}:${JSON.stringify(ev.args)}`;
+      if (this._seenToolKeys.has(key)) return;
+      this._seenToolKeys.add(key);
+      if (this._seenToolKeys.size > 200) {
+        const arr = [...this._seenToolKeys];
+        this._seenToolKeys = new Set(arr.slice(-100));
+      }
+      events.push(ev);
+    };
+
     for (const line of lines) {
       const trimmed = line.replace(/\x1b\[[0-9;]*m/g, "").trim();
       if (!trimmed) continue;
 
-      // Match: ⚙ Tool: tool_name(...) or [tool_call] tool_name
-      let m = trimmed.match(/(?:⚙|🔧|Tool:|tool_call[:\]]\s*)(\w+)/i);
-      if (m) {
-        events.push({ tool: m[1], args: {}, status: "executing" });
+      let m: RegExpMatchArray | null;
+
+      // XML tool_use blocks: <tool_use><name>read_file</name>
+      m = trimmed.match(/<(?:tool_use|function_call|tool)\b[^>]*>.*?<name>(\w+)<\/name>/i);
+      if (m) { emit({ tool: m[1], args: {}, status: "executing" }); continue; }
+
+      // XML tool_result blocks
+      m = trimmed.match(/<(?:tool_result|function_result)\b/i);
+      if (m) continue;
+
+      // JSON tool calls: {"type":"tool_use","name":"read_file",...} or {"tool":"read_file",...}
+      if (trimmed.startsWith("{") && trimmed.includes('"')) {
+        try {
+          const j = JSON.parse(trimmed);
+          const toolName = j.name || j.tool || j.function?.name;
+          if (toolName) {
+            const args: Record<string, unknown> = j.input || j.arguments || j.args || j.parameters || {};
+            emit({ tool: toolName, args, status: "executing" });
+            continue;
+          }
+        } catch { /* not valid JSON */ }
+      }
+
+      // Emoji + tool name patterns (OpenClaw CLI)
+      m = trimmed.match(/(?:⚙️?|🔧|🛠️?)\s*(?:Using\s+tool:?\s*|Tool:?\s*)?(\w[\w_.-]+)/i);
+      if (m) { emit({ tool: m[1], args: {}, status: "executing" }); continue; }
+
+      // [tool_call] or [tool_use] prefix
+      m = trimmed.match(/\[(?:tool_call|tool_use|function_call|tool)\]\s*(\w[\w_.-]+)/i);
+      if (m) { emit({ tool: m[1], args: {}, status: "executing" }); continue; }
+
+      // "Using tool `name`" or "Calling tool: name" or "Tool call: name"
+      m = trimmed.match(/(?:Using|Calling|Invoking)\s+(?:tool\s*)?[:`'"]*\s*(\w[\w_.-]+)/i);
+      if (m && !m[1].match(/^(?:the|a|an|this|that|it|to)$/i)) {
+        emit({ tool: m[1], args: {}, status: "executing" });
         continue;
       }
-      // Match: ✓ tool_name completed / ✗ tool_name failed
-      m = trimmed.match(/(?:✓|✔|✅)\s*(\w+)/);
+
+      // "Tool call: name" or "tool: name(args)"
+      m = trimmed.match(/(?:Tool\s*call:?\s*|tool:\s*)(\w[\w_.-]+)\s*(?:\(|$)/i);
+      if (m) { emit({ tool: m[1], args: {}, status: "executing" }); continue; }
+
+      // Success markers: ✓ ✔ ✅ or [tool_result] or "completed" / "succeeded"
+      m = trimmed.match(/(?:✓|✔|✅)\s*(\w[\w_.-]*)/);
+      if (m) { emit({ tool: m[1], args: {}, status: "completed" }); continue; }
+      m = trimmed.match(/\[tool_result\]\s*(\w[\w_.-]+)\s*(?:completed|succeeded|done|ok)/i);
+      if (m) { emit({ tool: m[1], args: {}, status: "completed" }); continue; }
+
+      // Error markers: ✗ ✘ ❌ or "failed" / "error"
+      m = trimmed.match(/(?:✗|✘|❌)\s*(\w[\w_.-]*)/);
+      if (m) { emit({ tool: m[1], args: {}, status: "error" }); continue; }
+      m = trimmed.match(/\[(?:tool_result|error)\]\s*(\w[\w_.-]+)\s*(?:failed|error)/i);
+      if (m) { emit({ tool: m[1], args: {}, status: "error" }); continue; }
+
+      // Running commands: Running `cmd`, $ cmd, > cmd, executing: cmd
+      m = trimmed.match(/(?:Running|Executing|Exec)\s+[`'"]+([^`'"]+)[`'"]+/i);
+      if (m) { emit({ tool: "bash", args: { command: m[1] }, status: "executing" }); continue; }
+      m = trimmed.match(/^(?:\$|>)\s+(.{3,})$/);
+      if (m) { emit({ tool: "bash", args: { command: m[1] }, status: "executing" }); continue; }
+
+      // File operations: Writing/Wrote/Creating/Created + path with extension
+      m = trimmed.match(/(?:Writing\s+(?:to\s+)?|Wrote\s+|Creating\s+|Created\s+|Saving\s+(?:to\s+)?|Updating\s+)[`'"]*([^\s`'",:]+\.\w{1,10})/i);
       if (m) {
-        events.push({ tool: m[1], args: {}, status: "completed" });
+        const p = m[1];
+        emit({ tool: "write_file", args: { path: p, language: p.split(".").pop() || "" }, status: "executing" });
         continue;
       }
-      m = trimmed.match(/(?:✗|✘|❌)\s*(\w+)/);
+
+      // Reading files: Reading/Read + path with extension
+      m = trimmed.match(/(?:Reading|Read(?:ing)?)\s+(?:file\s+)?[`'"]*([^\s`'",:]+\.\w{1,10})/i);
       if (m) {
-        events.push({ tool: m[1], args: {}, status: "error" });
+        emit({ tool: "read_file", args: { path: m[1] }, status: "executing" });
         continue;
       }
-      // Match: Running `command...` or $ command
-      m = trimmed.match(/(?:Running\s+[`']([^`']+)[`']|\$\s+(.+))/);
-      if (m) {
-        events.push({ tool: "bash", args: { command: m[1] || m[2] }, status: "executing" });
-        continue;
-      }
-      // Match: Writing to /path or Created /path or Wrote /path
-      m = trimmed.match(/(?:Writing to|Created|Wrote|Saving)\s+[`'"]?([^\s`'"]+)/i);
-      if (m) {
-        const filePath = m[1];
-        const ext = filePath.split(".").pop() || "";
-        events.push({ tool: "write_file", args: { path: filePath, language: ext }, status: "executing" });
-        continue;
-      }
-      // Match: Reading /path or Read /path
-      m = trimmed.match(/(?:Reading|Read)\s+[`'"]?([^\s`'"]+)/i);
-      if (m) {
-        events.push({ tool: "read_file", args: { path: m[1] }, status: "executing" });
-        continue;
-      }
+
+      // Searching/Grepping: Searching for X in Y
+      m = trimmed.match(/(?:Searching|Grep(?:ping)?|Finding)\s+(?:for\s+)?['"`]?(.+?)['"`]?\s+(?:in|across)/i);
+      if (m) { emit({ tool: "search", args: { query: m[1] }, status: "executing" }); continue; }
+
+      // Installing: npm install, pip install, etc.
+      m = trimmed.match(/(?:Installing|npm\s+install|pip\s+install|yarn\s+add)\s+(.+)/i);
+      if (m) { emit({ tool: "bash", args: { command: trimmed }, status: "executing" }); continue; }
+
+      // File path patterns in brackets: [read_file path.ts] or [write_file path.ts]
+      m = trimmed.match(/\[(\w+_file)\s+([^\]]+)\]/i);
+      if (m) { emit({ tool: m[1], args: { path: m[2].trim() }, status: "executing" }); continue; }
     }
+
     return events;
   }
 
@@ -531,7 +600,7 @@ class OpenClawClient {
    *   ~/.openclaw/workspace/memory/YYYY-MM-DD.md — daily session logs
    */
 
-  private async getWorkspaceDir(): Promise<string> {
+  async getWorkspaceDir(): Promise<string> {
     const home = await this.getOpenClawDir();
     return `${home}\\workspace`;
   }
@@ -789,14 +858,19 @@ class OpenClawClient {
     return [];
   }
 
-  async dispatchToAgent(agentId: string, message: string, thinking?: string): Promise<{ stdout: string; stderr: string; code: number }> {
+  async dispatchToAgent(
+    agentId: string,
+    message: string,
+    opts?: { thinking?: string; sessionId?: string; cwd?: string },
+  ): Promise<{ stdout: string; stderr: string; code: number }> {
     const escaped = message.replace(/"/g, '\\"').replace(/\n/g, ' ');
     let cmd = `${OPENCLAW_CMD} agent --agent "${agentId}"`;
-    if (thinking) cmd += ` --thinking ${thinking}`;
+    if (opts?.thinking) cmd += ` --thinking ${opts.thinking}`;
+    if (opts?.sessionId) cmd += ` --session-id ${opts.sessionId}`;
     cmd += ` --message "${escaped}"`;
     return invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
       command: cmd,
-      cwd: null,
+      cwd: opts?.cwd ?? null,
     });
   }
 
@@ -854,6 +928,88 @@ class OpenClawClient {
       }
     } catch { /* ignore */ }
     return { channels: {}, channelMeta: [], channelAccounts: {} };
+  }
+
+  /* ── Skills ── */
+
+  async listSkills(): Promise<{ name: string; description?: string; eligible: boolean; version?: string; author?: string; enabled?: boolean }[]> {
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} skills list --json`, cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        const data = JSON.parse(result.stdout);
+        return Array.isArray(data) ? data : data.skills ?? [];
+      }
+    } catch { /* ignore */ }
+    return [];
+  }
+
+  async enableSkill(name: string): Promise<boolean> {
+    try {
+      const r = await invoke<{ code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} skills enable "${escapeShellArg(name)}"`, cwd: null,
+      });
+      return r.code === 0;
+    } catch { return false; }
+  }
+
+  async disableSkill(name: string): Promise<boolean> {
+    try {
+      const r = await invoke<{ code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} skills disable "${escapeShellArg(name)}"`, cwd: null,
+      });
+      return r.code === 0;
+    } catch { return false; }
+  }
+
+  /* ── Cron ── */
+
+  async listCronJobs(): Promise<{ id?: string; name: string; schedule: unknown; command?: string; enabled?: boolean }[]> {
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} cron list --json`, cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        const data = JSON.parse(result.stdout);
+        return Array.isArray(data) ? data : data.jobs ?? data.cron ?? [];
+      }
+    } catch { /* ignore */ }
+    return [];
+  }
+
+  async addCronJob(name: string, schedule: string, command: string): Promise<boolean> {
+    try {
+      const r = await invoke<{ code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} cron add --name "${escapeShellArg(name)}" --schedule "${escapeShellArg(schedule)}" --command "${escapeShellArg(command)}"`,
+        cwd: null,
+      });
+      return r.code === 0;
+    } catch { return false; }
+  }
+
+  async removeCronJob(name: string): Promise<boolean> {
+    try {
+      const r = await invoke<{ code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} cron remove --name "${escapeShellArg(name)}"`, cwd: null,
+      });
+      return r.code === 0;
+    } catch { return false; }
+  }
+
+  /* ── Sessions ── */
+
+  async listSessions(): Promise<{ key: string; sessionId: string; model: string; modelProvider: string; inputTokens: number; outputTokens: number; totalTokens: number; contextTokens: number; agentId: string; updatedAt: number; ageMs: number; kind: string }[]> {
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} sessions --json`, cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        const data = JSON.parse(result.stdout);
+        return data.sessions || [];
+      }
+    } catch { /* ignore */ }
+    return [];
   }
 
   /* ── Gateway lifecycle ── */
