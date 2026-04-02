@@ -30,11 +30,13 @@ import {
   ShieldCheck,
   Layers,
   History,
+  Map,
 } from "lucide-react";
 import { useAppStore, AppView } from "@/stores/appStore";
 
 const navItems: { id: AppView; icon: React.ElementType; label: string; group: "main" | "openclaw" | "system" }[] = [
   { id: "home",           icon: Home,            label: "Home",     group: "main" },
+  { id: "city",           icon: Map,             label: "City",     group: "main" },
   { id: "conversation",   icon: MessageSquare,   label: "Chat",     group: "main" },
   { id: "command-center", icon: LayoutDashboard,  label: "Center",   group: "main" },
   { id: "agents",         icon: Bot,             label: "Agents",   group: "openclaw" },

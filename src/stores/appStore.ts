@@ -30,7 +30,8 @@ export type AppView =
   | "webhooks"
   | "voicecall"
   | "tasks"
-  | "approvals";
+  | "approvals"
+  | "city";
 
 export type VoiceState =
   | "idle"

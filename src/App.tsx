@@ -45,6 +45,7 @@ const WebhooksView = lazy(() => import("@/components/views/WebhooksView").then(m
 const VoiceCallView = lazy(() => import("@/components/views/VoiceCallView").then(m => ({ default: m.VoiceCallView })));
 const TasksView = lazy(() => import("@/components/views/TasksView").then(m => ({ default: m.TasksView })));
 const ApprovalsView = lazy(() => import("@/components/views/ApprovalsView").then(m => ({ default: m.ApprovalsView })));
+const CityView = lazy(() => import("@/components/views/CityView").then(m => ({ default: m.CityView })));
 
 function ViewSlot({ id, active, children }: { id: string; active: boolean; children: React.ReactNode }) {
   const mountedRef = useRef(false);
@@ -176,6 +177,7 @@ function App() {
                   <ViewSlot id="voicecall" active={currentView === "voicecall"}><VoiceCallView /></ViewSlot>
                   <ViewSlot id="tasks" active={currentView === "tasks"}><TasksView /></ViewSlot>
                   <ViewSlot id="approvals" active={currentView === "approvals"}><ApprovalsView /></ViewSlot>
+                  <ViewSlot id="city" active={currentView === "city"}><CityView /></ViewSlot>
                 </Suspense>
               </ErrorBoundary>
             </main>
