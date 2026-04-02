@@ -1,20 +1,40 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Bot, Loader2, CheckCircle2, AlertCircle, Plus, Clock, Brain, Globe, Terminal, FileText, Shield, Cpu, Copy, ChevronDown, ChevronUp, MessageSquare, ArrowRight } from "lucide-react";
+import {
+  Bot, Loader2, CheckCircle2, AlertCircle, Plus, Clock,
+  Copy, ChevronDown, ChevronUp, MessageSquare, ArrowRight,
+  RefreshCw, Cpu, Activity, Zap,
+} from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
 import { useDataStore } from "@/stores/dataStore";
 import { openclawClient } from "@/lib/openclaw";
 
-interface SubAgent {
+interface OCAgent {
   id: string;
   name: string;
-  role: string;
-  icon: string;
-  status: "idle" | "working" | "done" | "error";
-  currentTask: string | null;
-  taskLog: TaskLogEntry[];
-  color: string;
-  progress: number;
-  openclawAgentId?: string;
+  emoji: string;
+  model: string;
+  isDefault: boolean;
+  workspace: string;
+}
+
+interface AgentSession {
+  sessionId: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  agentId: string;
+  updatedAt: number;
+  ageMs: number;
+  kind: string;
+}
+
+interface AgentTask {
+  id: string;
+  kind: string;
+  status: string;
+  label?: string;
+  agentId?: string;
 }
 
 interface TaskLogEntry {
@@ -36,118 +56,150 @@ interface OfficeTask {
   createdAt: number;
 }
 
-const PRESET_AGENTS: Omit<SubAgent, "currentTask" | "taskLog" | "status" | "progress">[] = [
-  { id: "researcher", name: "Scout", role: "Web Research", icon: "globe", color: "#60a5fa" },
-  { id: "coder", name: "Forge", role: "Code & Automation", icon: "terminal", color: "#a78bfa" },
-  { id: "analyst", name: "Lens", role: "Data Analysis", icon: "cpu", color: "#4ade80" },
-  { id: "writer", name: "Quill", role: "Writing & Docs", icon: "file", color: "#fbbf24" },
-  { id: "security", name: "Sentinel", role: "Security & Audit", icon: "shield", color: "#f87171" },
-  { id: "planner", name: "Atlas", role: "Planning & Strategy", icon: "brain", color: "#c084fc" },
-];
+const AGENT_COLORS: Record<string, string> = {
+  main: "#8b5cf6",
+  research: "#3b82f6",
+  home: "#10b981",
+  finance: "#f59e0b",
+};
 
-function getAgentIcon(icon: string) {
-  const s = { width: 18, height: 18 };
-  switch (icon) {
-    case "globe": return <Globe style={s} />;
-    case "terminal": return <Terminal style={s} />;
-    case "cpu": return <Cpu style={s} />;
-    case "file": return <FileText style={s} />;
-    case "shield": return <Shield style={s} />;
-    case "brain": return <Brain style={s} />;
-    default: return <Bot style={s} />;
-  }
+function agentColor(id: string): string {
+  return AGENT_COLORS[id] || "#6b7280";
+}
+
+function formatAge(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
 }
 
 export function OfficeView() {
-  const [agents, setAgents] = useState<SubAgent[]>(() =>
-    PRESET_AGENTS.map(a => ({ ...a, status: "idle" as const, currentTask: null, taskLog: [], progress: 0 }))
-  );
+  const [ocAgents, setOcAgents] = useState<OCAgent[]>([]);
+  const [sessions, setSessions] = useState<AgentSession[]>([]);
+  const [bgTasks, setBgTasks] = useState<AgentTask[]>([]);
+  const [loading, setLoading] = useState(true);
+
   const [tasks, setTasks] = useState<OfficeTask[]>([]);
+  const [taskLogs, setTaskLogs] = useState<Record<string, TaskLogEntry[]>>({});
+  const [dispatchingSet, setDispatchingSet] = useState<Set<string>>(new Set());
   const [newTaskPrompt, setNewTaskPrompt] = useState("");
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-  const [autoAssign, setAutoAssign] = useState(true);
+  const [selectedAgent, setSelectedAgent] = useState<string>("main");
   const runningRef = useRef<Set<string>>(new Set());
   const setView = useAppStore(s => s.setView);
-  const [realAgents, setRealAgents] = useState<string[]>([]);
 
   const getAgents = useDataStore(s => s.getAgents);
+  const getSessions = useDataStore(s => s.getSessions);
+  const getTasks = useDataStore(s => s.getTasks);
+
+  const loadData = useCallback(async (force = false) => {
+    try {
+      const [agentsData, sessionsData, tasksData] = await Promise.all([
+        getAgents(force),
+        getSessions(force),
+        getTasks(force),
+      ]);
+
+      if (Array.isArray(agentsData)) {
+        setOcAgents(agentsData.map((a: Record<string, unknown>) => ({
+          id: String(a.id || ""),
+          name: String(a.identityName || a.name || a.id || ""),
+          emoji: String(a.identityEmoji || ""),
+          model: String(a.model || ""),
+          isDefault: a.isDefault === true,
+          workspace: String(a.workspace || ""),
+        })));
+      }
+
+      if (Array.isArray(sessionsData)) {
+        setSessions(sessionsData.map((s: Record<string, unknown>) => ({
+          sessionId: String(s.sessionId || s.key || ""),
+          model: String(s.model || ""),
+          inputTokens: Number(s.inputTokens || 0),
+          outputTokens: Number(s.outputTokens || 0),
+          totalTokens: Number(s.totalTokens || 0),
+          agentId: String(s.agentId || "main"),
+          updatedAt: Number(s.updatedAt || 0),
+          ageMs: Number(s.ageMs || 0),
+          kind: String(s.kind || ""),
+        })));
+      }
+
+      if (Array.isArray(tasksData)) {
+        setBgTasks(tasksData.map((t: Record<string, unknown>) => ({
+          id: String(t.id || ""),
+          kind: String(t.kind || ""),
+          status: String(t.status || ""),
+          label: t.label ? String(t.label) : undefined,
+          agentId: t.agentId ? String(t.agentId) : undefined,
+        })));
+      }
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, [getAgents, getSessions, getTasks]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
   useEffect(() => {
-    (async () => {
-      try {
-        const data = await getAgents();
-        if (Array.isArray(data)) {
-          const ids = data.map((a: Record<string, unknown>) => String(a.id || "")).filter((id: string) => id && id !== "main");
-          setRealAgents(ids);
-        }
-      } catch { /* ignore */ }
-    })();
-  }, []);
+    const interval = setInterval(() => loadData(), 15_000);
+    return () => clearInterval(interval);
+  }, [loadData]);
 
   const dispatchTask = useCallback(async (task: OfficeTask, agentId: string) => {
     if (runningRef.current.has(task.id)) return;
     runningRef.current.add(task.id);
+    setDispatchingSet(prev => new Set(prev).add(agentId));
 
-    setAgents(prev => prev.map(a =>
-      a.id === agentId ? { ...a, status: "working", currentTask: task.prompt, progress: 0 } : a
-    ));
     setTasks(prev => prev.map(t =>
       t.id === task.id ? { ...t, status: "running", assignedTo: agentId } : t
     ));
 
     const logId = crypto.randomUUID();
-    setAgents(prev => prev.map(a =>
-      a.id === agentId ? {
-        ...a,
-        taskLog: [...a.taskLog.slice(-19), { id: logId, task: task.prompt, status: "running", startedAt: Date.now() }],
-      } : a
-    ));
+    setTaskLogs(prev => ({
+      ...prev,
+      [agentId]: [...(prev[agentId] || []).slice(-19), { id: logId, task: task.prompt, status: "running" as const, startedAt: Date.now() }],
+    }));
 
     try {
-      const agent = agents.find(a => a.id === agentId);
-      const ocAgent = agent?.openclawAgentId || "main";
-      const roleHint = (ocAgent === "main" && agent) ? `You are ${agent.name}, a sub-agent specializing in ${agent.role}.` : "";
-      const fullPrompt = `${roleHint} ${task.prompt}`.trim();
-      const result = await openclawClient.dispatchToAgent(ocAgent, fullPrompt, { sessionId: task.sessionId });
-
+      const result = await openclawClient.dispatchToAgent(agentId, task.prompt, { sessionId: task.sessionId });
       const output = result.stdout || result.stderr || "Task completed";
       const success = result.code === 0;
 
-      setAgents(prev => prev.map(a =>
-        a.id === agentId ? {
-          ...a,
-          status: "done",
-          currentTask: null,
-          progress: 100,
-          taskLog: a.taskLog.map(l => l.id === logId ? { ...l, status: success ? "completed" : "error", output, completedAt: Date.now() } : l),
-        } : a
-      ));
+      setTaskLogs(prev => ({
+        ...prev,
+        [agentId]: (prev[agentId] || []).map(l =>
+          l.id === logId ? { ...l, status: success ? "completed" as const : "error" as const, output, completedAt: Date.now() } : l
+        ),
+      }));
       setTasks(prev => prev.map(t =>
         t.id === task.id ? { ...t, status: success ? "completed" : "error", result: output } : t
       ));
-
-      setTimeout(() => {
-        setAgents(prev => prev.map(a =>
-          a.id === agentId && a.status === "done" ? { ...a, status: "idle", progress: 0 } : a
-        ));
-      }, 3000);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Unknown error";
-      setAgents(prev => prev.map(a =>
-        a.id === agentId ? {
-          ...a,
-          status: "error",
-          currentTask: null,
-          progress: 0,
-          taskLog: a.taskLog.map(l => l.id === logId ? { ...l, status: "error", output: errMsg, completedAt: Date.now() } : l),
-        } : a
-      ));
+      setTaskLogs(prev => ({
+        ...prev,
+        [agentId]: (prev[agentId] || []).map(l =>
+          l.id === logId ? { ...l, status: "error" as const, output: errMsg, completedAt: Date.now() } : l
+        ),
+      }));
       setTasks(prev => prev.map(t =>
         t.id === task.id ? { ...t, status: "error", result: errMsg } : t
       ));
     }
 
     runningRef.current.delete(task.id);
-  }, [agents]);
+    setDispatchingSet(prev => { const n = new Set(prev); n.delete(agentId); return n; });
+    loadData(true);
+  }, [loadData]);
 
   const addTask = useCallback(() => {
     if (!newTaskPrompt.trim()) return;
@@ -161,170 +213,150 @@ export function OfficeView() {
     };
     setTasks(prev => [...prev, task]);
     setNewTaskPrompt("");
+    dispatchTask(task, selectedAgent);
+  }, [newTaskPrompt, selectedAgent, dispatchTask]);
 
-    if (autoAssign) {
-      const idle = agents.find(a => a.status === "idle");
-      if (idle) dispatchTask(task, idle.id);
-    } else if (selectedAgent) {
-      const agent = agents.find(a => a.id === selectedAgent);
-      if (agent && agent.status === "idle") dispatchTask(task, selectedAgent);
-    }
-  }, [newTaskPrompt, autoAssign, selectedAgent, agents, dispatchTask]);
+  const sessionsForAgent = (agentId: string) =>
+    sessions.filter(s => s.agentId === agentId).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5);
 
-  const runTask = useCallback((taskId: string, agentId: string) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (task && task.status === "queued") dispatchTask(task, agentId);
-  }, [tasks, dispatchTask]);
+  const tasksForAgent = (agentId: string) =>
+    bgTasks.filter(t => t.agentId === agentId && t.status === "running");
 
-  useEffect(() => {
-    if (!autoAssign) return;
-    const queued = tasks.find(t => t.status === "queued" && !t.assignedTo);
-    if (!queued) return;
-    const idle = agents.find(a => a.status === "idle");
-    if (idle) dispatchTask(queued, idle.id);
-  }, [tasks, agents, autoAssign, dispatchTask]);
+  const totalSessions = sessions.length;
+  const runningTasks = bgTasks.filter(t => t.status === "running").length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-      {/* Header */}
       <div style={{ padding: "18px 24px 10px", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <h2 style={{ color: "var(--text)", fontSize: 16, fontWeight: 700, margin: 0 }}>
-              Office
+              Agent Office
             </h2>
             <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "2px 0 0" }}>
-              Sub-agents working on tasks in real-time
+              Live agent monitoring and task dispatch
             </p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-secondary)", cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={autoAssign}
-                onChange={e => setAutoAssign(e.target.checked)}
-                style={{ accentColor: "var(--accent)" }}
-              />
-              Auto-assign
-            </label>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
-                {agents.filter(a => a.status === "working").length} active
-              </span>
-              <span style={{ width: 4, height: 4, borderRadius: "50%", background: agents.some(a => a.status === "working") ? "var(--success)" : "var(--text-muted)" }} />
-            </div>
+            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+              {ocAgents.length} agents &middot; {totalSessions} sessions &middot; {runningTasks} running
+            </span>
+            <button onClick={() => loadData(true)} style={{
+              background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 4,
+            }}>
+              <RefreshCw style={{ width: 13, height: 13 }} />
+            </button>
           </div>
         </div>
       </div>
 
       <div style={{ flex: 1, overflow: "auto", padding: "0 24px 24px" }}>
-        {/* Agent Grid */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-          gap: 14,
-          marginBottom: 20,
-        }}>
-          {agents.map(agent => (
-            <AgentCard
-              key={agent.id}
-              agent={agent}
-              selected={selectedAgent === agent.id}
-              onSelect={() => setSelectedAgent(selectedAgent === agent.id ? null : agent.id)}
-              realAgents={realAgents}
-              onMapAgent={(ocId) => setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, openclawAgentId: ocId } : a))}
-            />
-          ))}
-        </div>
-
-        {/* Task Input */}
-        <div style={{
-          background: "var(--bg-elevated)",
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          padding: "14px 16px",
-          marginBottom: 16,
-        }}>
-          <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, color: "var(--text-muted)", marginBottom: 8 }}>
-            Dispatch Task
+        {loading && ocAgents.length === 0 ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
+            <Loader2 style={{ width: 20, height: 20, color: "var(--accent)", animation: "spin 1s linear infinite" }} />
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              value={newTaskPrompt}
-              onChange={e => setNewTaskPrompt(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && addTask()}
-              placeholder="Describe a task for a sub-agent..."
-              style={{
-                flex: 1,
-                background: "var(--bg-surface)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                padding: "8px 12px",
-                color: "var(--text)",
-                fontSize: 12,
-                outline: "none",
-              }}
-            />
-            {!autoAssign && (
-              <select
-                value={selectedAgent || ""}
-                onChange={e => setSelectedAgent(e.target.value || null)}
-                style={{
-                  background: "var(--bg-surface)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  padding: "8px 10px",
-                  color: "var(--text)",
-                  fontSize: 11,
-                  outline: "none",
-                }}
-              >
-                <option value="">Select agent...</option>
-                {agents.map(a => (
-                  <option key={a.id} value={a.id} disabled={a.status === "working"}>
-                    {a.name} ({a.role}) {a.status === "working" ? "— busy" : ""}
-                  </option>
-                ))}
-              </select>
+        ) : (
+          <>
+            {/* Agent cards */}
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: `repeat(${Math.min(ocAgents.length, 4)}, 1fr)`,
+              gap: 14,
+              marginBottom: 20,
+            }}>
+              {ocAgents.map(agent => {
+                const color = agentColor(agent.id);
+                const agentSessions = sessionsForAgent(agent.id);
+                const agentRunning = tasksForAgent(agent.id);
+                const localLogs = taskLogs[agent.id] || [];
+                const isDispatching = dispatchingSet.has(agent.id);
+
+                return (
+                  <LiveAgentCard
+                    key={agent.id}
+                    agent={agent}
+                    color={color}
+                    sessions={agentSessions}
+                    runningTasks={agentRunning}
+                    localLogs={localLogs}
+                    isDispatching={isDispatching}
+                  />
+                );
+              })}
+            </div>
+
+            {/* Dispatch task */}
+            <div style={{
+              background: "var(--bg-elevated)", border: "1px solid var(--border)",
+              borderRadius: 12, padding: "14px 16px", marginBottom: 16,
+            }}>
+              <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, color: "var(--text-muted)", marginBottom: 8 }}>
+                Dispatch Task
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  value={newTaskPrompt}
+                  onChange={e => setNewTaskPrompt(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && addTask()}
+                  placeholder="Describe a task for an agent..."
+                  style={{
+                    flex: 1, background: "var(--bg-surface)", border: "1px solid var(--border)",
+                    borderRadius: 8, padding: "8px 12px", color: "var(--text)", fontSize: 12, outline: "none",
+                  }}
+                />
+                <select
+                  value={selectedAgent}
+                  onChange={e => setSelectedAgent(e.target.value)}
+                  style={{
+                    background: "var(--bg-surface)", border: "1px solid var(--border)",
+                    borderRadius: 8, padding: "8px 10px", color: "var(--text)", fontSize: 11, outline: "none",
+                  }}
+                >
+                  {ocAgents.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.name || a.id} {a.isDefault ? "(default)" : ""}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={addTask}
+                  disabled={!newTaskPrompt.trim()}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "8px 16px", borderRadius: 8, border: "none",
+                    background: newTaskPrompt.trim() ? "var(--accent)" : "var(--bg-surface)",
+                    color: newTaskPrompt.trim() ? "#fff" : "var(--text-muted)",
+                    fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all 0.15s",
+                  }}
+                >
+                  <Plus style={{ width: 13, height: 13 }} />
+                  Dispatch
+                </button>
+              </div>
+            </div>
+
+            {/* Task Queue */}
+            {tasks.length > 0 && (
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, color: "var(--text-muted)", marginBottom: 8 }}>
+                  Task Queue ({tasks.length})
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {[...tasks].reverse().map(task => (
+                    <TaskRow key={task.id} task={task} agents={ocAgents} onSendToChat={(result, prompt, sessionId) => {
+                      const context = `A sub-agent completed the following task:\n\n**Task:** ${prompt}\n\n**Result:**\n${result}\n\nPlease review this result and execute any actionable items.`;
+                      setView("conversation");
+                      setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent("crystal:send-to-chat", {
+                          detail: { context, surface: "office", sessionId },
+                        }));
+                      }, 300);
+                    }} />
+                  ))}
+                </div>
+              </div>
             )}
-            <button
-              onClick={addTask}
-              disabled={!newTaskPrompt.trim()}
-              style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "8px 16px", borderRadius: 8, border: "none",
-                background: newTaskPrompt.trim() ? "var(--accent)" : "var(--bg-surface)",
-                color: newTaskPrompt.trim() ? "#fff" : "var(--text-muted)",
-                fontSize: 12, fontWeight: 600, cursor: "pointer",
-                transition: "all 0.15s",
-              }}
-            >
-              <Plus style={{ width: 13, height: 13 }} />
-              Dispatch
-            </button>
-          </div>
-        </div>
-
-        {/* Task Queue */}
-        {tasks.length > 0 && (
-          <div>
-            <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, color: "var(--text-muted)", marginBottom: 8 }}>
-              Task Queue ({tasks.length})
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {[...tasks].reverse().map(task => (
-                <TaskRow key={task.id} task={task} agents={agents} onRun={runTask} onSendToChat={(result, prompt, sessionId) => {
-                  const context = `A sub-agent completed the following task:\n\n**Task:** ${prompt}\n\n**Result:**\n${result}\n\nPlease review this result and execute any actionable items. Ask me to confirm before taking irreversible actions.`;
-                  setView("conversation");
-                  setTimeout(() => {
-                    window.dispatchEvent(new CustomEvent("crystal:send-to-chat", {
-                      detail: { context, surface: "office", sessionId },
-                    }));
-                  }, 300);
-                }} />
-              ))}
-            </div>
-          </div>
+          </>
         )}
       </div>
       <style>{`
@@ -336,132 +368,177 @@ export function OfficeView() {
   );
 }
 
-function AgentCard({ agent, selected, onSelect, realAgents, onMapAgent }: {
-  agent: SubAgent; selected: boolean; onSelect: () => void;
-  realAgents: string[]; onMapAgent: (openclawId: string | undefined) => void;
+function LiveAgentCard({ agent, color, sessions, runningTasks, localLogs, isDispatching }: {
+  agent: OCAgent; color: string; sessions: AgentSession[];
+  runningTasks: AgentTask[]; localLogs: TaskLogEntry[]; isDispatching: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const statusColor = agent.status === "working" ? agent.color
-    : agent.status === "done" ? "var(--success)"
-    : agent.status === "error" ? "var(--error)"
-    : "var(--text-muted)";
+  const [showSessions, setShowSessions] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
+  const isActive = isDispatching || runningTasks.length > 0;
+  const modelShort = agent.model.split("/").pop() || agent.model;
+
+  const totalTokens = sessions.reduce((sum, s) => sum + s.totalTokens, 0);
 
   return (
-    <div
-      onClick={onSelect}
-      style={{
-        background: "var(--bg-elevated)",
-        border: selected ? `1.5px solid ${agent.color}` : "1px solid var(--border)",
-        borderRadius: 14,
-        padding: 16,
-        cursor: "pointer",
-        transition: "all 0.2s",
-        position: "relative",
-        overflow: "hidden",
-      }}
-    >
-      {agent.status === "working" && (
+    <div style={{
+      background: "var(--bg-elevated)", border: `1px solid var(--border)`,
+      borderRadius: 14, padding: 16, position: "relative", overflow: "hidden",
+    }}>
+      {isActive && (
         <div style={{
           position: "absolute", top: 0, left: 0, right: 0, height: 3,
           background: "var(--border)", overflow: "hidden",
         }}>
           <div style={{
-            height: "100%", width: "40%",
-            background: agent.color,
-            borderRadius: 2,
+            height: "100%", width: "40%", background: color, borderRadius: 2,
             animation: "indeterminate-bar 1.5s ease-in-out infinite",
           }} />
         </div>
       )}
 
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
         <div style={{
-          width: 36, height: 36, borderRadius: 10,
+          width: 40, height: 40, borderRadius: 12,
           display: "flex", alignItems: "center", justifyContent: "center",
-          background: `${agent.color}18`,
-          color: agent.color,
-          border: `1px solid ${agent.color}30`,
+          background: `${color}18`, border: `1px solid ${color}30`,
+          fontSize: 20,
         }}>
-          {getAgentIcon(agent.icon)}
+          {agent.emoji || <Bot style={{ width: 20, height: 20, color }} />}
         </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
-            {agent.name}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
+            {agent.name || agent.id}
             <span style={{
-              width: 6, height: 6, borderRadius: "50%",
-              background: statusColor,
-              boxShadow: agent.status === "working" ? `0 0 8px ${agent.color}` : "none",
-              animation: agent.status === "working" ? "thinking-dot 1.4s ease-in-out infinite" : "none",
+              width: 7, height: 7, borderRadius: "50%",
+              background: isActive ? color : "var(--text-muted)",
+              boxShadow: isActive ? `0 0 8px ${color}` : "none",
+              animation: isActive ? "thinking-dot 1.4s ease-in-out infinite" : "none",
             }} />
           </div>
-          <div style={{ fontSize: 10, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
-            {agent.role}
-            {realAgents.length > 0 && (
-              <select
-                value={agent.openclawAgentId || ""}
-                onClick={e => e.stopPropagation()}
-                onChange={e => { e.stopPropagation(); onMapAgent(e.target.value || undefined); }}
-                style={{
-                  fontSize: 8, padding: "1px 4px", borderRadius: 4,
-                  background: agent.openclawAgentId ? "rgba(139,92,246,0.12)" : "var(--bg-input)",
-                  border: "1px solid var(--border)", color: agent.openclawAgentId ? "rgba(139,92,246,0.9)" : "var(--text-muted)",
-                  outline: "none", cursor: "pointer",
-                }}
-              >
-                <option value="" style={{ background: "var(--bg-base)" }}>main (default)</option>
-                {realAgents.map(id => (
-                  <option key={id} value={id} style={{ background: "var(--bg-base)" }}>{id}</option>
-                ))}
-              </select>
-            )}
+          <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
+            {agent.id}{agent.isDefault ? " (default)" : ""}
           </div>
         </div>
         <div style={{
-          fontSize: 9, padding: "2px 8px", borderRadius: 6,
-          fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5,
-          background: `${statusColor}15`,
-          color: statusColor,
+          fontSize: 9, padding: "2px 8px", borderRadius: 6, fontWeight: 600,
+          textTransform: "uppercase", letterSpacing: 0.5,
+          background: isActive ? `${color}15` : "rgba(255,255,255,0.04)",
+          color: isActive ? color : "var(--text-muted)",
         }}>
-          {agent.status}
+          {isActive ? "active" : "idle"}
         </div>
       </div>
 
-      {/* Current task */}
-      {agent.currentTask && (
-        <div style={{
-          fontSize: 11, color: "var(--text-secondary)",
-          padding: "8px 10px", borderRadius: 8,
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border)",
-          marginBottom: 8,
-          display: "flex", alignItems: "center", gap: 6,
+      {/* Model + stats */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+        <span style={{
+          fontSize: 9, padding: "2px 8px", borderRadius: 6,
+          background: "var(--bg-surface)", border: "1px solid var(--border)",
+          color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 4,
         }}>
-          <Loader2 style={{ width: 11, height: 11, color: agent.color, animation: "spin 1s linear infinite", flexShrink: 0 }} />
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {agent.currentTask}
+          <Cpu style={{ width: 9, height: 9 }} />
+          {modelShort}
+        </span>
+        <span style={{
+          fontSize: 9, padding: "2px 8px", borderRadius: 6,
+          background: "var(--bg-surface)", border: "1px solid var(--border)",
+          color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 4,
+        }}>
+          <Activity style={{ width: 9, height: 9 }} />
+          {sessions.length} sessions
+        </span>
+        {totalTokens > 0 && (
+          <span style={{
+            fontSize: 9, padding: "2px 8px", borderRadius: 6,
+            background: "var(--bg-surface)", border: "1px solid var(--border)",
+            color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 4,
+          }}>
+            <Zap style={{ width: 9, height: 9 }} />
+            {formatTokens(totalTokens)} tokens
           </span>
+        )}
+      </div>
+
+      {/* Running tasks */}
+      {runningTasks.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          {runningTasks.map(t => (
+            <div key={t.id} style={{
+              fontSize: 10, color: "var(--text-secondary)", padding: "6px 10px", borderRadius: 8,
+              background: "var(--bg-surface)", border: "1px solid var(--border)", marginBottom: 4,
+              display: "flex", alignItems: "center", gap: 6,
+            }}>
+              <Loader2 style={{ width: 10, height: 10, color, animation: "spin 1s linear infinite", flexShrink: 0 }} />
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {t.label || t.kind}
+              </span>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Task log */}
-      {agent.taskLog.length > 0 && (
+      {/* Dispatching indicator */}
+      {isDispatching && runningTasks.length === 0 && (
+        <div style={{
+          fontSize: 10, color: "var(--text-secondary)", padding: "6px 10px", borderRadius: 8,
+          background: "var(--bg-surface)", border: "1px solid var(--border)", marginBottom: 8,
+          display: "flex", alignItems: "center", gap: 6,
+        }}>
+          <Loader2 style={{ width: 10, height: 10, color, animation: "spin 1s linear infinite", flexShrink: 0 }} />
+          Processing dispatched task...
+        </div>
+      )}
+
+      {/* Recent sessions toggle */}
+      {sessions.length > 0 && (
         <div>
-          <button
-            onClick={e => { e.stopPropagation(); setExpanded(!expanded); }}
-            style={{
-              background: "none", border: "none", cursor: "pointer",
-              fontSize: 9, color: "var(--text-muted)", padding: "2px 0",
-              display: "flex", alignItems: "center", gap: 4,
-            }}
-          >
+          <button onClick={() => setShowSessions(!showSessions)} style={{
+            background: "none", border: "none", cursor: "pointer",
+            fontSize: 9, color: "var(--text-muted)", padding: "2px 0",
+            display: "flex", alignItems: "center", gap: 4, width: "100%",
+          }}>
             <Clock style={{ width: 9, height: 9 }} />
-            {agent.taskLog.length} task{agent.taskLog.length !== 1 ? "s" : ""} completed
+            Recent sessions ({sessions.length})
+            {showSessions ? <ChevronUp style={{ width: 9, height: 9, marginLeft: "auto" }} /> : <ChevronDown style={{ width: 9, height: 9, marginLeft: "auto" }} />}
           </button>
-          {expanded && (
+          {showSessions && (
             <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 3 }}>
-              {agent.taskLog.slice(-5).reverse().map(log => (
-                <TaskLogItem key={log.id} log={log} agentColor={agent.color} />
+              {sessions.map(s => (
+                <div key={s.sessionId} style={{
+                  fontSize: 9, padding: "4px 8px", borderRadius: 6,
+                  background: "var(--bg-surface)", color: "var(--text-muted)",
+                  display: "flex", alignItems: "center", gap: 8,
+                }}>
+                  <span style={{ color: "var(--text-secondary)", fontFamily: "monospace" }}>
+                    {s.sessionId.slice(0, 8)}
+                  </span>
+                  <span>{s.model.split("/").pop()}</span>
+                  <span>{formatTokens(s.totalTokens)} tok</span>
+                  <span style={{ marginLeft: "auto" }}>{formatAge(s.ageMs)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Local dispatch logs */}
+      {localLogs.length > 0 && (
+        <div style={{ marginTop: 6 }}>
+          <button onClick={() => setShowLogs(!showLogs)} style={{
+            background: "none", border: "none", cursor: "pointer",
+            fontSize: 9, color: "var(--text-muted)", padding: "2px 0",
+            display: "flex", alignItems: "center", gap: 4, width: "100%",
+          }}>
+            <Activity style={{ width: 9, height: 9 }} />
+            Dispatch history ({localLogs.length})
+            {showLogs ? <ChevronUp style={{ width: 9, height: 9, marginLeft: "auto" }} /> : <ChevronDown style={{ width: 9, height: 9, marginLeft: "auto" }} />}
+          </button>
+          {showLogs && (
+            <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 3 }}>
+              {localLogs.slice(-5).reverse().map(log => (
+                <TaskLogItem key={log.id} log={log} agentColor={color} />
               ))}
             </div>
           )}
@@ -476,8 +553,7 @@ function TaskLogItem({ log, agentColor }: { log: TaskLogEntry; agentColor: strin
   return (
     <div style={{
       fontSize: 10, padding: "4px 8px", borderRadius: 6,
-      background: "var(--bg-surface)",
-      color: "var(--text-muted)",
+      background: "var(--bg-surface)", color: "var(--text-muted)",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         {log.status === "completed"
@@ -516,20 +592,19 @@ function TaskLogItem({ log, agentColor }: { log: TaskLogEntry; agentColor: strin
   );
 }
 
-function TaskRow({ task, agents, onRun, onSendToChat }: {
+function TaskRow({ task, agents, onSendToChat }: {
   task: OfficeTask;
-  agents: SubAgent[];
-  onRun: (taskId: string, agentId: string) => void;
+  agents: OCAgent[];
   onSendToChat?: (result: string, prompt: string, sessionId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const assigned = task.assignedTo ? agents.find(a => a.id === task.assignedTo) : null;
+  const assignedColor = assigned ? agentColor(assigned.id) : "var(--text-muted)";
 
   return (
     <div style={{
       padding: "8px 14px", borderRadius: 10,
-      background: "var(--bg-elevated)",
-      border: "1px solid var(--border)",
+      background: "var(--bg-elevated)", border: "1px solid var(--border)",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {task.status === "queued" && <Clock style={{ width: 13, height: 13, color: "var(--text-muted)", flexShrink: 0 }} />}
@@ -543,7 +618,7 @@ function TaskRow({ task, agents, onRun, onSendToChat }: {
           </div>
           {task.result && !expanded && (
             <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {task.result.slice(0, 200)}...
+              {task.result.slice(0, 200)}
             </div>
           )}
         </div>
@@ -551,10 +626,10 @@ function TaskRow({ task, agents, onRun, onSendToChat }: {
         {assigned && (
           <span style={{
             fontSize: 9, padding: "2px 8px", borderRadius: 6,
-            background: `${assigned.color}15`, color: assigned.color,
+            background: `${assignedColor}15`, color: assignedColor,
             fontWeight: 600, flexShrink: 0,
           }}>
-            {assigned.name}
+            {assigned.name || assigned.id}
           </span>
         )}
 
@@ -575,11 +650,8 @@ function TaskRow({ task, agents, onRun, onSendToChat }: {
               display: "flex", alignItems: "center", gap: 4,
               padding: "3px 8px", borderRadius: 6, border: "none",
               background: "rgba(59,130,246,0.1)", color: "var(--accent)",
-              fontSize: 9, fontWeight: 600, cursor: "pointer",
-              transition: "all 0.15s", flexShrink: 0,
+              fontSize: 9, fontWeight: 600, cursor: "pointer", transition: "all 0.15s", flexShrink: 0,
             }}
-            onMouseEnter={e => e.currentTarget.style.background = "rgba(59,130,246,0.2)"}
-            onMouseLeave={e => e.currentTarget.style.background = "rgba(59,130,246,0.1)"}
           >
             <ArrowRight style={{ width: 10, height: 10 }} />
             Chat
@@ -587,27 +659,11 @@ function TaskRow({ task, agents, onRun, onSendToChat }: {
         )}
 
         {task.result && (
-          <button onClick={() => setExpanded(!expanded)}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: "2px", display: "flex", alignItems: "center" }}>
+          <button onClick={() => setExpanded(!expanded)} style={{
+            background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: "2px", display: "flex", alignItems: "center",
+          }}>
             {expanded ? <ChevronUp style={{ width: 13, height: 13 }} /> : <ChevronDown style={{ width: 13, height: 13 }} />}
           </button>
-        )}
-
-        {task.status === "queued" && (
-          <select
-            onChange={e => { if (e.target.value) onRun(task.id, e.target.value); e.target.value = ""; }}
-            defaultValue=""
-            style={{
-              background: "var(--bg-surface)", border: "1px solid var(--border)",
-              borderRadius: 6, padding: "3px 6px", fontSize: 10,
-              color: "var(--text-secondary)", cursor: "pointer", outline: "none",
-            }}
-          >
-            <option value="" disabled>Assign...</option>
-            {agents.filter(a => a.status === "idle").map(a => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </select>
         )}
       </div>
 
@@ -632,8 +688,7 @@ function TaskRow({ task, agents, onRun, onSendToChat }: {
             padding: "8px 10px", borderRadius: 6,
             background: "var(--bg-surface)", border: "1px solid var(--border)",
             fontSize: 11, fontFamily: "monospace", color: "var(--text-secondary)",
-            whiteSpace: "pre-wrap", wordBreak: "break-word",
-            maxHeight: 300, overflowY: "auto",
+            whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 300, overflowY: "auto",
           }}>
             {task.result}
           </div>

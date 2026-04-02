@@ -1,0 +1,215 @@
+import { useState, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  ShieldCheck, RefreshCw, Loader2, AlertTriangle, Plus, Trash2,
+  CheckCircle2, XCircle, Shield,
+} from "lucide-react";
+
+interface ApprovalEntry {
+  command: string;
+  agent?: string;
+  approvedAt?: string;
+  scope?: string;
+}
+
+interface AllowlistEntry {
+  pattern: string;
+  agent: string;
+  scope?: string;
+}
+
+export function ApprovalsView() {
+  const [approvals, setApprovals] = useState<ApprovalEntry[]>([]);
+  const [allowlist, setAllowlist] = useState<AllowlistEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<"pending" | "allowlist">("pending");
+  const [newPattern, setNewPattern] = useState("");
+  const [newAgent, setNewAgent] = useState("main");
+  const [adding, setAdding] = useState(false);
+
+  const loadApprovals = useCallback(async () => {
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: "openclaw approvals get --json", cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim()) {
+        const data = JSON.parse(result.stdout);
+        const pending = data.pending ?? data.approvals ?? [];
+        setApprovals(pending.map((a: Record<string, unknown>) => ({
+          command: String(a.command ?? a.cmd ?? ""),
+          agent: a.agent ? String(a.agent) : a.agentId ? String(a.agentId) : undefined,
+          approvedAt: a.approvedAt ? String(a.approvedAt) : undefined,
+          scope: a.scope ? String(a.scope) : undefined,
+        })));
+        const allow = data.allowlist ?? data.allowed ?? [];
+        setAllowlist(allow.map((a: Record<string, unknown>) => ({
+          pattern: String(a.pattern ?? a.command ?? ""),
+          agent: String(a.agent ?? a.agentId ?? "main"),
+          scope: a.scope ? String(a.scope) : undefined,
+        })));
+        setError(null);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load approvals");
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadApprovals();
+    const interval = setInterval(loadApprovals, 30_000);
+    return () => clearInterval(interval);
+  }, [loadApprovals]);
+
+  const addToAllowlist = async () => {
+    if (!newPattern.trim()) return;
+    setAdding(true);
+    try {
+      await invoke("execute_command", {
+        command: `openclaw approvals allowlist --add "${newPattern.replace(/"/g, '\\"')}" --agent ${newAgent}`,
+        cwd: null,
+      });
+      setNewPattern("");
+      await loadApprovals();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to add to allowlist");
+    }
+    setAdding(false);
+  };
+
+  const removeFromAllowlist = async (pattern: string, agent: string) => {
+    try {
+      await invoke("execute_command", {
+        command: `openclaw approvals allowlist --remove "${pattern.replace(/"/g, '\\"')}" --agent ${agent}`,
+        cwd: null,
+      });
+      await loadApprovals();
+    } catch { /* ignore */ }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      <div style={{ padding: "14px 20px 10px", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <ShieldCheck style={{ width: 18, height: 18, color: "var(--accent)" }} />
+            <h2 style={{ color: "var(--text)", fontSize: 15, fontWeight: 600, margin: 0 }}>Exec Approvals</h2>
+          </div>
+          <button onClick={() => { setLoading(true); loadApprovals(); }} disabled={loading}
+            style={{ display: "flex", alignItems: "center", padding: "4px 8px", borderRadius: 6, border: "none", background: "var(--bg-hover)", color: "var(--text-muted)", cursor: "pointer" }}>
+            <RefreshCw style={{ width: 12, height: 12, ...(loading ? { animation: "spin 1s linear infinite" } : {}) }} />
+          </button>
+        </div>
+
+        <div style={{ display: "flex", gap: 2, borderBottom: "1px solid var(--border)" }}>
+          {(["pending", "allowlist"] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)} style={{
+              padding: "8px 16px", border: "none", cursor: "pointer", fontSize: 12,
+              borderBottom: tab === t ? "2px solid var(--accent)" : "2px solid transparent",
+              background: tab === t ? "var(--bg-elevated)" : "transparent",
+              color: tab === t ? "var(--accent)" : "var(--text-muted)",
+              fontWeight: tab === t ? 600 : 500, borderRadius: "8px 8px 0 0",
+            }}>
+              {t === "pending" ? `Pending (${approvals.length})` : `Allowlist (${allowlist.length})`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px 20px" }}>
+        {error && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)", marginBottom: 12 }}>
+            <AlertTriangle style={{ width: 14, height: 14, color: "#f87171" }} />
+            <span style={{ fontSize: 11, color: "#f87171", flex: 1 }}>{error}</span>
+          </div>
+        )}
+
+        {loading ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
+            <Loader2 style={{ width: 20, height: 20, color: "var(--text-muted)", animation: "spin 1s linear infinite" }} />
+          </div>
+        ) : tab === "pending" ? (
+          approvals.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "40px 20px" }}>
+              <CheckCircle2 style={{ width: 32, height: 32, color: "#4ade80", margin: "0 auto 10px" }} />
+              <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>No pending approvals</p>
+              <p style={{ fontSize: 10, color: "var(--text-muted)", margin: "4px 0 0" }}>
+                Exec approvals appear when agents request to run commands that need authorization
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {approvals.map((a, i) => (
+                <div key={i} style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg-elevated)", border: "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Shield style={{ width: 14, height: 14, color: "#fbbf24", flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <code style={{ fontSize: 11, color: "var(--text)", fontFamily: "monospace", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {a.command}
+                      </code>
+                      <div style={{ display: "flex", gap: 8, fontSize: 9, color: "var(--text-muted)", marginTop: 2 }}>
+                        {a.agent && <span>Agent: {a.agent}</span>}
+                        {a.scope && <span>Scope: {a.scope}</span>}
+                        {a.approvedAt && <span>{a.approvedAt}</span>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : (
+          <>
+            <div style={{ marginBottom: 16, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
+              <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 6 }}>Add Allowlist Pattern</span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input value={newPattern} onChange={e => setNewPattern(e.target.value)}
+                  placeholder="e.g. npm install *" onKeyDown={e => { if (e.key === "Enter") addToAllowlist(); }}
+                  style={{ flex: 1, padding: "6px 10px", borderRadius: 6, background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 12, fontFamily: "monospace", outline: "none" }} />
+                <select value={newAgent} onChange={e => setNewAgent(e.target.value)}
+                  style={{ padding: "6px 8px", borderRadius: 6, background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 11, outline: "none" }}>
+                  <option value="main">main</option>
+                  <option value="research">research</option>
+                  <option value="home">home</option>
+                  <option value="finance">finance</option>
+                  <option value="*">all agents</option>
+                </select>
+                <button onClick={addToAllowlist} disabled={adding || !newPattern.trim()}
+                  style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "var(--accent)", color: "#fff", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, opacity: adding || !newPattern.trim() ? 0.5 : 1 }}>
+                  {adding ? <Loader2 style={{ width: 11, height: 11, animation: "spin 1s linear infinite" }} /> : <Plus style={{ width: 11, height: 11 }} />}
+                  Add
+                </button>
+              </div>
+            </div>
+
+            {allowlist.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "30px 20px" }}>
+                <XCircle style={{ width: 28, height: 28, color: "var(--text-muted)", margin: "0 auto 8px" }} />
+                <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>No allowlist patterns</p>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {allowlist.map((a, i) => (
+                  <div key={i} style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg-elevated)", border: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
+                    <CheckCircle2 style={{ width: 14, height: 14, color: "#4ade80", flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <code style={{ fontSize: 11, color: "var(--text)", fontFamily: "monospace" }}>{a.pattern}</code>
+                      <span style={{ fontSize: 9, color: "var(--text-muted)", marginLeft: 8 }}>agent: {a.agent}</span>
+                    </div>
+                    <button onClick={() => removeFromAllowlist(a.pattern, a.agent)}
+                      style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(248,113,113,0.15)", background: "rgba(248,113,113,0.06)", color: "#f87171", cursor: "pointer", display: "flex", alignItems: "center" }}>
+                      <Trash2 style={{ width: 11, height: 11 }} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}

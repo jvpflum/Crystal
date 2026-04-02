@@ -695,6 +695,9 @@ export function ChannelsView() {
               </div>
             </div>
 
+            {/* Channel Logs */}
+            <ChannelLogs channelName={selected.name} />
+
             {/* Docs link */}
             <div>
               <SectionTitle text="Documentation" />
@@ -779,6 +782,65 @@ function ActionBtn({ onClick, loading, icon, label, color }: { onClick: () => vo
       {loading ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : icon}
       {label}
     </button>
+  );
+}
+
+function ChannelLogs({ channelName }: { channelName: string }) {
+  const [logs, setLogs] = useState<string[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const fetchLogs = async () => {
+    setLoadingLogs(true);
+    try {
+      const raw = await runCli(`openclaw channels logs --channel ${channelName} --limit 50`);
+      const lines = raw.split("\n").filter((l: string) => l.trim());
+      setLogs(lines);
+    } catch {
+      setLogs(["Failed to fetch logs"]);
+    }
+    setLoadingLogs(false);
+  };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <SectionTitle text="Channel Logs" style={{ margin: 0 }} />
+        <div style={{ display: "flex", gap: 4 }}>
+          <button onClick={fetchLogs} disabled={loadingLogs}
+            style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-elevated)", color: "var(--text-muted)", fontSize: 10, cursor: "pointer" }}>
+            {loadingLogs ? <Loader2 style={{ width: 10, height: 10, animation: "spin 1s linear infinite" }} /> : <RefreshCw style={{ width: 10, height: 10 }} />}
+            {logs.length === 0 ? "Load Logs" : "Refresh"}
+          </button>
+          {logs.length > 0 && (
+            <button onClick={() => setExpanded(!expanded)}
+              style={{ padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-elevated)", color: "var(--text-muted)", fontSize: 10, cursor: "pointer" }}>
+              {expanded ? "Collapse" : "Expand"}
+            </button>
+          )}
+        </div>
+      </div>
+      {logs.length > 0 && (
+        <div style={{
+          ...cardStyle,
+          maxHeight: expanded ? 400 : 150, overflowY: "auto",
+          padding: "8px 10px", fontFamily: "monospace", fontSize: 10,
+        }}>
+          {logs.map((line, i) => {
+            const isError = line.toLowerCase().includes("error") || line.toLowerCase().includes("fail");
+            const isWarn = line.toLowerCase().includes("warn");
+            return (
+              <div key={i} style={{
+                padding: "1px 0", color: isError ? "#f87171" : isWarn ? "#fbbf24" : "var(--text-secondary)",
+                whiteSpace: "pre-wrap", wordBreak: "break-all",
+              }}>
+                {line}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 

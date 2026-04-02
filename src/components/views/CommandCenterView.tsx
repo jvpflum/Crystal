@@ -26,6 +26,8 @@ interface CronJob {
   scheduleKind?: "cron" | "every" | "at" | "unknown";
   everyMs?: number;
   atIso?: string;
+  deliveryChannel?: string;
+  deliveryTarget?: string;
 }
 
 type WorkflowDef = WorkflowDefinition;
@@ -83,13 +85,29 @@ function parseCronJob(raw: Record<string, unknown>): CronJob {
   const message = payload?.message ? String(payload.message) : String(raw.message || "");
   const state = raw.state as Record<string, unknown> | undefined;
   const nextRunMs = state?.nextRunAtMs ? Number(state.nextRunAtMs) : undefined;
+  const delivery = raw.delivery as Record<string, unknown> | undefined;
   return {
     id: String(raw.id || ""), name: raw.name ? String(raw.name) : undefined,
     schedule: scheduleStr, message, agent: String(raw.agentId || raw.agent || "main"),
     enabled: raw.enabled !== false,
     nextRun: nextRunMs ? new Date(nextRunMs).toLocaleString() : undefined,
     scheduleKind, everyMs, atIso,
+    deliveryChannel: delivery?.channel ? String(delivery.channel) : undefined,
+    deliveryTarget: delivery?.to ? String(delivery.to) : delivery?.threadId ? `thread:${delivery.threadId}` : undefined,
   };
+}
+
+const THREAD_NAMES: Record<number, string> = {
+  16: "Finance", 17: "Home", 38: "System", 89: "Neighborhood", 1195: "Factory",
+};
+
+function deliveryLabel(target: string): string {
+  const m = target.match(/^thread:(\d+)$/);
+  if (m) {
+    const id = Number(m[1]);
+    return THREAD_NAMES[id] ? `${THREAD_NAMES[id]} (#${id})` : target;
+  }
+  return target;
 }
 
 function cronToReadable(expr: string): string {
@@ -384,9 +402,10 @@ function CalendarTab() {
                           border: isHeartbeat ? "1px solid rgba(168,85,247,0.25)" : "1px solid rgba(59,130,246,0.2)",
                           fontWeight: 500,
                           display: "flex", alignItems: "center", gap: 3,
-                        }} title={j.name || j.message}>
+                        }} title={`${j.name || j.message}${j.deliveryTarget ? ` → ${deliveryLabel(j.deliveryTarget)}` : ""}`}>
                           {isHeartbeat && <span style={{ fontSize: 7 }}>💜</span>}
                           {j.name || j.message.slice(0, 30)}
+                          {j.deliveryTarget && <span style={{ fontSize: 7, opacity: 0.7 }}>→{deliveryLabel(j.deliveryTarget).split(" ")[0]}</span>}
                         </div>
                       );
                     })}
@@ -421,7 +440,14 @@ function CalendarTab() {
                   <p style={{ margin: "6px 0 0", fontSize: 10, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {j.message}
                   </p>
-                  {j.nextRun && <p style={{ margin: "2px 0 0", fontSize: 9, color: "var(--text-muted)" }}>Next: {j.nextRun}</p>}
+                  <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                    {j.nextRun && <span style={{ fontSize: 9, color: "var(--text-muted)" }}>Next: {j.nextRun}</span>}
+                    {j.deliveryChannel && (
+                      <span style={{ fontSize: 9, padding: "0 4px", borderRadius: 4, background: "rgba(59,130,246,0.1)", color: "var(--accent)" }}>
+                        → {j.deliveryChannel}{j.deliveryTarget ? ` · ${deliveryLabel(j.deliveryTarget)}` : ""}
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -1037,7 +1063,14 @@ function ScheduledTab() {
                         <span style={{ fontSize: 9, color: "var(--text-muted)" }}>{cronToReadable(job.schedule)}</span>
                       </div>
                       <p style={{ margin: 0, fontSize: 11, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.message}</p>
-                      {job.nextRun && <p style={{ margin: "2px 0 0", fontSize: 9, color: "var(--text-muted)" }}>Next: {job.nextRun}</p>}
+                      <div style={{ display: "flex", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
+                        {job.nextRun && <span style={{ fontSize: 9, color: "var(--text-muted)" }}>Next: {job.nextRun}</span>}
+                        {job.deliveryChannel && (
+                          <span style={{ fontSize: 9, padding: "0 4px", borderRadius: 4, background: "rgba(59,130,246,0.1)", color: "var(--accent)" }}>
+                            → {job.deliveryChannel}{job.deliveryTarget ? ` · ${deliveryLabel(job.deliveryTarget)}` : ""}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                       {isHb ? (

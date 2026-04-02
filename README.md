@@ -6,11 +6,11 @@
 
 <p align="center">
   <strong>The most complete desktop frontend for <a href="https://github.com/nichochar/open-claw">OpenClaw</a>.</strong><br/>
-  A native AI assistant with 28 views, 60+ slash commands, NVIDIA-accelerated voice, multi-provider LLM support, and a full agent workspace — all in a single desktop app.
+  A native AI command center with 30 views, AI-powered search, 60+ slash commands, NVIDIA-accelerated voice, multi-provider LLM support, and a full agent workspace — all in a single desktop app.
 </p>
 
 <p align="center">
-  <a href="#-features"><img src="https://img.shields.io/badge/28-Views-6366f1?style=flat-square" /></a>
+  <a href="#-features"><img src="https://img.shields.io/badge/30-Views-6366f1?style=flat-square" /></a>
   <a href="#-ai-chat"><img src="https://img.shields.io/badge/60+-Slash%20Commands-3b82f6?style=flat-square" /></a>
   <a href="#-voice-engine"><img src="https://img.shields.io/badge/6-Voice%20Providers-10b981?style=flat-square" /></a>
   <a href="#-multi-provider-llm"><img src="https://img.shields.io/badge/7-LLM%20Providers-f59e0b?style=flat-square" /></a>
@@ -28,19 +28,30 @@
 
 ## What's New
 
-### March 2026
+### April 2026 — v0.5.0 Full OpenClaw Alignment
 
-- **Multi-Provider LLM Support** — Crystal is no longer local-only. Connect to Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, or Mistral. Manage API keys from Settings and switch providers on the fly.
-- **NVIDIA RTX Voice Engine** — GPU-accelerated speech with Nemotron/Parakeet STT (port 8090) and Magpie TTS (port 8091), with automatic fallback to Whisper and Kokoro.
-- **Software Factory** — Launch and manage Claude Code and Cortex coding agents. Create projects, run objectives, stream live logs, and cancel runs — all from a dedicated view.
-- **ClawHub** — A built-in skill registry. Search, install, update, publish, and sync OpenClaw skills directly from the Marketplace.
-- **Agent Workspace** — Edit 9 agent identity files (AGENTS.md, SOUL.md, IDENTITY.md, USER.md, TOOLS.md, MEMORY.md, BOOT.md, BOOTSTRAP.md, HEARTBEAT.md) with presets and standing orders.
-- **28 Views** — Added Workspace, Messaging, Directory, Sub-Agents (with integrated ACP), Devices, Webhooks, Voice Calls, and more.
-- **60+ Slash Commands** — Full command coverage: navigation, model switching, thinking levels, session export, debug tools, sub-agent management, approval workflows, and more.
-- **Image Generation** — Ask Crystal to generate images via the `openai-image-gen` skill (DALL·E).
-- **Voice Calls** — Notify/converse voice call modes with expose (serve/funnel/off) and call history.
+- **Live Agent Office** — OfficeView rebuilt with real-time agent monitoring. Shows all OpenClaw agents (main/JC, research, home, finance) with live sessions, running tasks, token counts, and dispatch functionality — no more fake preset agents.
+- **Skill Launcher Factory** — FactoryView rebuilt with a searchable Skills tab showing all 18+ workspace skills (bill-sweep, bounty-hunter, car-broker, etc.) with eligibility status, missing dependency details, and one-click launch. Projects tab preserved for autonomous code builds with any agent ID.
+- **Skill-Based Workflows** — 12 real workflows mapped to OpenClaw skills: Bill Sweep, Bounty Scout, Car Deal Finder, Home Service Quote, Market Research, VC Evaluation, Code Review, and more — across Finance, Home, Development, System, Research, and Productivity categories.
+- **AI-Powered Command Palette** — Ctrl+K now detects questions and answers them with GPT-4o-mini. Shows inline AI responses with navigation suggestions and a "Deep Dive in Chat" button for deeper exploration.
+- **Telegram Topics Dashboard** — HomeView now shows all Telegram topics (Finance #16, Home #17, System #38, Neighborhood #89, Factory #1195) with cron delivery counts.
+- **Cron Health Monitor** — Dashboard displays enabled/total ratio, failure count, health bar, and next firing time.
+- **Delivery Target Labels** — Calendar, CronView, and Command Center all show which Telegram topic each cron job delivers to (e.g., "→ telegram · Finance (#16)").
+- **Data Layer Expansion** — Added `getSkills()` and `getSessions()` caches to the data store for consistent, fast access across views.
+- **Dynamic Agent Types** — Factory store no longer hardcoded to `claude-code`/`cortex` — supports any agent ID string.
+
+### March 2026 — v0.4.0
+
+- **Multi-Provider LLM Support** — Connect to Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, or Mistral.
+- **NVIDIA RTX Voice Engine** — GPU-accelerated speech with Nemotron/Parakeet STT and Magpie TTS.
+- **Software Factory** — Launch and manage coding agents with live log streaming.
+- **ClawHub** — Built-in skill registry with search, install, publish, and sync.
+- **Agent Workspace** — Visual editor for 9 agent identity files.
+- **28 Views** — Workspace, Messaging, Directory, Sub-Agents, Devices, Webhooks, Voice Calls, and more.
+- **60+ Slash Commands** — Full command coverage across all features.
+- **Image Generation** — DALL·E via the `openai-image-gen` skill.
+- **Voice Calls** — Notify/converse modes with expose controls and call history.
 - **DNS Configuration** — Custom domain support from Settings.
-- **Comprehensive OpenClaw Integration** — Every feature in Crystal now runs through OpenClaw. CLI commands, gateway API, and agent protocol unified across all 28 views.
 
 ---
 
@@ -52,7 +63,7 @@ Crystal wraps [OpenClaw](https://github.com/nichochar/open-claw) — an open-sou
 
 | | OpenClaw CLI | Crystal |
 |---|---|---|
-| Interface | Terminal | Native desktop GUI with 28 views |
+| Interface | Terminal | Native desktop GUI with 30 views |
 | Setup | Manual config files | One-click onboarding wizard |
 | LLM Providers | Manual configuration | 7 providers with visual API key management |
 | Server management | Start services manually | Auto-starts Ollama, gateway, and voice servers |
@@ -60,7 +71,7 @@ Crystal wraps [OpenClaw](https://github.com/nichochar/open-claw) — an open-sou
 | Skills & plugins | `npx openclaw skills list` | Toggle switches, ClawHub, one-click Power Up |
 | Voice | Separate setup | 6 built-in voice providers with NVIDIA RTX acceleration |
 | System monitoring | None | Live GPU, CPU, RAM, disk dashboards |
-| Coding agents | Separate tools | Built-in Factory with Claude Code & Cortex |
+| Coding agents | Separate tools | Built-in Factory with skill launcher + any agent |
 | Agent identity | Edit files manually | Visual workspace editor with presets |
 | Themes | None | 6 polished themes |
 
@@ -106,13 +117,16 @@ Full-featured conversation interface with multi-conversation sidebar, Markdown r
 
 Bird's-eye view of your entire system on one screen:
 
-- **Status Cards** — Gateway connection with latency, active LLM model, OS info
-- **Stats Row** — Active sessions, ready skills, token usage, memory chunks
-- **Quick Actions** — Morning Briefing, Heartbeat, Security Scan, Health Check
-- **Power Up** — One-click setup: enable all plugins/skills, fix security issues, reindex memory
+- **Status Cards** — Gateway, LLM model, Telegram connection, OS info
+- **Stats Row** — Sessions, agents, cron jobs, skills, memory chunks, heartbeat interval
+- **Telegram Topics** — Live panel showing Finance (#16), Home (#17), System (#38), Neighborhood (#89), Factory (#1195) with cron delivery counts per topic
+- **Cron Health** — Enabled/total ratio, failure count, health bar, next firing time
+- **System Presence** — Connected agents and services
+- **Quick Actions** — Morning Briefing, Heartbeat, Security Scan, Health Check, Backup, Check Updates
 - **Security Summary** — Critical and warning counts from the latest audit
-- **System Monitor** — Live CPU, RAM, storage, uptime (polled every 15s)
+- **System Monitor** — Live CPU, RAM, storage, uptime (polled every 30s)
 - **GPU Monitor** — Real-time NVIDIA GPU stats: utilization gauge, VRAM bar, temperature, power draw
+- **PC Optimizer** — 12 one-click system optimizations (power plans, DNS flush, temp cleanup, memory cleanup, etc.)
 
 ---
 
@@ -162,14 +176,16 @@ AI configuration includes temperature (0–2), max tokens, context window, syste
 
 ### Software Factory
 
-Launch and manage coding agents from a dedicated view:
+Two-tab view for skills and autonomous builds:
 
-| Agent | Description |
-|-------|-------------|
-| **Claude Code** | Anthropic's coding agent |
-| **Cortex** | OpenClaw's built-in coding agent |
+**Skills Tab** — Browse and launch all OpenClaw workspace and bundled skills:
+- Searchable grid with eligibility indicators and missing dependency details
+- One-click launch with custom prompts, dispatched via OpenClaw agents
+- Skill detail panel with full description, dependencies, and documentation links
 
-Create projects with a working directory, run objectives, stream live logs, and cancel active runs.
+**Projects Tab** — Create projects and dispatch coding agents:
+- Supports any agent ID (claude-code, cortex, main, research, etc.)
+- Stream live logs, cancel active runs, browse run workspace files
 
 ---
 
@@ -208,9 +224,9 @@ Four-tab marketplace for extending Crystal:
 
 Unified hub for workflows, scheduling, and automation:
 
-- **Calendar** — Visual schedule overview
-- **Workflows** — 7 built-in templates (Morning Briefing, Code Review, Research Topic, System Health, Daily Digest, Write Email, Explain Code) plus custom workflow builder with `{{INPUT}}` template variables
-- **Cron Jobs** — Schedule recurring AI tasks with cron expressions. 6 quick templates, interactive syntax reference, per-job run/enable/disable/remove
+- **Calendar** — Visual schedule overview with delivery target badges (shows which Telegram topic each job posts to)
+- **Workflows** — 12 skill-based templates across 6 categories (Finance, Home, Development, System, Research, Productivity) plus custom workflow builder with `{{INPUT}}` template variables
+- **Cron Jobs** — Schedule recurring AI tasks with cron expressions. 6 quick templates, interactive syntax reference, per-job run/enable/disable/remove, delivery target labels
 - **Heartbeat** — Configure autonomous agent behavior
 
 ---
@@ -266,9 +282,10 @@ Per-channel: add/remove, login/logout, view capabilities, configure tokens, reso
 
 ### Agent Management
 
-- List, create, and delete OpenClaw agents
-- Dispatch tasks to agents with session tracking
-- View model, workspace, and routes per agent
+- **Office** — Live agent dashboard showing all real OpenClaw agents with identity, emoji, model, running tasks, recent sessions, token usage, and task dispatch
+- **Agents Hub** — List, create, and delete OpenClaw agents. View model, workspace, and routes per agent
+- **Tasks** — Background task monitoring with filtering by status and kind. Audit and maintenance controls
+- **Approvals** — Exec approval management with allowlist configuration per agent
 - **Sub-Agents & ACP** — Unified view for spawning, steering, and managing sub-agents and ACP sessions (Codex, Claude Code, Gemini CLI)
 
 ---
@@ -381,7 +398,7 @@ Terminal-style output with color-coded results and summary cards (Passed / Warni
 | Shortcut | Action |
 |----------|--------|
 | `Ctrl + Space` | Toggle Crystal window (global) |
-| `Ctrl + K` | Command palette |
+| `Ctrl + K` | Command palette (with AI-powered search) |
 | `Ctrl + N` | New conversation |
 | `Ctrl + ,` | Settings |
 | `Ctrl + Shift + D` | Doctor |
@@ -409,7 +426,7 @@ First-run wizard with 5 steps:
 
 Crystal is engineered to feel instant:
 
-- **Lazy-loaded views** — All 28 views use `React.lazy()` + `Suspense`. Only the active view's code is loaded.
+- **Lazy-loaded views** — All 30 views use `React.lazy()` + `Suspense`. Only the active view's code is loaded.
 - **CLI response caching** — Shared cache with TTL deduplicates OpenClaw CLI calls across views.
 - **Visibility-aware polling** — GPU monitor, system monitor, and model poller pause when hidden. Zero background work on inactive tabs.
 - **Vendor bundle splitting** — React, markdown rendering, and animation libraries cached as separate chunks.
@@ -501,8 +518,8 @@ Open **Settings → API Keys** and add keys for any providers you want to use (O
 Crystal/
 ├── src/                              # React frontend
 │   ├── components/
-│   │   ├── shell/                    # TitleBar, Navigation, CommandPalette, Onboarding, Toast
-│   │   ├── views/                    # 28 feature views
+│   │   ├── shell/                    # TitleBar, Navigation, CommandPalette (AI-powered), Onboarding, Toast
+│   │   ├── views/                    # 30 feature views
 │   │   ├── voice/                    # VoiceOrb, TranscriptPanel, ConfirmationCard, EventLog
 │   │   ├── factory/                  # DirectoryBrowser, FileTree, FileViewer, RunWorkspace
 │   │   └── widgets/                  # GpuMonitor
@@ -512,7 +529,9 @@ Crystal/
 │   │   ├── openclaw.ts               # OpenClaw client (gateway, LLM, memory, channels, config)
 │   │   ├── tools.ts                  # Tool implementations (shell, files, web)
 │   │   ├── cache.ts                  # CLI response cache with TTL + deduplication
-│   │   ├── factory.ts                # Factory agent runner (Claude Code, Cortex)
+│   │   ├── factory.ts                # Factory agent runner (any agent ID)
+│   │   ├── search-ai.ts              # AI-powered command palette search (GPT-4o-mini)
+│   │   ├── workflows.ts              # 12 skill-based workflow definitions
 │   │   ├── voice.ts                  # Voice service orchestration
 │   │   ├── voice/                    # Voice provider architecture
 │   │   │   ├── providers/            # NVIDIA Nemotron, Whisper, Kokoro, Magpie, Browser
@@ -521,14 +540,13 @@ Crystal/
 │   │   │   ├── intent-router.ts      # Voice intent classification
 │   │   │   ├── conversation-agent.ts # Voice conversation handler
 │   │   │   └── session-store.ts      # Voice session persistence
-│   │   ├── templates.ts              # Built-in workflow definitions
 │   │   ├── marketplace.ts            # Skill/plugin catalog
 │   │   └── storage.ts                # Local storage abstraction
 │   └── stores/
 │       ├── appStore.ts               # App state (view, voice, gateway, thinking level)
 │       ├── themeStore.ts             # 6 themes with CSS variable mapping
-│       ├── dataStore.ts              # Data caching layer
-│       └── factoryStore.ts           # Factory project/run state
+│       ├── dataStore.ts              # Data caching layer (8 cache entries: cron, agents, memory, system, tasks, channels, skills, sessions)
+│       └── factoryStore.ts           # Factory project/run state (dynamic agent types)
 ├── src-tauri/                        # Rust backend
 │   ├── src/
 │   │   ├── lib.rs                    # 13 Tauri commands, server lifecycle, system tray
@@ -551,7 +569,7 @@ Crystal/
 
 | | Count |
 |---|---|
-| Views | 28 |
+| Views | 30 |
 | Slash commands | 60+ |
 | Voice providers | 6 (3 STT + 3 TTS) |
 | LLM providers | 7 |
@@ -559,12 +577,15 @@ Crystal/
 | Tools | 6 |
 | Channel integrations | 11 |
 | Workspace files | 9 |
-| Workflow templates | 7 |
+| Workflow templates | 12 |
+| Workflow categories | 6 |
 | Cron templates | 6 |
+| Telegram topics | 5 |
 | Diagnostic commands | 6 |
 | Keyboard shortcuts | 10 |
 | Tauri commands | 13 |
 | OpenClaw skills | 51+ |
+| Data cache entries | 8 |
 
 ---
 

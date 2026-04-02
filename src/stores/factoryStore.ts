@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type AgentType = "claude-code" | "cortex";
+export type AgentType = string;
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 

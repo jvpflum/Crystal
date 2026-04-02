@@ -753,14 +753,44 @@ fn start_openclaw_daemon(state: tauri::State<AppState>) -> Result<String, String
     if check_port_in_use(18789) {
         return Ok("OpenClaw daemon already running".to_string());
     }
-    
-    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
+
+    // Sanitize config before attempting start
+    sanitize_openclaw_config();
+
     let openclaw_bin = find_openclaw_bin();
-    
+    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
+
+    // First attempt
     match spawn_hidden(&openclaw_bin, &["gateway", "--port", "18789"]) {
         Ok(child) => {
-            servers.openclaw = Some(child);
-            Ok("OpenClaw daemon started".to_string())
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            if check_port_in_use(18789) {
+                servers.openclaw = Some(child);
+                return Ok("OpenClaw daemon started".to_string());
+            }
+            // Didn't bind — try doctor --fix
+        }
+        Err(_) => {}
+    }
+
+    // Attempt auto-repair
+    let _ = Command::new(&openclaw_bin)
+        .args(["doctor", "--fix"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .stdin(Stdio::null())
+        .output();
+
+    // Retry after repair
+    match spawn_hidden(&openclaw_bin, &["gateway", "--port", "18789"]) {
+        Ok(child) => {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            if check_port_in_use(18789) {
+                servers.openclaw = Some(child);
+                Ok("OpenClaw daemon started (after auto-repair)".to_string())
+            } else {
+                Err("Gateway started but not listening — check openclaw config".to_string())
+            }
         }
         Err(e) => Err(format!("Failed to start OpenClaw daemon: {}", e)),
     }
@@ -891,6 +921,172 @@ fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Sanitize the OpenClaw config so a minor schema drift doesn't crash the gateway.
+/// Strips BOM, ensures every provider has `baseUrl` + `models`, removes unknown
+/// keys that newer/older versions of OpenClaw reject (e.g. `enabled` on providers).
+fn sanitize_openclaw_config() {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| ".".to_string());
+    let config_path = format!("{}/.openclaw/openclaw.json", home);
+    let path = Path::new(&config_path);
+    if !path.exists() {
+        return;
+    }
+
+    let raw = match fs::read_to_string(path) {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+
+    // Strip UTF-8 BOM if present
+    let json_str = raw.strip_prefix('\u{FEFF}').unwrap_or(&raw);
+
+    let mut doc: serde_json::Value = match serde_json::from_str(json_str) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("OpenClaw config is not valid JSON ({}), skipping sanitize", e);
+            return;
+        }
+    };
+
+    let mut changed = false;
+
+    // Provider defaults for missing baseUrl
+    let provider_defaults: HashMap<&str, &str> = [
+        ("ollama", "http://127.0.0.1:11434"),
+        ("anthropic", "https://api.anthropic.com"),
+        ("xai", "https://api.x.ai/v1"),
+        ("openai", "https://api.openai.com/v1"),
+        ("openai-codex", "https://api.openai.com/v1"),
+        ("google", "https://generativelanguage.googleapis.com/v1beta"),
+        ("deepseek", "https://api.deepseek.com"),
+    ]
+    .into_iter()
+    .collect();
+
+    if let Some(providers) = doc
+        .pointer_mut("/models/providers")
+        .and_then(|v| v.as_object_mut())
+    {
+        let keys: Vec<String> = providers.keys().cloned().collect();
+        for key in keys {
+            if let Some(prov) = providers.get_mut(&key).and_then(|v| v.as_object_mut()) {
+                // Remove unsupported 'enabled' flag from provider objects
+                if prov.remove("enabled").is_some() {
+                    changed = true;
+                }
+                // Ensure required `baseUrl`
+                if !prov.contains_key("baseUrl") {
+                    let default_url = provider_defaults
+                        .get(key.as_str())
+                        .unwrap_or(&"https://localhost");
+                    prov.insert(
+                        "baseUrl".to_string(),
+                        serde_json::Value::String(default_url.to_string()),
+                    );
+                    changed = true;
+                }
+                // Ensure required `models` array
+                if !prov.contains_key("models") {
+                    prov.insert(
+                        "models".to_string(),
+                        serde_json::Value::Array(vec![]),
+                    );
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    if changed {
+        // Backup before writing
+        let backup_path = format!("{}.bak", config_path);
+        let _ = fs::copy(path, &backup_path);
+
+        match serde_json::to_string_pretty(&doc) {
+            Ok(out) => {
+                if fs::write(path, out.as_bytes()).is_ok() {
+                    println!("OpenClaw config sanitized (fixed provider schema issues)");
+                }
+            }
+            Err(e) => eprintln!("Failed to serialize sanitized config: {}", e),
+        }
+    }
+}
+
+/// Try to start the gateway, retrying once after running `openclaw doctor --fix`
+/// if the first attempt fails (config validation error).
+fn start_gateway_resilient<R: Runtime>(app: &AppHandle<R>) {
+    if check_port_in_use(18789) {
+        println!("OpenClaw gateway already running on port 18789 — reusing existing instance");
+        return;
+    }
+
+    // Pre-flight: sanitize config before first attempt
+    sanitize_openclaw_config();
+
+    let openclaw_bin = find_openclaw_bin();
+
+    // First attempt
+    println!("Starting OpenClaw daemon...");
+    match spawn_hidden(&openclaw_bin, &["gateway", "--port", "18789"]) {
+        Ok(child) => {
+            // Give the gateway a moment to either start or crash
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            if check_port_in_use(18789) {
+                if let Some(state) = app.try_state::<AppState>() {
+                    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
+                    servers.openclaw = Some(child);
+                }
+                println!("OpenClaw gateway started on port 18789");
+                return;
+            }
+            // Gateway process exited — config is probably still invalid
+            eprintln!("OpenClaw gateway spawned but not listening — attempting doctor --fix");
+        }
+        Err(e) => {
+            eprintln!("OpenClaw gateway spawn failed: {} — attempting doctor --fix", e);
+        }
+    }
+
+    // Retry: run `openclaw doctor --fix` then try again
+    let doctor_result = Command::new(&openclaw_bin)
+        .args(["doctor", "--fix"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null())
+        .output();
+
+    match doctor_result {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            println!("openclaw doctor --fix: {}{}", stdout, stderr);
+        }
+        Err(e) => {
+            eprintln!("Failed to run openclaw doctor: {}", e);
+        }
+    }
+
+    // Second attempt after doctor
+    match spawn_hidden(&openclaw_bin, &["gateway", "--port", "18789"]) {
+        Ok(child) => {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            if check_port_in_use(18789) {
+                if let Some(state) = app.try_state::<AppState>() {
+                    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
+                    servers.openclaw = Some(child);
+                }
+                println!("OpenClaw gateway started on port 18789 (after doctor --fix)");
+            } else {
+                eprintln!("OpenClaw gateway still not listening after doctor --fix — running without gateway");
+            }
+        }
+        Err(e) => eprintln!("OpenClaw daemon not available: {} (agent will use direct LLM)", e),
+    }
+}
+
 fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
     // Try multiple paths to find scripts directory
     let scripts_dir = {
@@ -937,22 +1133,7 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
         })
     });
     
-    if check_port_in_use(18789) {
-        println!("OpenClaw gateway already running on port 18789 — reusing existing instance");
-    } else {
-        println!("Starting OpenClaw daemon...");
-        let openclaw_bin = find_openclaw_bin();
-        match spawn_hidden(&openclaw_bin, &["gateway", "--port", "18789"]) {
-            Ok(child) => {
-                if let Some(state) = app.try_state::<AppState>() {
-                    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
-                    servers.openclaw = Some(child);
-                }
-                println!("OpenClaw gateway started on port 18789");
-            }
-            Err(e) => eprintln!("OpenClaw daemon not available: {} (agent will use direct LLM)", e),
-        }
-    }
+    start_gateway_resilient(app);
 
     // Start Ollama if not already running
     if !check_port_in_use(11434) {

@@ -22,12 +22,9 @@ export interface RunHandle {
   logFile: string;
 }
 
-const AGENT_COMMANDS: Record<AgentType, (objective: string, cwd: string) => string> = {
-  "claude-code": (obj, cwd) =>
-    `openclaw agent --agent claude-code --message ${esc(obj)} --cwd ${esc(cwd)}`,
-  "cortex": (obj, cwd) =>
-    `openclaw agent --agent cortex --message ${esc(obj)} --cwd ${esc(cwd)}`,
-};
+function agentCommand(agentType: AgentType, objective: string, cwd: string): string {
+  return `openclaw agent --agent ${esc(agentType)} --message ${esc(objective)} --cwd ${esc(cwd)}`;
+}
 
 function esc(s: string): string {
   return `"${s.replace(/"/g, '`"')}"`;
@@ -43,7 +40,7 @@ class FactoryService {
     objective: string,
     cwd: string
   ): Promise<RunHandle> {
-    const command = AGENT_COMMANDS[agentType](objective, cwd);
+    const command = agentCommand(agentType, objective, cwd);
 
     const resolvedLogFile = await this._resolveLogPath(runId);
 

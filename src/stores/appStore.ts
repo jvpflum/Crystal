@@ -28,7 +28,9 @@ export type AppView =
   | "devices"
   | "subagents"
   | "webhooks"
-  | "voicecall";
+  | "voicecall"
+  | "tasks"
+  | "approvals";
 
 export type VoiceState =
   | "idle"

@@ -43,6 +43,8 @@ const DevicesView = lazy(() => import("@/components/views/DevicesView").then(m =
 const SubagentsView = lazy(() => import("@/components/views/SubagentsView").then(m => ({ default: m.SubagentsView })));
 const WebhooksView = lazy(() => import("@/components/views/WebhooksView").then(m => ({ default: m.WebhooksView })));
 const VoiceCallView = lazy(() => import("@/components/views/VoiceCallView").then(m => ({ default: m.VoiceCallView })));
+const TasksView = lazy(() => import("@/components/views/TasksView").then(m => ({ default: m.TasksView })));
+const ApprovalsView = lazy(() => import("@/components/views/ApprovalsView").then(m => ({ default: m.ApprovalsView })));
 
 function ViewSlot({ id, active, children }: { id: string; active: boolean; children: React.ReactNode }) {
   const mountedRef = useRef(false);
@@ -172,6 +174,8 @@ function App() {
                   <ViewSlot id="subagents" active={currentView === "subagents"}><SubagentsView /></ViewSlot>
                   <ViewSlot id="webhooks" active={currentView === "webhooks"}><WebhooksView /></ViewSlot>
                   <ViewSlot id="voicecall" active={currentView === "voicecall"}><VoiceCallView /></ViewSlot>
+                  <ViewSlot id="tasks" active={currentView === "tasks"}><TasksView /></ViewSlot>
+                  <ViewSlot id="approvals" active={currentView === "approvals"}><ApprovalsView /></ViewSlot>
                 </Suspense>
               </ErrorBoundary>
             </main>

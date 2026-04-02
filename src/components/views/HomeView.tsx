@@ -9,11 +9,12 @@ import { LobsterIcon } from "@/components/LobsterIcon";
 import {
   Radio, Bot, Monitor, Activity, Wrench,
   Clock, Shield, Stethoscope, Sun, Zap,
-  AlertTriangle, ShieldAlert, Database, Percent, Loader2,
+  AlertTriangle, ShieldAlert, Database, Loader2,
   Cpu, MemoryStick, HardDrive, Bolt, Trash2, Wifi, BatteryFull,
   Gauge, RefreshCw, Power, RotateCcw, FolderCog, ShieldCheck,
-  MonitorDown, Layers, Users,
+  MonitorDown, Layers, Users, CheckCircle2, XCircle,
 } from "lucide-react";
+import { useDataStore } from "@/stores/dataStore";
 
 // Global caches so data survives tab switches without re-fetching
 let _dashboardCache: { data: DashboardData; ts: number } | null = null;
@@ -31,6 +32,12 @@ interface DashboardData {
   memoryChunks: number;
   securityCritical: number;
   securityWarn: number;
+  openclawVersion: string;
+  telegramStatus: string;
+  telegramBot: string;
+  cronJobsCount: number;
+  heartbeatInterval: string;
+  agentCount: number;
 }
 
 const INITIAL: DashboardData = {
@@ -43,6 +50,12 @@ const INITIAL: DashboardData = {
   memoryChunks: 0,
   securityCritical: 0,
   securityWarn: 0,
+  openclawVersion: "—",
+  telegramStatus: "unknown",
+  telegramBot: "",
+  cronJobsCount: 0,
+  heartbeatInterval: "—",
+  agentCount: 0,
 };
 
 function safeParse(stdout: string) {
@@ -91,11 +104,13 @@ export function HomeView() {
     let cancelled = false;
     (async () => {
       try {
-        const [statusR, modelsR, skillsR, sessionsR] = await Promise.all([
+        const [statusR, modelsR, skillsR, sessionsR, versionR, healthR] = await Promise.all([
           cachedCommand("openclaw status --json", { ttl: 60_000 }),
           cachedCommand("openclaw models list --json", { ttl: 60_000 }),
           cachedCommand("openclaw skills list --json", { ttl: 60_000 }),
           cachedCommand("openclaw sessions --json", { ttl: 60_000 }),
+          cachedCommand("openclaw --version", { ttl: 300_000 }),
+          cachedCommand("openclaw health", { ttl: 30_000 }),
         ]);
 
         if (cancelled) return;
@@ -104,9 +119,17 @@ export function HomeView() {
         const models = safeParse(modelsR.stdout);
         const skills = safeParse(skillsR.stdout);
         const sessions = safeParse(sessionsR.stdout);
+        const healthText = healthR.stdout || "";
 
         const defaultModel = models?.models?.find((m: { tags?: string[] }) => m.tags?.includes("default"));
         const firstSession = sessions?.sessions?.[0];
+
+        const versionMatch = (versionR.stdout || "").match(/OpenClaw\s+([\d.]+\S*)/i);
+        const telegramMatch = healthText.match(/Telegram:\s*(\w+)(?:\s*\((@\w+)\))?/i);
+        const agentsMatch = healthText.match(/Agents:\s*(.+)/i);
+        const heartbeatMatch = healthText.match(/Heartbeat interval:\s*(\S+)/i);
+
+        const agentList = agentsMatch?.[1]?.split(",") ?? [];
 
         const newData: DashboardData = {
           gateway: {
@@ -124,6 +147,12 @@ export function HomeView() {
           memoryChunks: status?.memory?.totalChunks ?? status?.memory?.chunks ?? 0,
           securityCritical: status?.securityAudit?.summary?.critical ?? 0,
           securityWarn: status?.securityAudit?.summary?.warn ?? 0,
+          openclawVersion: versionMatch?.[1] ?? "—",
+          telegramStatus: telegramMatch?.[1] ?? "unknown",
+          telegramBot: telegramMatch?.[2] ?? "",
+          cronJobsCount: status?.cron?.count ?? 0,
+          heartbeatInterval: heartbeatMatch?.[1] ?? "—",
+          agentCount: agentList.length,
         };
 
         _dashboardCache = { data: newData, ts: Date.now() };
@@ -183,6 +212,26 @@ export function HomeView() {
       color: "var(--success)",
       action: () => setView("doctor"),
     },
+    {
+      id: "backup", icon: Database, label: "Backup", desc: "Create state backup",
+      color: "#06b6d4",
+      action: () => runAction("backup", async () => {
+        const r = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+          command: "openclaw backup create", cwd: null,
+        });
+        return r.stdout?.trim() || r.stderr?.trim() || "Backup complete";
+      }),
+    },
+    {
+      id: "update", icon: RefreshCw, label: "Check Updates", desc: "Check for new version",
+      color: "#8b5cf6",
+      action: () => runAction("update", async () => {
+        const r = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+          command: "openclaw update status", cwd: null,
+        });
+        return r.stdout?.trim() || r.stderr?.trim() || "Up to date";
+      }),
+    },
   ];
 
   const gwConnected = data.gateway.connected || gatewayConnected;
@@ -216,7 +265,7 @@ export function HomeView() {
 
       {/* ── System Status Row ── */}
       <SectionLabel text="System Status" />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
         <StatusCard
           icon={Radio}
           label="Gateway"
@@ -233,6 +282,14 @@ export function HomeView() {
           onClick={() => setView("models")}
         />
         <StatusCard
+          icon={Radio}
+          label="Telegram"
+          value={data.telegramStatus === "ok" ? "Connected" : data.telegramStatus}
+          detail={data.telegramBot || undefined}
+          color={data.telegramStatus === "ok" ? "var(--success)" : "var(--warning)"}
+          onClick={() => setView("channels")}
+        />
+        <StatusCard
           icon={Monitor}
           label="System"
           value={data.osLabel}
@@ -242,19 +299,27 @@ export function HomeView() {
       </div>
 
       {/* ── Stats Row ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8, marginBottom: 20 }}>
         <MetricCard icon={Activity} label="Sessions" value={loading ? "…" : data.activeSessions} color="var(--accent)" />
-        <MetricCard icon={Wrench} label="Skills" value={loading ? "…" : data.readySkills} color="var(--warning)" />
-        <MetricCard icon={Percent} label="Tokens" value={loading ? "…" : `${data.tokenPercentUsed}%`} color="#a855f7" />
+        <MetricCard icon={Bot} label="Agents" value={loading ? "…" : data.agentCount} color="#06b6d4" />
+        <MetricCard icon={Clock} label="Cron Jobs" value={loading ? "…" : data.cronJobsCount} color="var(--warning)" />
+        <MetricCard icon={Wrench} label="Skills" value={loading ? "…" : data.readySkills} color="#a855f7" />
         <MetricCard icon={Database} label="Memory" value={loading ? "…" : data.memoryChunks} color="var(--success)" />
+        <MetricCard icon={Zap} label="Heartbeat" value={loading ? "…" : data.heartbeatInterval} color="#f59e0b" />
       </div>
+
+      {/* ── Telegram Topics ── */}
+      <TelegramTopics onNavigate={() => setView("channels")} />
+
+      {/* ── Cron Health ── */}
+      <CronHealth onNavigate={() => setView("cron")} />
 
       {/* ── System Presence ── */}
       <SystemPresence />
 
       {/* ── Quick Actions ── */}
       <SectionLabel text="Quick Actions" />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
         {quickActions.map(a => (
           <ActionCard
             key={a.id}
@@ -339,7 +404,7 @@ export function HomeView() {
 
       <div style={{ marginTop: "auto", paddingTop: 16, textAlign: "center" }}>
         <p style={{ fontSize: 10, color: "var(--text-muted)", margin: 0 }}>
-          Running 100% locally &middot; Powered by OpenClaw &middot; v2026.3.2
+          Powered by OpenClaw {data.openclawVersion !== "—" ? `v${data.openclawVersion}` : ""} &middot; Crystal v0.5.0
         </p>
       </div>
     </div>
@@ -438,6 +503,174 @@ function ActionCard({ icon: Icon, label, desc, color, busy, onClick }: {
         <p style={{ margin: "2px 0 0", fontSize: 10, color: "var(--text-muted)" }}>{desc}</p>
       </div>
     </button>
+  );
+}
+
+/* ─── Telegram Topics ─── */
+
+const TELEGRAM_TOPICS = [
+  { name: "Finance", threadId: 16, color: "#f59e0b", icon: "💰" },
+  { name: "Home", threadId: 17, color: "#10b981", icon: "🏠" },
+  { name: "System", threadId: 38, color: "#3b82f6", icon: "⚙️" },
+  { name: "Neighborhood", threadId: 89, color: "#8b5cf6", icon: "🏘️" },
+  { name: "Factory", threadId: 1195, color: "#06b6d4", icon: "🏭" },
+];
+
+function TelegramTopics({ onNavigate }: { onNavigate: () => void }) {
+  const getCronJobs = useDataStore(s => s.getCronJobs);
+  const [deliveryCounts, setDeliveryCounts] = useState<Record<number, number>>({});
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const jobs = await getCronJobs();
+        const counts: Record<number, number> = {};
+        for (const job of jobs) {
+          const delivery = job.delivery as Record<string, unknown> | undefined;
+          if (delivery) {
+            const threadId = delivery.threadId ? Number(delivery.threadId) : undefined;
+            if (threadId && job.enabled !== false) {
+              counts[threadId] = (counts[threadId] || 0) + 1;
+            }
+          }
+        }
+        setDeliveryCounts(counts);
+      } catch { /* ignore */ }
+    })();
+  }, [getCronJobs]);
+
+  return (
+    <>
+      <SectionLabel text="Telegram Topics" />
+      <div
+        onClick={onNavigate}
+        style={{
+          ...card({ padding: "12px 16px", marginBottom: 16, cursor: "pointer" }),
+          display: "flex", gap: 8, flexWrap: "wrap",
+        }}
+        onMouseEnter={hoverIn}
+        onMouseLeave={hoverOut}
+      >
+        {TELEGRAM_TOPICS.map(topic => (
+          <div key={topic.threadId} style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "6px 12px", borderRadius: 8,
+            background: `${topic.color}10`, border: `1px solid ${topic.color}25`,
+            flex: "1 0 auto", minWidth: 120,
+          }}>
+            <span style={{ fontSize: 14 }}>{topic.icon}</span>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: topic.color }}>{topic.name}</div>
+              <div style={{ fontSize: 9, color: "var(--text-muted)" }}>
+                #{topic.threadId}
+                {deliveryCounts[topic.threadId] ? ` · ${deliveryCounts[topic.threadId]} cron` : ""}
+              </div>
+            </div>
+          </div>
+        ))}
+        <div style={{ display: "flex", alignItems: "center", marginLeft: "auto" }}>
+          <span style={{ fontSize: 10, color: "var(--text-muted)" }}>View &rarr;</span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ─── Cron Health ─── */
+
+function CronHealth({ onNavigate }: { onNavigate: () => void }) {
+  const getCronJobs = useDataStore(s => s.getCronJobs);
+  const [health, setHealth] = useState<{
+    total: number; enabled: number; recentFailures: number; nextJob?: string; nextTime?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const jobs = await getCronJobs();
+        const enabled = jobs.filter((j: Record<string, unknown>) => j.enabled !== false);
+        let recentFailures = 0;
+        let nextMs = Infinity;
+        let nextName = "";
+
+        for (const job of jobs) {
+          const state = job.state as Record<string, unknown> | undefined;
+          if (state?.lastRunStatus && state.lastRunStatus !== "ok") recentFailures++;
+          const nextRunMs = state?.nextRunAtMs ? Number(state.nextRunAtMs) : undefined;
+          if (nextRunMs && nextRunMs < nextMs && job.enabled !== false) {
+            nextMs = nextRunMs;
+            nextName = String(job.name || job.id || "");
+          }
+        }
+
+        setHealth({
+          total: jobs.length,
+          enabled: enabled.length,
+          recentFailures,
+          nextJob: nextName || undefined,
+          nextTime: nextMs < Infinity ? new Date(nextMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : undefined,
+        });
+      } catch { /* ignore */ }
+    })();
+  }, [getCronJobs]);
+
+  if (!health) return null;
+
+  const healthPct = health.total > 0 ? Math.round((health.enabled / health.total) * 100) : 0;
+
+  return (
+    <>
+      <SectionLabel text="Cron Health" />
+      <div
+        onClick={onNavigate}
+        onMouseEnter={hoverIn}
+        onMouseLeave={hoverOut}
+        style={{
+          ...card({ padding: "12px 16px", marginBottom: 16, cursor: "pointer" }),
+          display: "flex", alignItems: "center", gap: 14,
+        }}
+      >
+        <div style={{
+          width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+          background: health.recentFailures > 0 ? "rgba(248,113,113,0.1)" : "rgba(74,222,128,0.1)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          {health.recentFailures > 0 ? (
+            <AlertTriangle style={{ width: 18, height: 18, color: "var(--error)" }} />
+          ) : (
+            <CheckCircle2 style={{ width: 18, height: 18, color: "var(--success)" }} />
+          )}
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
+              {health.enabled}/{health.total} enabled
+            </span>
+            {health.recentFailures > 0 && (
+              <span style={{ fontSize: 10, color: "var(--error)", display: "flex", alignItems: "center", gap: 3 }}>
+                <XCircle style={{ width: 10, height: 10 }} />
+                {health.recentFailures} failed
+              </span>
+            )}
+          </div>
+          <div style={{ height: 4, borderRadius: 2, background: "var(--bg-hover)", marginTop: 6, overflow: "hidden", maxWidth: 200 }}>
+            <div style={{
+              height: "100%", borderRadius: 2, transition: "width 0.6s ease",
+              width: `${healthPct}%`,
+              background: health.recentFailures > 0 ? "var(--warning)" : "var(--success)",
+            }} />
+          </div>
+        </div>
+        {health.nextJob && (
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, color: "var(--text-muted)" }}>Next</div>
+            <div style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 500 }}>{health.nextTime}</div>
+            <div style={{ fontSize: 9, color: "var(--text-muted)", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{health.nextJob}</div>
+          </div>
+        )}
+        <span style={{ fontSize: 10, color: "var(--text-muted)" }}>View &rarr;</span>
+      </div>
+    </>
   );
 }
 

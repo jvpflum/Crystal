@@ -1,7 +1,7 @@
 {
   "name": "crystal",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "packageManager": "pnpm@10.30.3",
   "scripts": {
@@ -20,7 +20,7 @@
     "clsx": "^2.1.1",
     "framer-motion": "^12.35.0",
     "lucide-react": "^0.577.0",
-    "openclaw": "^2026.3.13",
+    "openclaw": "^2026.4.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
@@ -29,6 +29,16 @@
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.1",
     "zustand": "^5.0.11"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "openclaw",
+      "sharp",
+      "protobufjs",
+      "koffi",
+      "@matrix-org/matrix-sdk-crypto-nodejs"
+    ]
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

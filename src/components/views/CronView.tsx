@@ -27,6 +27,10 @@ interface CronJob {
   agent: string;
   enabled: boolean;
   nextRun?: string;
+  lastRun?: string;
+  deliveryChannel?: string;
+  deliveryTarget?: string;
+  model?: string;
 }
 
 interface CronStatus {
@@ -52,6 +56,10 @@ function parseCronJob(raw: Record<string, unknown>): CronJob {
   const state = raw.state as Record<string, unknown> | undefined;
   const nextRunMs = state?.nextRunAtMs ? Number(state.nextRunAtMs) : undefined;
 
+  const delivery = raw.delivery as Record<string, unknown> | undefined;
+  const lastRunMs = state?.lastRunAtMs ? Number(state.lastRunAtMs) : undefined;
+  const payloadModel = payload?.model ? String(payload.model) : undefined;
+
   return {
     id: String(raw.id || ""),
     name: raw.name ? String(raw.name) : undefined,
@@ -60,7 +68,24 @@ function parseCronJob(raw: Record<string, unknown>): CronJob {
     agent: String(raw.agentId || raw.agent || "main"),
     enabled: raw.enabled !== false,
     nextRun: nextRunMs ? new Date(nextRunMs).toLocaleString() : undefined,
+    lastRun: lastRunMs ? new Date(lastRunMs).toLocaleString() : undefined,
+    deliveryChannel: delivery?.channel ? String(delivery.channel) : undefined,
+    deliveryTarget: delivery?.to ? String(delivery.to) : delivery?.threadId ? `thread:${delivery.threadId}` : undefined,
+    model: payloadModel,
   };
+}
+
+const THREAD_NAMES: Record<number, string> = {
+  16: "Finance", 17: "Home", 38: "System", 89: "Neighborhood", 1195: "Factory",
+};
+
+function threadLabel(target: string): string {
+  const m = target.match(/^thread:(\d+)$/);
+  if (m) {
+    const id = Number(m[1]);
+    return THREAD_NAMES[id] ? `${THREAD_NAMES[id]} (#${id})` : target;
+  }
+  return target;
 }
 
 interface ExampleJob {
@@ -361,11 +386,24 @@ export function CronView() {
                       <p style={{ margin: 0, fontSize: 11, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {job.message}
                       </p>
-                      {job.nextRun && (
-                        <p style={{ margin: "2px 0 0", fontSize: 9, color: "var(--text-muted)" }}>
-                          Next: {job.nextRun}
-                        </p>
-                      )}
+                      <div style={{ display: "flex", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
+                        {job.nextRun && (
+                          <span style={{ fontSize: 9, color: "var(--text-muted)" }}>Next: {job.nextRun}</span>
+                        )}
+                        {job.lastRun && (
+                          <span style={{ fontSize: 9, color: "var(--text-muted)" }}>Last: {job.lastRun}</span>
+                        )}
+                        {job.deliveryChannel && (
+                          <span style={{ fontSize: 9, padding: "0 4px", borderRadius: 4, background: "rgba(59,130,246,0.1)", color: "var(--accent)" }}>
+                            → {job.deliveryChannel}{job.deliveryTarget ? ` · ${threadLabel(job.deliveryTarget)}` : ""}
+                          </span>
+                        )}
+                        {job.model && (
+                          <span style={{ fontSize: 9, padding: "0 4px", borderRadius: 4, background: "var(--bg-hover)", color: "var(--text-muted)" }}>
+                            {job.model}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                       <button onClick={() => runNow(job.id)} disabled={runningId === job.id} title="Run now"

@@ -33,9 +33,12 @@ interface StepResult {
 }
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
-  Productivity: <Zap style={{ width: 14, height: 14 }} />,
+  Finance: <Zap style={{ width: 14, height: 14 }} />,
+  Home: <Layers style={{ width: 14, height: 14 }} />,
   Development: <Code2 style={{ width: 14, height: 14 }} />,
   System: <Activity style={{ width: 14, height: 14 }} />,
+  Research: <Bot style={{ width: 14, height: 14 }} />,
+  Productivity: <Zap style={{ width: 14, height: 14 }} />,
 };
 
 export function TemplatesView() {
@@ -177,11 +180,10 @@ export function TemplatesView() {
     });
   };
 
-  const grouped = {
-    Productivity: allWorkflows.filter((w) => w.category === "Productivity"),
-    Development: allWorkflows.filter((w) => w.category === "Development"),
-    System: allWorkflows.filter((w) => w.category === "System"),
-  };
+  const categories = ["Finance", "Home", "Development", "System", "Research", "Productivity"] as const;
+  const grouped = Object.fromEntries(
+    categories.map(cat => [cat, allWorkflows.filter(w => w.category === cat)])
+  ) as Record<string, Workflow[]>;
 
   return (
     <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
@@ -223,9 +225,12 @@ export function TemplatesView() {
             <select value={newCategory} onChange={(e) => setNewCategory(e.target.value as Workflow["category"])}
               style={{ width: "100%", padding: "6px 8px", borderRadius: 6, background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 12, marginBottom: 8, outline: "none" }}
             >
-              <option value="Productivity" style={{ background: "var(--bg-base)" }}>Productivity</option>
+              <option value="Finance" style={{ background: "var(--bg-base)" }}>Finance</option>
+              <option value="Home" style={{ background: "var(--bg-base)" }}>Home</option>
               <option value="Development" style={{ background: "var(--bg-base)" }}>Development</option>
               <option value="System" style={{ background: "var(--bg-base)" }}>System</option>
+              <option value="Research" style={{ background: "var(--bg-base)" }}>Research</option>
+              <option value="Productivity" style={{ background: "var(--bg-base)" }}>Productivity</option>
             </select>
 
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-secondary)", marginBottom: 8, cursor: "pointer" }}>
