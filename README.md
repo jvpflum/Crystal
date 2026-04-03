@@ -28,6 +28,17 @@
 
 ## What's New
 
+### April 2026 — v0.6.0 Sandbox, City, Memory & Performance
+
+- **NVIDIA OpenShell Sandbox** — One-toggle sandbox mode in Settings. Agents execute inside isolated [OpenShell](https://github.com/NVIDIA/OpenShell) containers with filesystem, network, and process isolation. Auto-detects Docker, creates sandboxes from the `openclaw` community image, and reverts cleanly if anything fails. Requires Docker Desktop.
+- **Crystal City — Future-Punk Visualization** — Full cyberpunk isometric city with neon buildings, holographic billboards, flying drones, electric arcs, rain, steam vents, scanlines, and shooting stars. Agents walk between buildings, display current tasks in speech bubbles, and show status rings. HUD includes activity feed, agent roster, and live clock.
+- **Memory System Overhaul** — New Knowledge Base tab for browsing, viewing, and editing all workspace `.md` files (SOUL.md, USER.md, AGENTS.md, etc.). New Tiers tab visualizing HOT → WARM → COLD memory hierarchy. ClawHub memory skills (`memory-never-forget`, `elite-longterm-memory`) installed.
+- **Sidebar Consolidation** — Navigation reduced from 31 to 15 items with collapsible OpenClaw section. All views remain accessible via Ctrl+K command palette.
+- **Concurrency Limiter** — `cache.ts` now throttles CLI commands to 3 concurrent requests max, preventing WebSocket handshake timeouts and gateway lane stalls.
+- **Batched Prefetching** — Data store prefetches in 3 sequential batches with 30s cooldown instead of flooding the gateway with 12+ parallel requests.
+- **Reduced Polling** — Gateway reconnection intervals, City polling, and data refresh rates all reduced to minimize gateway load.
+- **Factory Builds Tab** — Live Claude Code sub-agent builds with spawn, steer, send, and log streaming.
+
 ### April 2026 — v0.5.0 Full OpenClaw Alignment
 
 - **Live Agent Office** — OfficeView rebuilt with real-time agent monitoring. Shows all OpenClaw agents (main/JC, research, home, finance) with live sessions, running tasks, token counts, and dispatch functionality — no more fake preset agents.
@@ -268,6 +279,31 @@ Per-channel: add/remove, login/logout, view capabilities, configure tokens, reso
 
 ---
 
+### OpenShell Sandbox
+
+Crystal integrates [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) for secure, sandboxed agent execution. Toggle it on/off from **Settings → OpenShell Sandbox**.
+
+| Feature | Details |
+|---------|---------|
+| **One-click toggle** | Enable/disable sandbox mode without leaving Crystal |
+| **Auto-provisioning** | Creates an OpenClaw sandbox from the community image on first enable |
+| **Docker detection** | Pre-checks that Docker is running before creating sandboxes |
+| **Graceful fallback** | If sandbox creation fails, config reverts automatically — nothing breaks |
+| **Sandbox monitoring** | View active sandboxes, status indicators, and tail logs from the panel |
+
+**Protection layers when enabled:**
+
+| Layer | What It Does |
+|-------|-------------|
+| Filesystem | Agents can only access allowed paths |
+| Network | All outbound blocked by default; whitelist via YAML policy |
+| Process | No privilege escalation; dangerous syscalls blocked (seccomp) |
+| Inference | LLM calls routed through privacy-aware proxy |
+
+**Requirements:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) must be installed and running. Install OpenShell via `uv tool install -U openshell` or use the in-app install button.
+
+---
+
 ### Security
 
 - **Security Audit** — Standard and deep scan modes with pass/warn/fail scoring
@@ -292,9 +328,12 @@ Per-channel: add/remove, login/logout, view capabilities, configure tokens, reso
 
 ### Memory
 
+- **Knowledge Base** — Browse, view, and edit all workspace `.md` files (SOUL.md, USER.md, AGENTS.md, TOOLS.md, etc.) with category filtering (Identity, System, Operations, Security, Domain)
+- **Tiered Memory** — Visual HOT → WARM → COLD memory hierarchy showing active context, stable facts, and long-term archive with installed memory skills
 - **Curated Memory** — View, add, and delete entries in `MEMORY.md`
 - **Daily Memory** — Browse daily memory logs with automatic cron capture (11 PM daily)
 - **Semantic Search** — Search across all memory entries
+- **Vector DB** — LanceDB configuration, similarity search, and embedding stats
 - **Reindex** — Rebuild the memory index with stats
 
 ---
@@ -447,6 +486,7 @@ Crystal is engineered to feel instant:
 | Voice STT | NVIDIA Nemotron, Whisper, Web Speech API |
 | Voice TTS | NVIDIA Magpie, Kokoro, Web Speech API |
 | Image Gen | OpenAI DALL·E (via OpenClaw skill) |
+| Sandbox | [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) *(optional)* |
 | Icons | Lucide React |
 | Markdown | react-markdown + remark-gfm + rehype-highlight |
 | Animations | Framer Motion |
@@ -464,6 +504,7 @@ Crystal is engineered to feel instant:
 | **Rust** | Latest stable toolchain |
 | **Ollama** | Installed with at least one model pulled |
 | **Python** | 3.10+ *(optional, for Whisper/Kokoro voice servers)* |
+| **Docker** | Docker Desktop *(optional, required for OpenShell sandbox mode)* |
 
 > **Cloud-only mode:** If you don't have an NVIDIA GPU, you can still use Crystal with cloud LLM providers and browser-based voice. Set your API keys in Settings and you're good to go.
 

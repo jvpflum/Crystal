@@ -1519,25 +1519,41 @@ function AuditBadge({ label, count, color }: { label: string; count: number; col
 
 function SandboxPanel() {
   const [installed, setInstalled] = useState<boolean | null>(null);
+  const [dockerOk, setDockerOk] = useState<boolean | null>(null);
   const [sandboxes, setSandboxes] = useState<{ name: string; status: string; image?: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [sandboxMode, setSandboxMode] = useState<"off" | "openshell">("off");
-  const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error" | "warn"; text: string } | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [logs, setLogs] = useState<string | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [openshellVersion, setOpenshellVersion] = useState("");
 
-  const showFeedback = (type: "success" | "error", text: string) => {
-    setFeedback({ type, text }); setTimeout(() => setFeedback(null), 5000);
+  const showFeedback = (type: "success" | "error" | "warn", text: string) => {
+    setFeedback({ type, text }); setTimeout(() => setFeedback(null), 6000);
   };
 
-  const checkInstalled = async () => {
+  const checkDocker = async (): Promise<boolean> => {
+    try {
+      const r = await invoke<{ stdout: string; code: number }>("execute_command", { command: "docker info --format '{{.ServerVersion}}'", cwd: null });
+      const ok = r.code === 0 && !r.stdout.toLowerCase().includes("error");
+      setDockerOk(ok);
+      return ok;
+    } catch {
+      setDockerOk(false);
+      return false;
+    }
+  };
+
+  const checkInstalled = async (): Promise<boolean> => {
     try {
       const r = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", { command: "openshell --version", cwd: null });
-      setInstalled(r.code === 0);
-      return r.code === 0;
+      const ok = r.code === 0 && r.stdout.trim().length > 0;
+      setInstalled(ok);
+      if (ok) setOpenshellVersion(r.stdout.trim());
+      return ok;
     } catch {
       setInstalled(false);
       return false;
@@ -1545,6 +1561,7 @@ function SandboxPanel() {
   };
 
   const loadSandboxes = async () => {
+    if (!installed) { setSandboxes([]); return; }
     try {
       const r = await invoke<{ stdout: string; code: number }>("execute_command", { command: "openshell sandbox list --json", cwd: null });
       if (r.code === 0 && r.stdout.trim()) {
@@ -1552,13 +1569,13 @@ function SandboxPanel() {
           const data = JSON.parse(r.stdout);
           const list = Array.isArray(data) ? data : data.sandboxes ?? data.items ?? [];
           setSandboxes(list);
-        } catch {
-          const lines = r.stdout.trim().split("\n").filter(l => l.trim() && !l.startsWith("NAME"));
-          setSandboxes(lines.map(l => {
-            const parts = l.trim().split(/\s{2,}/);
-            return { name: parts[0] || "unknown", status: parts[1] || "unknown", image: parts[2] };
-          }));
-        }
+          return;
+        } catch { /* fall through to line parsing */ }
+        const lines = r.stdout.trim().split("\n").filter(l => l.trim() && !l.startsWith("NAME"));
+        setSandboxes(lines.map(l => {
+          const parts = l.trim().split(/\s{2,}/);
+          return { name: parts[0] || "unknown", status: parts[1] || "unknown", image: parts[2] };
+        }));
       } else {
         setSandboxes([]);
       }
@@ -1571,9 +1588,11 @@ function SandboxPanel() {
     try {
       const r = await cachedCommand("openclaw config get agents.defaults.sandbox --json", { ttl: 30_000 });
       if (r.code === 0 && r.stdout.trim()) {
-        const data = JSON.parse(r.stdout);
-        const mode = data.mode ?? data.value?.mode ?? data ?? "off";
-        setSandboxMode(typeof mode === "string" && mode !== "off" ? "openshell" : "off");
+        try {
+          const data = JSON.parse(r.stdout);
+          const mode = data.mode ?? data.value?.mode ?? data.value ?? data ?? "off";
+          setSandboxMode(typeof mode === "string" && mode !== "off" ? "openshell" : "off");
+        } catch { /* keep default */ }
       }
     } catch { /* keep default */ }
   };
@@ -1581,38 +1600,59 @@ function SandboxPanel() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const ok = await checkInstalled();
-      if (ok) {
-        await Promise.all([loadSandboxes(), loadSandboxMode()]);
-      } else {
-        await loadSandboxMode();
-      }
+      const [isInstalled] = await Promise.all([checkInstalled(), checkDocker(), loadSandboxMode()]);
+      if (isInstalled) await loadSandboxes();
       setLoading(false);
     })();
   }, []);
 
   const handleInstall = async () => {
     setInstalling(true);
+    showFeedback("warn", "Installing OpenShell... This may take a minute.");
     try {
-      const r = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+      const uvR = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: "uv tool install -U openshell", cwd: null,
+      });
+      if (uvR.code === 0) {
+        const vr = await invoke<{ stdout: string; code: number }>("execute_command", { command: "openshell --version", cwd: null });
+        if (vr.code === 0 && vr.stdout.trim()) {
+          setInstalled(true);
+          setOpenshellVersion(vr.stdout.trim());
+          showFeedback("success", `OpenShell installed: ${vr.stdout.trim()}`);
+          await loadSandboxes();
+          setInstalling(false);
+          return;
+        }
+      }
+      const pipR = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
         command: "pip install -U openshell", cwd: null,
       });
-      if (r.code === 0) {
+      if (pipR.code === 0) {
         const vr = await invoke<{ stdout: string; code: number }>("execute_command", { command: "openshell --version", cwd: null });
-        if (vr.code === 0) {
+        if (vr.code === 0 && vr.stdout.trim()) {
           setInstalled(true);
+          setOpenshellVersion(vr.stdout.trim());
           showFeedback("success", `OpenShell installed: ${vr.stdout.trim()}`);
           await loadSandboxes();
         } else {
-          showFeedback("error", "Installed but CLI not found. Try: uv tool install -U openshell");
+          showFeedback("error", "Package installed but CLI not found. Install manually: uv tool install -U openshell");
         }
       } else {
-        showFeedback("error", `Install failed. Try manually: uv tool install -U openshell`);
+        showFeedback("error", "Install failed. Run manually in a terminal: uv tool install -U openshell");
       }
     } catch (e) {
       showFeedback("error", `Install error: ${e instanceof Error ? e.message : String(e)}`);
     }
     setInstalling(false);
+  };
+
+  const setConfigMode = async (mode: "openshell" | "off"): Promise<boolean> => {
+    try {
+      const r = await invoke<{ code: number }>("execute_command", {
+        command: `openclaw config set agents.defaults.sandbox.mode ${mode}`, cwd: null,
+      });
+      return r.code === 0;
+    } catch { return false; }
   };
 
   const handleToggle = async () => {
@@ -1621,34 +1661,61 @@ function SandboxPanel() {
 
     try {
       if (enabling) {
-        const hasOcSandbox = sandboxes.some(s => s.name === "openclaw" || s.image?.includes("openclaw"));
-        if (!hasOcSandbox && installed) {
-          showFeedback("success", "Creating OpenShell sandbox for OpenClaw...");
-          const createR = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-            command: "openshell sandbox create --from openclaw --name openclaw-crystal", cwd: null,
-          });
-          if (createR.code !== 0) {
-            showFeedback("error", `Sandbox creation failed: ${createR.stderr || createR.stdout}`.slice(0, 120));
+        if (!dockerOk) {
+          const ok = await checkDocker();
+          if (!ok) {
+            showFeedback("error", "Docker is not running. Start Docker Desktop first, then try again.");
             setToggling(false);
             return;
           }
         }
 
-        await invoke("execute_command", {
-          command: `openclaw config set agents.defaults.sandbox.mode openshell`, cwd: null,
-        });
-        setSandboxMode("openshell");
-        showFeedback("success", "Sandbox mode enabled — agents will run inside OpenShell");
+        const hasOcSandbox = sandboxes.some(s =>
+          s.name === "openclaw" || s.name === "openclaw-crystal" || s.image?.includes("openclaw"),
+        );
+
+        if (!hasOcSandbox && installed) {
+          showFeedback("warn", "Creating OpenShell sandbox for OpenClaw... This may take a minute on first run.");
+          const createR = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+            command: "openshell sandbox create --from openclaw --name openclaw-crystal", cwd: null,
+          });
+          if (createR.code !== 0) {
+            const errMsg = (createR.stderr || createR.stdout || "").trim();
+            if (errMsg.toLowerCase().includes("docker") || errMsg.toLowerCase().includes("daemon")) {
+              showFeedback("error", "Docker is not responding. Make sure Docker Desktop is running.");
+            } else {
+              showFeedback("error", `Sandbox creation failed: ${errMsg}`.slice(0, 150));
+            }
+            setToggling(false);
+            return;
+          }
+        }
+
+        const ok = await setConfigMode("openshell");
+        if (ok) {
+          setSandboxMode("openshell");
+          showFeedback("success", "Sandbox mode enabled — agents will run inside OpenShell");
+        } else {
+          showFeedback("error", "Failed to update OpenClaw config. Sandbox not enabled.");
+        }
       } else {
-        await invoke("execute_command", {
-          command: `openclaw config set agents.defaults.sandbox.mode off`, cwd: null,
-        });
-        setSandboxMode("off");
-        showFeedback("success", "Sandbox mode disabled — agents run on host");
+        const ok = await setConfigMode("off");
+        if (ok) {
+          setSandboxMode("off");
+          showFeedback("success", "Sandbox mode disabled — agents run on host");
+        } else {
+          showFeedback("error", "Failed to update OpenClaw config. Sandbox mode unchanged.");
+        }
       }
       await loadSandboxes();
     } catch (e) {
-      showFeedback("error", `Toggle failed: ${e instanceof Error ? e.message : String(e)}`);
+      if (enabling) {
+        await setConfigMode("off").catch(() => {});
+        setSandboxMode("off");
+        showFeedback("error", `Toggle failed and config reverted: ${e instanceof Error ? e.message : String(e)}`);
+      } else {
+        showFeedback("error", `Toggle failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
     setToggling(false);
   };
@@ -1672,6 +1739,11 @@ function SandboxPanel() {
     display: "flex", alignItems: "center", justifyContent: "space-between",
     padding: "10px 14px", borderBottom: "1px solid var(--border)",
   };
+  const feedbackColors: Record<string, { bg: string; fg: string; border: string }> = {
+    success: { bg: "rgba(74,222,128,0.08)", fg: "#4ade80", border: "rgba(74,222,128,0.2)" },
+    error:   { bg: "rgba(248,113,113,0.08)", fg: "#f87171", border: "rgba(248,113,113,0.2)" },
+    warn:    { bg: "rgba(251,191,36,0.08)", fg: "#fbbf24", border: "rgba(251,191,36,0.2)" },
+  };
 
   if (loading) {
     return (
@@ -1682,14 +1754,24 @@ function SandboxPanel() {
     );
   }
 
+  const fb = feedback ? feedbackColors[feedback.type] : null;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {feedback && (
+      {feedback && fb && (
         <div style={{ padding: "8px 12px", borderRadius: 8, fontSize: 11,
-          background: feedback.type === "success" ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
-          color: feedback.type === "success" ? "#4ade80" : "#f87171",
-          border: `1px solid ${feedback.type === "success" ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)"}` }}>
+          background: fb.bg, color: fb.fg, border: `1px solid ${fb.border}` }}>
           {feedback.text}
+        </div>
+      )}
+
+      {/* Docker warning */}
+      {dockerOk === false && (
+        <div style={{ padding: "8px 12px", borderRadius: 8, fontSize: 11,
+          background: "rgba(251,191,36,0.06)", color: "#fbbf24",
+          border: "1px solid rgba(251,191,36,0.15)", display: "flex", alignItems: "center", gap: 6 }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          Docker Desktop is not running. Sandbox mode requires Docker to create isolated containers.
         </div>
       )}
 
@@ -1720,6 +1802,7 @@ function SandboxPanel() {
               width: 48, height: 26, borderRadius: 13, border: "none", cursor: toggling ? "wait" : "pointer",
               background: sandboxMode !== "off" ? "#4ade80" : "rgba(255,255,255,0.12)",
               position: "relative", transition: "background 0.2s", flexShrink: 0,
+              opacity: toggling ? 0.6 : 1,
             }}>
               <div style={{
                 width: 20, height: 20, borderRadius: "50%", background: "#fff",
@@ -1749,8 +1832,15 @@ function SandboxPanel() {
               background: installed ? "#4ade80" : "#f87171",
             }} />
             <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-              {installed === null ? "Checking..." : installed ? "OpenShell CLI available" : "OpenShell not installed"}
+              {installed === null ? "Checking..." : installed ? `OpenShell ${openshellVersion}` : "OpenShell not installed"}
             </span>
+            {installed && (
+              <>
+                <span style={{ color: "var(--border)", margin: "0 2px" }}>·</span>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: dockerOk ? "#4ade80" : "#f87171" }} />
+                <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{dockerOk ? "Docker running" : "Docker stopped"}</span>
+              </>
+            )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             {installed && sandboxes.length > 0 && (
@@ -1758,22 +1848,20 @@ function SandboxPanel() {
                 {sandboxes.length} sandbox{sandboxes.length !== 1 ? "es" : ""}
               </span>
             )}
-            {installed && (
-              <button onClick={() => setExpanded(!expanded)} style={{
-                background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: 10,
-                display: "flex", alignItems: "center", gap: 2, padding: "2px 6px",
-              }}>
-                {expanded ? "▲ Less" : "▼ Details"}
-              </button>
-            )}
+            <button onClick={() => setExpanded(!expanded)} style={{
+              background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: 10,
+              display: "flex", alignItems: "center", gap: 2, padding: "2px 6px",
+            }}>
+              {expanded ? "▲ Less" : "▼ Details"}
+            </button>
           </div>
         </div>
 
         {/* Expanded details */}
-        {expanded && installed && (
+        {expanded && (
           <div style={{ padding: "8px 14px 12px" }}>
             {/* Sandbox list */}
-            {sandboxes.length > 0 ? (
+            {installed && sandboxes.length > 0 ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
                 <div style={{ fontSize: 9, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 }}>Active Sandboxes</div>
                 {sandboxes.map((sb, i) => (
@@ -1786,19 +1874,19 @@ function SandboxPanel() {
                   </div>
                 ))}
               </div>
-            ) : (
+            ) : installed ? (
               <div style={{ fontSize: 11, color: "var(--text-muted)", padding: "8px 0" }}>
                 No sandboxes created yet. Toggle sandbox mode to create one.
               </div>
-            )}
+            ) : null}
 
             {/* Actions */}
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button onClick={() => { loadSandboxes(); loadSandboxMode(); }} style={{
+              <button onClick={async () => { await Promise.all([checkInstalled(), checkDocker()]); await loadSandboxes(); await loadSandboxMode(); }} style={{
                 padding: "5px 12px", borderRadius: 6, fontSize: 10, background: "var(--bg)", border: "1px solid var(--border)",
                 color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
               }}><IconRefresh /> Refresh</button>
-              {sandboxes.length > 0 && (
+              {installed && sandboxes.length > 0 && (
                 <button onClick={handleViewLogs} disabled={logsLoading} style={{
                   padding: "5px 12px", borderRadius: 6, fontSize: 10, background: "var(--bg)", border: "1px solid var(--border)",
                   color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
@@ -1827,6 +1915,19 @@ function SandboxPanel() {
                 Each sandbox runs inside a container with kernel-level security (Landlock, seccomp, OPA policy proxy).
               </div>
             </div>
+
+            {/* Install instructions when not installed */}
+            {!installed && (
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)" }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>Install Manually</div>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.6, fontFamily: "monospace" }}>
+                  # Recommended (requires uv)<br />
+                  uv tool install -U openshell<br /><br />
+                  # Or via pip<br />
+                  pip install -U openshell
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
