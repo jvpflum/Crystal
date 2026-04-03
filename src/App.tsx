@@ -8,12 +8,15 @@ import { ToastProvider } from "@/components/shell/Toast";
 import { ErrorBoundary } from "@/components/shell/ErrorBoundary";
 import { Onboarding } from "@/components/shell/Onboarding";
 import { useAppStore } from "@/stores/appStore";
+import { useDataStore } from "@/stores/dataStore";
 import { useToggleWindowShortcut } from "@/hooks/useGlobalShortcut";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useStorage } from "@/hooks/useStorage";
 import { openclawClient } from "@/lib/openclaw";
 import { Loader2 } from "lucide-react";
 import "./index.css";
+
+useDataStore.getState().hydrateFromDisk();
 
 const HomeView = lazy(() => import("@/components/views/HomeView").then(m => ({ default: m.HomeView })));
 const ConversationView = lazy(() => import("@/components/views/ConversationView").then(m => ({ default: m.ConversationView })));
@@ -112,7 +115,10 @@ function App() {
     const unsubscribe = openclawClient.onStatusChange(statusCb);
 
     openclawClient.connectGateway().then(connected => {
-      if (!disposed) setGatewayConnected(connected);
+      if (!disposed) {
+        setGatewayConnected(connected);
+        if (connected) useDataStore.getState().prefetchAll();
+      }
     }).catch(() => { if (!disposed) setGatewayConnected(false); });
 
     const scheduleReconnect = (delay: number) => {
@@ -125,7 +131,10 @@ function App() {
         }
         try {
           const ok = await openclawClient.connectGateway();
-          if (!disposed) setGatewayConnected(ok);
+          if (!disposed) {
+            setGatewayConnected(ok);
+            if (ok) useDataStore.getState().prefetchAll();
+          }
           scheduleReconnect(ok ? 30_000 : 10_000);
         } catch {
           if (!disposed) setGatewayConnected(false);

@@ -8,7 +8,7 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<{ stdout: string; stderr: string; code: number }>>();
 
-const DEFAULT_TTL = 30_000;
+const DEFAULT_TTL = 120_000;
 
 export async function cachedCommand(
   command: string,

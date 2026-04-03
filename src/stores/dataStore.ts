@@ -19,6 +19,10 @@ interface DataState {
   sessions: CacheEntry<Record<string, unknown>[]> | null;
 
   _inflight: Record<string, Promise<unknown>>;
+  _hydrated: boolean;
+
+  hydrateFromDisk: () => void;
+  prefetchAll: () => Promise<void>;
 
   getCronJobs: (force?: boolean) => Promise<Record<string, unknown>[]>;
   getAgents: (force?: boolean) => Promise<Record<string, unknown>[]>;
@@ -31,23 +35,148 @@ interface DataState {
   invalidate: (key?: CacheKey) => void;
 }
 
-const TTL = {
-  cronJobs: 30_000,
-  agents: 60_000,
-  memoryStatus: 60_000,
-  systemStatus: 30_000,
-  tasks: 15_000,
-  channelStatus: 30_000,
-  skills: 60_000,
-  sessions: 15_000,
+const TTL: Record<CacheKey, number> = {
+  skills:        300_000, // 5 min – rarely change
+  agents:        180_000, // 3 min
+  memoryStatus:  120_000, // 2 min
+  cronJobs:      120_000, // 2 min
+  channelStatus: 120_000, // 2 min
+  systemStatus:   60_000, // 1 min
+  tasks:          30_000, // 30 s – more dynamic
+  sessions:       30_000, // 30 s
 };
+
+const DISK_KEY = "crystal_data_cache";
+const DISK_MAX_AGE = 24 * 60 * 60 * 1000; // 24 h
 
 function isFresh<T>(entry: CacheEntry<T> | null, ttl: number): entry is CacheEntry<T> {
   return entry !== null && Date.now() - entry.fetchedAt < ttl;
 }
 
+function persistToDisk(state: DataState) {
+  try {
+    const snapshot: Record<string, CacheEntry<unknown>> = {};
+    for (const key of Object.keys(TTL) as CacheKey[]) {
+      const entry = state[key];
+      if (entry) snapshot[key] = entry as CacheEntry<unknown>;
+    }
+    localStorage.setItem(DISK_KEY, JSON.stringify(snapshot));
+  } catch { /* quota or serialisation error – ignore */ }
+}
+
+function loadFromDisk(): Partial<Record<CacheKey, CacheEntry<unknown>>> {
+  try {
+    const raw = localStorage.getItem(DISK_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, CacheEntry<unknown>>;
+    const now = Date.now();
+    const result: Partial<Record<CacheKey, CacheEntry<unknown>>> = {};
+    for (const key of Object.keys(TTL) as CacheKey[]) {
+      const entry = parsed[key];
+      if (entry && now - entry.fetchedAt < DISK_MAX_AGE) {
+        result[key] = entry;
+      }
+    }
+    return result;
+  } catch { return {}; }
+}
+
 async function runCommand(command: string): Promise<{ stdout: string; stderr: string; code: number }> {
   return invoke<{ stdout: string; stderr: string; code: number }>("execute_command", { command, cwd: null });
+}
+
+function makeGetter<T>(
+  key: CacheKey,
+  fetcher: () => Promise<T>,
+) {
+  return async (force = false): Promise<T> => {
+    const state = useDataStore.getState();
+    if (!force && isFresh(state[key] as CacheEntry<T> | null, TTL[key])) {
+      return (state[key] as CacheEntry<T>).data;
+    }
+    if (key in state._inflight) return state._inflight[key] as Promise<T>;
+
+    const promise = fetcher()
+      .then(data => {
+        useDataStore.setState({ [key]: { data, fetchedAt: Date.now() } } as Partial<DataState>);
+        persistToDisk(useDataStore.getState());
+        return data;
+      })
+      .catch(() => {
+        const fallback = useDataStore.getState()[key];
+        return (fallback as CacheEntry<T> | null)?.data ?? (Array.isArray((useDataStore.getState()[key] as CacheEntry<T> | null)?.data) ? [] : {}) as T;
+      })
+      .finally(() => {
+        const inf = { ...useDataStore.getState()._inflight };
+        delete inf[key];
+        useDataStore.setState({ _inflight: inf });
+      });
+
+    useDataStore.setState({ _inflight: { ...useDataStore.getState()._inflight, [key]: promise } });
+    return promise;
+  };
+}
+
+async function fetchCronJobs(): Promise<Record<string, unknown>[]> {
+  const r = await runCommand("openclaw cron list --json --all");
+  if (r.code === 0 && r.stdout.trim()) {
+    const p = JSON.parse(r.stdout);
+    return Array.isArray(p) ? p : p.jobs ?? [];
+  }
+  return [];
+}
+
+async function fetchAgents(): Promise<Record<string, unknown>[]> {
+  const r = await runCommand("openclaw agents list --json");
+  if (r.code === 0 && r.stdout.trim()) {
+    const d = JSON.parse(r.stdout);
+    return Array.isArray(d) ? d : (d.agents ?? d.items ?? []);
+  }
+  return [];
+}
+
+async function fetchMemoryStatus(): Promise<Record<string, unknown>> {
+  const r = await runCommand("openclaw memory status --json");
+  if (r.code === 0 && r.stdout.trim()) return JSON.parse(r.stdout);
+  return {};
+}
+
+async function fetchSystemStatus(): Promise<Record<string, unknown>> {
+  const r = await runCommand("openclaw health");
+  return { healthy: r.code === 0, text: r.stdout, fetchedAt: Date.now() };
+}
+
+async function fetchTasks(): Promise<Record<string, unknown>[]> {
+  const r = await runCommand("openclaw tasks list --json");
+  if (r.code === 0 && r.stdout.trim()) {
+    const p = JSON.parse(r.stdout);
+    return Array.isArray(p) ? p : p.tasks ?? p.runs ?? [];
+  }
+  return [];
+}
+
+async function fetchChannelStatus(): Promise<Record<string, unknown>> {
+  const r = await runCommand("openclaw channels status --json");
+  if (r.code === 0 && r.stdout.trim()) return JSON.parse(r.stdout);
+  return {};
+}
+
+async function fetchSkills(): Promise<Record<string, unknown>[]> {
+  const r = await runCommand("openclaw skills list --json");
+  if (r.code === 0 && r.stdout.trim()) {
+    const p = JSON.parse(r.stdout);
+    return Array.isArray(p) ? p : p.skills ?? [];
+  }
+  return [];
+}
+
+async function fetchSessions(): Promise<Record<string, unknown>[]> {
+  const r = await runCommand("openclaw sessions --json");
+  if (r.code === 0 && r.stdout.trim()) {
+    const p = JSON.parse(r.stdout);
+    return p.sessions ?? (Array.isArray(p) ? p : []);
+  }
+  return [];
 }
 
 export const useDataStore = create<DataState>((set, get) => ({
@@ -60,216 +189,50 @@ export const useDataStore = create<DataState>((set, get) => ({
   skills: null,
   sessions: null,
   _inflight: {},
+  _hydrated: false,
 
-  getCronJobs: async (force = false) => {
-    const state = get();
-    if (!force && isFresh(state.cronJobs, TTL.cronJobs)) return state.cronJobs.data;
-    if ("cronJobs" in state._inflight) return state._inflight["cronJobs"] as Promise<Record<string, unknown>[]>;
-
-    const promise = (async () => {
-      try {
-        const result = await runCommand("openclaw cron list --json --all");
-        if (result.code === 0 && result.stdout.trim()) {
-          const parsed = JSON.parse(result.stdout);
-          const data = Array.isArray(parsed) ? parsed : parsed.jobs ?? [];
-          set({ cronJobs: { data, fetchedAt: Date.now() } });
-          return data;
-        }
-      } catch { /* fall through */ }
-      const fallback = get().cronJobs?.data ?? [];
-      return fallback;
-    })().finally(() => {
-      const inf = { ...get()._inflight };
-      delete inf["cronJobs"];
-      set({ _inflight: inf });
+  hydrateFromDisk: () => {
+    if (get()._hydrated) return;
+    const disk = loadFromDisk();
+    set({
+      ...(disk as Partial<DataState>),
+      _hydrated: true,
     });
-
-    set({ _inflight: { ...get()._inflight, cronJobs: promise } });
-    return promise;
   },
 
-  getAgents: async (force = false) => {
+  prefetchAll: async () => {
     const state = get();
-    if (!force && isFresh(state.agents, TTL.agents)) return state.agents.data;
-    if ("agents" in state._inflight) return state._inflight["agents"] as Promise<Record<string, unknown>[]>;
-
-    const promise = (async () => {
-      try {
-        const result = await runCommand("openclaw agents list --json");
-        if (result.code === 0 && result.stdout.trim()) {
-          const data = JSON.parse(result.stdout);
-          const arr = Array.isArray(data) ? data : (data.agents ?? data.items ?? []);
-          set({ agents: { data: arr, fetchedAt: Date.now() } });
-          return arr;
-        }
-      } catch { /* fall through */ }
-      return get().agents?.data ?? [];
-    })().finally(() => {
-      const inf = { ...get()._inflight };
-      delete inf["agents"];
-      set({ _inflight: inf });
-    });
-
-    set({ _inflight: { ...get()._inflight, agents: promise } });
-    return promise;
+    const fetchers: Promise<unknown>[] = [];
+    if (!isFresh(state.agents, TTL.agents)) fetchers.push(state.getAgents());
+    if (!isFresh(state.cronJobs, TTL.cronJobs)) fetchers.push(state.getCronJobs());
+    if (!isFresh(state.skills, TTL.skills)) fetchers.push(state.getSkills());
+    if (!isFresh(state.systemStatus, TTL.systemStatus)) fetchers.push(state.getSystemStatus());
+    if (!isFresh(state.channelStatus, TTL.channelStatus)) fetchers.push(state.getChannelStatus());
+    if (!isFresh(state.tasks, TTL.tasks)) fetchers.push(state.getTasks());
+    if (!isFresh(state.sessions, TTL.sessions)) fetchers.push(state.getSessions());
+    if (!isFresh(state.memoryStatus, TTL.memoryStatus)) fetchers.push(state.getMemoryStatus());
+    await Promise.allSettled(fetchers);
   },
 
-  getMemoryStatus: async (force = false) => {
-    const state = get();
-    if (!force && isFresh(state.memoryStatus, TTL.memoryStatus)) return state.memoryStatus.data;
-    if ("memoryStatus" in state._inflight) return state._inflight["memoryStatus"] as Promise<Record<string, unknown>>;
-
-    const promise = (async () => {
-      try {
-        const result = await runCommand("openclaw memory status --json");
-        if (result.code === 0 && result.stdout.trim()) {
-          const data = JSON.parse(result.stdout);
-          set({ memoryStatus: { data, fetchedAt: Date.now() } });
-          return data;
-        }
-      } catch { /* fall through */ }
-      return get().memoryStatus?.data ?? {};
-    })().finally(() => {
-      const inf = { ...get()._inflight };
-      delete inf["memoryStatus"];
-      set({ _inflight: inf });
-    });
-
-    set({ _inflight: { ...get()._inflight, memoryStatus: promise } });
-    return promise;
-  },
-
-  getSystemStatus: async (force = false) => {
-    const state = get();
-    if (!force && isFresh(state.systemStatus, TTL.systemStatus)) return state.systemStatus.data;
-    if ("systemStatus" in state._inflight) return state._inflight["systemStatus"] as Promise<Record<string, unknown>>;
-
-    const promise = (async () => {
-      try {
-        const result = await runCommand("openclaw health");
-        const data = { healthy: result.code === 0, text: result.stdout, fetchedAt: Date.now() };
-        set({ systemStatus: { data, fetchedAt: Date.now() } });
-        return data;
-      } catch { /* fall through */ }
-      return get().systemStatus?.data ?? { healthy: false };
-    })().finally(() => {
-      const inf = { ...get()._inflight };
-      delete inf["systemStatus"];
-      set({ _inflight: inf });
-    });
-
-    set({ _inflight: { ...get()._inflight, systemStatus: promise } });
-    return promise;
-  },
-
-  getTasks: async (force = false) => {
-    const state = get();
-    if (!force && isFresh(state.tasks, TTL.tasks)) return state.tasks.data;
-    if ("tasks" in state._inflight) return state._inflight["tasks"] as Promise<Record<string, unknown>[]>;
-
-    const promise = (async () => {
-      try {
-        const result = await runCommand("openclaw tasks list --json");
-        if (result.code === 0 && result.stdout.trim()) {
-          const parsed = JSON.parse(result.stdout);
-          const data = Array.isArray(parsed) ? parsed : parsed.tasks ?? parsed.runs ?? [];
-          set({ tasks: { data, fetchedAt: Date.now() } });
-          return data;
-        }
-      } catch { /* fall through */ }
-      return get().tasks?.data ?? [];
-    })().finally(() => {
-      const inf = { ...get()._inflight };
-      delete inf["tasks"];
-      set({ _inflight: inf });
-    });
-
-    set({ _inflight: { ...get()._inflight, tasks: promise } });
-    return promise;
-  },
-
-  getChannelStatus: async (force = false) => {
-    const state = get();
-    if (!force && isFresh(state.channelStatus, TTL.channelStatus)) return state.channelStatus.data;
-    if ("channelStatus" in state._inflight) return state._inflight["channelStatus"] as Promise<Record<string, unknown>>;
-
-    const promise = (async () => {
-      try {
-        const result = await runCommand("openclaw channels status --json");
-        if (result.code === 0 && result.stdout.trim()) {
-          const data = JSON.parse(result.stdout);
-          set({ channelStatus: { data, fetchedAt: Date.now() } });
-          return data;
-        }
-      } catch { /* fall through */ }
-      return get().channelStatus?.data ?? {};
-    })().finally(() => {
-      const inf = { ...get()._inflight };
-      delete inf["channelStatus"];
-      set({ _inflight: inf });
-    });
-
-    set({ _inflight: { ...get()._inflight, channelStatus: promise } });
-    return promise;
-  },
-
-  getSkills: async (force = false) => {
-    const state = get();
-    if (!force && isFresh(state.skills, TTL.skills)) return state.skills.data;
-    if ("skills" in state._inflight) return state._inflight["skills"] as Promise<Record<string, unknown>[]>;
-
-    const promise = (async () => {
-      try {
-        const result = await runCommand("openclaw skills list --json");
-        if (result.code === 0 && result.stdout.trim()) {
-          const parsed = JSON.parse(result.stdout);
-          const data = Array.isArray(parsed) ? parsed : parsed.skills ?? [];
-          set({ skills: { data, fetchedAt: Date.now() } });
-          return data;
-        }
-      } catch { /* fall through */ }
-      return get().skills?.data ?? [];
-    })().finally(() => {
-      const inf = { ...get()._inflight };
-      delete inf["skills"];
-      set({ _inflight: inf });
-    });
-
-    set({ _inflight: { ...get()._inflight, skills: promise } });
-    return promise;
-  },
-
-  getSessions: async (force = false) => {
-    const state = get();
-    if (!force && isFresh(state.sessions, TTL.sessions)) return state.sessions.data;
-    if ("sessions" in state._inflight) return state._inflight["sessions"] as Promise<Record<string, unknown>[]>;
-
-    const promise = (async () => {
-      try {
-        const result = await runCommand("openclaw sessions --json");
-        if (result.code === 0 && result.stdout.trim()) {
-          const parsed = JSON.parse(result.stdout);
-          const data = parsed.sessions ?? (Array.isArray(parsed) ? parsed : []);
-          set({ sessions: { data, fetchedAt: Date.now() } });
-          return data;
-        }
-      } catch { /* fall through */ }
-      return get().sessions?.data ?? [];
-    })().finally(() => {
-      const inf = { ...get()._inflight };
-      delete inf["sessions"];
-      set({ _inflight: inf });
-    });
-
-    set({ _inflight: { ...get()._inflight, sessions: promise } });
-    return promise;
-  },
+  getCronJobs: makeGetter("cronJobs", fetchCronJobs),
+  getAgents: makeGetter("agents", fetchAgents),
+  getMemoryStatus: makeGetter("memoryStatus", fetchMemoryStatus),
+  getSystemStatus: makeGetter("systemStatus", fetchSystemStatus),
+  getTasks: makeGetter("tasks", fetchTasks),
+  getChannelStatus: makeGetter("channelStatus", fetchChannelStatus),
+  getSkills: makeGetter("skills", fetchSkills),
+  getSessions: makeGetter("sessions", fetchSessions),
 
   invalidate: (key) => {
     if (key) {
-      set({ [key]: null });
+      set({ [key]: null } as Partial<DataState>);
     } else {
-      set({ cronJobs: null, agents: null, memoryStatus: null, systemStatus: null, tasks: null, channelStatus: null, skills: null, sessions: null });
+      set({
+        cronJobs: null, agents: null, memoryStatus: null,
+        systemStatus: null, tasks: null, channelStatus: null,
+        skills: null, sessions: null,
+      });
     }
+    persistToDisk(get());
   },
 }));

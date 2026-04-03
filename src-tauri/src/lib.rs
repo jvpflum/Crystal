@@ -1299,7 +1299,48 @@ fn cleanup_servers(app: &AppHandle<impl Runtime>) {
             println!("Stopping OpenClaw daemon...");
             kill_process_tree(&mut child);
         }
+
+        // Kill any streaming commands still running
+        let mut streaming = state.streaming.lock().unwrap_or_else(|e| e.into_inner());
+        for (id, proc) in streaming.iter() {
+            println!("Killing streaming process {}...", id);
+            let pid = proc.pid;
+            #[cfg(target_os = "windows")]
+            {
+                let mut cmd = Command::new("taskkill");
+                cmd.args(["/F", "/T", "/PID", &pid.to_string()])
+                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                    .creation_flags(CREATE_NO_WINDOW);
+                let _ = cmd.output();
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
+            }
+        }
+        streaming.clear();
     }
+
+    // Kill any orphaned processes on Crystal-managed ports
+    #[cfg(target_os = "windows")]
+    {
+        let ports = [8080u16, 8081, 8090, 8091];
+        for port in ports {
+            if check_port_in_use(port) {
+                println!("Killing orphan on port {}...", port);
+                let kill_cmd = format!(
+                    "Get-NetTCPConnection -LocalPort {} -ErrorAction SilentlyContinue | ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}",
+                    port
+                );
+                let mut cmd = Command::new("powershell");
+                cmd.args(["-NoProfile", "-NonInteractive", "-Command", &kill_cmd])
+                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                    .creation_flags(CREATE_NO_WINDOW);
+                let _ = cmd.output();
+            }
+        }
+    }
+    println!("All Crystal services stopped.");
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1317,9 +1358,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                println!("Window close requested – shutting down all services...");
+                cleanup_servers(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![
