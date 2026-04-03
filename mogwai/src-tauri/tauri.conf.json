@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Crystal",
+  "version": "0.5.0",
+  "identifier": "com.jarro.crystal",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Crystal",
+        "width": 1100,
+        "height": 750,
+        "minWidth": 800,
+        "minHeight": 550,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": false,
+        "resizable": true,
+        "shadow": true,
+        "center": true,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; img-src 'self' data: blob:; font-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "resources": {
+      "../scripts/*": "scripts/"
+    }
+  }
+}
