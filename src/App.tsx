@@ -103,25 +103,43 @@ function App() {
   }, [setView]);
 
   useEffect(() => {
-    openclawClient.onStatusChange((s) => setGatewayConnected(s === "connected"));
-    openclawClient.connectGateway().then(connected => {
-      setGatewayConnected(connected);
-    }).catch(() => setGatewayConnected(false));
+    let disposed = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    let attempts = 0;
-    const tryReconnect = async () => {
-      try {
-        if (!openclawClient.isGatewayConnected()) {
-          const ok = await openclawClient.connectGateway();
-          setGatewayConnected(ok);
-        }
-      } catch { setGatewayConnected(false); }
-      attempts++;
-      const delay = attempts < 6 ? 5_000 : 15_000;
-      reconnectTimer = setTimeout(tryReconnect, delay);
+    const statusCb = (s: string) => {
+      if (!disposed) setGatewayConnected(s === "connected");
     };
-    let reconnectTimer = setTimeout(tryReconnect, 5_000);
-    return () => clearTimeout(reconnectTimer);
+    const unsubscribe = openclawClient.onStatusChange(statusCb);
+
+    openclawClient.connectGateway().then(connected => {
+      if (!disposed) setGatewayConnected(connected);
+    }).catch(() => { if (!disposed) setGatewayConnected(false); });
+
+    const scheduleReconnect = (delay: number) => {
+      if (disposed) return;
+      reconnectTimer = setTimeout(async () => {
+        if (disposed) return;
+        if (openclawClient.isGatewayConnected()) {
+          scheduleReconnect(30_000);
+          return;
+        }
+        try {
+          const ok = await openclawClient.connectGateway();
+          if (!disposed) setGatewayConnected(ok);
+          scheduleReconnect(ok ? 30_000 : 10_000);
+        } catch {
+          if (!disposed) setGatewayConnected(false);
+          scheduleReconnect(10_000);
+        }
+      }, delay);
+    };
+    scheduleReconnect(8_000);
+
+    return () => {
+      disposed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (unsubscribe) unsubscribe();
+    };
   }, [setGatewayConnected]);
 
   if (!isInitialized) {

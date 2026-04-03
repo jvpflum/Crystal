@@ -67,9 +67,21 @@ interface AppState {
   cycleThinkingLevel: () => void;
 }
 
+const PERSISTED_VIEW_KEY = "crystal_current_view";
+function loadPersistedView(): AppView {
+  try {
+    const saved = localStorage.getItem(PERSISTED_VIEW_KEY);
+    if (saved) return saved as AppView;
+  } catch { /* ignore */ }
+  return "home";
+}
+
 export const useAppStore = create<AppState>((set) => ({
-  currentView: "home",
-  setView: (view) => set({ currentView: view }),
+  currentView: loadPersistedView(),
+  setView: (view) => {
+    try { localStorage.setItem(PERSISTED_VIEW_KEY, view); } catch { /* ignore */ }
+    set({ currentView: view });
+  },
 
   voiceState: "idle",
   setVoiceState: (state) => set({ voiceState: state }),

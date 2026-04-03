@@ -670,10 +670,13 @@ export function CityView() {
 
       const dpr = window.devicePixelRatio || 1;
       const cw = w.canvasW, ch = w.canvasH;
-      canvas.width = cw * dpr; canvas.height = ch * dpr;
-      canvas.style.width = `${cw}px`; canvas.style.height = `${ch}px`;
+      const targetW = Math.round(cw * dpr), targetH = Math.round(ch * dpr);
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW; canvas.height = targetH;
+        canvas.style.width = `${cw}px`; canvas.style.height = `${ch}px`;
+      }
       ctx.save();
-      ctx.scale(dpr, dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       const cx = cw / 2, cy = ch / 2;
 

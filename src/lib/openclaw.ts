@@ -133,6 +133,7 @@ class OpenClawClient {
   private _configCache: { data: OpenClawConfig; ts: number } | null = null;
   private _modelsCache: { data: string[]; ts: number } | null = null;
   private _currentModel: string | null = null;
+  private _didInitialSync = false;
   private static CONFIG_TTL = 30_000;
   private static MODELS_TTL = 30_000;
 
@@ -156,7 +157,10 @@ class OpenClawClient {
 
   /* ── Gateway connection (via Rust port check + CLI) ── */
 
-  onStatusChange(cb: (s: GatewayStatus) => void) { this.statusCallbacks.push(cb); }
+  onStatusChange(cb: (s: GatewayStatus) => void): () => void {
+    this.statusCallbacks.push(cb);
+    return () => { this.statusCallbacks = this.statusCallbacks.filter(c => c !== cb); };
+  }
 
   private setGwStatus(s: GatewayStatus) {
     this.gwStatus = s;
@@ -174,20 +178,17 @@ class OpenClawClient {
         return false;
       }
       try {
-        const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        await invoke<{ stdout: string; code: number }>("execute_command", {
           command: `${OPENCLAW_CMD} health`,
           cwd: null,
         });
-        if (result.code === 0) {
-          this.setGwStatus("connected");
-          await this.syncModelFromOpenClaw();
-          this.ensureDailyMemoryCron();
-          return true;
-        }
-      } catch { /* fall through */ }
+      } catch { /* health check is best-effort */ }
       this.setGwStatus("connected");
-      await this.syncModelFromOpenClaw();
-      this.ensureDailyMemoryCron();
+      if (!this._didInitialSync) {
+        this._didInitialSync = true;
+        this.syncModelFromOpenClaw().catch(() => {});
+        this.ensureDailyMemoryCron().catch(() => {});
+      }
       return true;
     } catch {
       this.setGwStatus("error");
