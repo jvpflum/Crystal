@@ -39,7 +39,16 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      ignored: ["**/src-tauri/**"],
+      ignored: [
+        "**/src-tauri/**",
+        "**/node_modules/**",
+        "**/.git/**",
+        "**/target/**",
+        "**/dist/**",
+        "**/*.log",
+      ],
+      usePolling: true,
+      interval: 2000,
     },
   },
 }));

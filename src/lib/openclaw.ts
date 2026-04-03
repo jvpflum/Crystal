@@ -164,14 +164,18 @@ class OpenClawClient {
   }
 
   private setGwStatus(s: GatewayStatus) {
+    if (this.gwStatus === s) return;
     this.gwStatus = s;
     this.statusCallbacks.forEach(cb => cb(s));
   }
 
   getGatewayStatus(): GatewayStatus { return this.gwStatus; }
 
+  private _connectLock = false;
+
   async connectGateway(): Promise<boolean> {
-    this.setGwStatus("connecting");
+    if (this._connectLock) return this.gwStatus === "connected";
+    this._connectLock = true;
     try {
       const status = await invoke<{ openclaw_running: boolean }>("get_server_status");
       if (!status.openclaw_running) {
@@ -194,6 +198,8 @@ class OpenClawClient {
     } catch {
       this.setGwStatus("error");
       return false;
+    } finally {
+      this._connectLock = false;
     }
   }
 

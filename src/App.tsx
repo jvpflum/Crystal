@@ -50,10 +50,30 @@ const TasksView = lazy(() => import("@/components/views/TasksView").then(m => ({
 const ApprovalsView = lazy(() => import("@/components/views/ApprovalsView").then(m => ({ default: m.ApprovalsView })));
 const CityView = lazy(() => import("@/components/views/CityView").then(m => ({ default: m.CityView })));
 
+const KEEP_ALIVE_MS = 30_000;
+
 function ViewSlot({ id, active, children }: { id: string; active: boolean; children: React.ReactNode }) {
   const mountedRef = useRef(false);
-  if (active && !mountedRef.current) mountedRef.current = true;
-  if (!mountedRef.current) return null;
+  const lastActiveRef = useRef(0);
+  const [alive, setAlive] = useState(false);
+
+  if (active) {
+    mountedRef.current = true;
+    lastActiveRef.current = Date.now();
+  }
+
+  useEffect(() => {
+    if (active) {
+      setAlive(true);
+      return;
+    }
+    if (!mountedRef.current) return;
+    const timer = setTimeout(() => setAlive(false), KEEP_ALIVE_MS);
+    return () => clearTimeout(timer);
+  }, [active]);
+
+  if (!mountedRef.current || !alive) return null;
+
   return (
     <div key={id} style={{ display: active ? "contents" : "none" }}>
       {children}
@@ -108,41 +128,42 @@ function App() {
   useEffect(() => {
     let disposed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastGwState: boolean | null = null;
 
-    const statusCb = (s: string) => {
-      if (!disposed) setGatewayConnected(s === "connected");
+    const safeSetGw = (connected: boolean) => {
+      if (disposed || connected === lastGwState) return;
+      lastGwState = connected;
+      setGatewayConnected(connected);
     };
+
+    const statusCb = (s: string) => safeSetGw(s === "connected");
     const unsubscribe = openclawClient.onStatusChange(statusCb);
 
     openclawClient.connectGateway().then(connected => {
-      if (!disposed) {
-        setGatewayConnected(connected);
-        if (connected) useDataStore.getState().prefetchAll();
-      }
-    }).catch(() => { if (!disposed) setGatewayConnected(false); });
+      safeSetGw(connected);
+      if (connected) useDataStore.getState().prefetchAll();
+    }).catch(() => safeSetGw(false));
 
     const scheduleReconnect = (delay: number) => {
       if (disposed) return;
       reconnectTimer = setTimeout(async () => {
         if (disposed) return;
         if (openclawClient.isGatewayConnected()) {
-          scheduleReconnect(60_000);
+          scheduleReconnect(90_000);
           return;
         }
         try {
           const ok = await openclawClient.connectGateway();
-          if (!disposed) {
-            setGatewayConnected(ok);
-            if (ok) useDataStore.getState().prefetchAll();
-          }
-          scheduleReconnect(ok ? 60_000 : 15_000);
+          safeSetGw(ok);
+          if (ok) useDataStore.getState().prefetchAll();
+          scheduleReconnect(ok ? 90_000 : 20_000);
         } catch {
-          if (!disposed) setGatewayConnected(false);
-          scheduleReconnect(20_000);
+          safeSetGw(false);
+          scheduleReconnect(30_000);
         }
       }, delay);
     };
-    scheduleReconnect(10_000);
+    scheduleReconnect(15_000);
 
     return () => {
       disposed = true;
