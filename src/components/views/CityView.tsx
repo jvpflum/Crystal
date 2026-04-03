@@ -164,7 +164,7 @@ function drawSky(ctx: CanvasRenderingContext2D, w: number, h: number, stars: Sta
     ctx.lineTo(ss.x - ss.vx * 12, ss.y - ss.vy * 12); ctx.stroke();
   }
   ctx.globalAlpha = 1;
-  if (frame % 300 === 0 && shootingStars.length < 3) {
+  if (frame % 900 === 0 && shootingStars.length < 1) {
     shootingStars.push({ x: Math.random() * w, y: Math.random() * h * 0.3, vx: 3 + Math.random() * 4, vy: 1.5 + Math.random() * 2, life: 40 + Math.random() * 30, maxLife: 70 });
   }
 
@@ -235,18 +235,19 @@ function drawGround(ctx: CanvasRenderingContext2D, cx: number, cy: number, frame
 
 // ─── Steam Vents ───────────────────────────────────────────────
 
-function drawSteamVents(ctx: CanvasRenderingContext2D, cx: number, cy: number, vents: SteamVent[], particles: Particle[], _frame: number) {
+function drawSteamVents(ctx: CanvasRenderingContext2D, cx: number, cy: number, vents: SteamVent[], particles: Particle[], _frame: number, hasActivity?: boolean) {
   for (const v of vents) {
     const vx = cx + v.x, vy = cy + v.y;
-    // Vent grate
     ctx.fillStyle = "rgba(20,20,30,0.6)"; ctx.fillRect(vx - 3, vy - 1, 6, 2);
     ctx.strokeStyle = `rgba(0,255,242,0.15)`; ctx.lineWidth = 0.5; ctx.strokeRect(vx - 3, vy - 1, 6, 2);
 
+    if (!hasActivity) continue;
+
     v.timer--;
     if (v.timer <= 0) {
-      v.timer = v.interval;
-      if (particles.length < 350) {
-        for (let i = 0; i < 6; i++) {
+      v.timer = v.interval + Math.floor(Math.random() * 60);
+      if (particles.length < 150) {
+        for (let i = 0; i < 4; i++) {
           particles.push({
             x: vx + (Math.random() - 0.5) * 4, y: vy,
             vx: (Math.random() - 0.5) * 0.4, vy: -0.8 - Math.random() * 0.6,
@@ -347,7 +348,7 @@ function drawHoloCore(ctx: CanvasRenderingContext2D, x: number, y: number, frame
 
 // ─── Electric Arcs ─────────────────────────────────────────────
 
-function updateArcs(arcs: ElectricArc[], frame: number, cx: number, cy: number) {
+function updateArcs(arcs: ElectricArc[], frame: number, cx: number, cy: number, activeBuildings?: Set<string>) {
   for (let i = arcs.length - 1; i >= 0; i--) {
     arcs[i].life--;
     if (arcs[i].life <= 0) arcs.splice(i, 1);
@@ -365,11 +366,15 @@ function updateArcs(arcs: ElectricArc[], frame: number, cx: number, cy: number) 
       arc.points.push({ x: tx, y: ty });
     }
   }
-  if (frame % 180 === 0 && arcs.length < 2) {
-    const a = Math.floor(Math.random() * BUILDINGS.length);
-    let b = Math.floor(Math.random() * BUILDINGS.length);
-    while (b === a) b = Math.floor(Math.random() * BUILDINGS.length);
-    arcs.push({ fromIdx: a, toIdx: b, life: 12 + Math.floor(Math.random() * 8), points: [] });
+  const activeCount = activeBuildings?.size ?? 0;
+  if (activeCount >= 2 && frame % 300 === 0 && arcs.length < 1) {
+    const activeIdxs = BUILDINGS.map((b, i) => activeBuildings?.has(b.id) ? i : -1).filter(i => i >= 0);
+    if (activeIdxs.length >= 2) {
+      const a = activeIdxs[Math.floor(Math.random() * activeIdxs.length)];
+      let b = activeIdxs[Math.floor(Math.random() * activeIdxs.length)];
+      while (b === a && activeIdxs.length > 1) b = activeIdxs[Math.floor(Math.random() * activeIdxs.length)];
+      arcs.push({ fromIdx: a, toIdx: b, life: 10 + Math.floor(Math.random() * 6), points: [] });
+    }
   }
 }
 
@@ -391,28 +396,39 @@ function drawArcs(ctx: CanvasRenderingContext2D, arcs: ElectricArc[]) {
 
 // ─── Drones ────────────────────────────────────────────────────
 
-function updateDrones(drones: Drone[], frame: number) {
+function updateDrones(drones: Drone[], frame: number, activeBuildings?: Set<string>) {
+  const activeCount = activeBuildings?.size ?? 0;
+  const desiredDrones = Math.min(activeCount, 2);
+
   for (const d of drones) {
     const dx = d.tx - d.x, dy = d.ty - d.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < 5) {
-      const target = BUILDINGS[Math.floor(Math.random() * BUILDINGS.length)];
-      d.tx = target.ox + (Math.random() - 0.5) * 40;
-      d.ty = target.oy - target.h - 20 + (Math.random() - 0.5) * 30;
+      const activeIdxs = BUILDINGS.map((b, i) => activeBuildings?.has(b.id) ? i : -1).filter(i => i >= 0);
+      const target = activeIdxs.length > 0
+        ? BUILDINGS[activeIdxs[Math.floor(Math.random() * activeIdxs.length)]]
+        : BUILDINGS[Math.floor(Math.random() * BUILDINGS.length)];
+      d.tx = target.ox + (Math.random() - 0.5) * 30;
+      d.ty = target.oy - target.h - 20 + (Math.random() - 0.5) * 20;
     } else {
       d.x += (dx / dist) * d.speed; d.y += (dy / dist) * d.speed;
     }
     d.trail.push({ x: d.x, y: d.y });
     if (d.trail.length > 12) d.trail.shift();
   }
-  if (frame === 1 && drones.length === 0) {
-    for (let i = 0; i < 4; i++) {
-      const src = BUILDINGS[i % BUILDINGS.length];
+
+  while (drones.length > desiredDrones) drones.pop();
+
+  if (drones.length < desiredDrones && frame % 120 === 0) {
+    const activeIdxs = BUILDINGS.map((b, i) => activeBuildings?.has(b.id) ? i : -1).filter(i => i >= 0);
+    if (activeIdxs.length > 0) {
+      const srcIdx = activeIdxs[Math.floor(Math.random() * activeIdxs.length)];
+      const src = BUILDINGS[srcIdx];
       drones.push({
         x: src.ox, y: src.oy - src.h - 30,
-        tx: src.ox + 50, ty: src.oy - src.h - 50,
-        speed: 0.8 + Math.random() * 0.6,
-        color: [N.cyan, N.magenta, N.green, N.amber][i],
+        tx: src.ox + 40, ty: src.oy - src.h - 50,
+        speed: 0.6 + Math.random() * 0.4,
+        color: [N.cyan, N.magenta, N.green, N.amber][drones.length % 4],
         trail: [], timer: 0,
       });
     }
@@ -456,10 +472,14 @@ function initBillboards(billboards: Billboard[]) {
 }
 
 function drawBillboards(ctx: CanvasRenderingContext2D, billboards: Billboard[], cx: number, cy: number, frame: number, agents: AgentSprite[], activeCount: number) {
-  // Update billboard content with live data
   if (billboards.length >= 3) {
-    billboards[0].lines = [`${agents.length} AGENTS`, activeCount > 0 ? "◉ ONLINE" : "◌ IDLE"];
-    billboards[2].lines = [agents.filter(a => a.state === "working").length > 0 ? "⚡ BUILDING" : "MONITORING"];
+    const working = agents.filter(a => a.state === "working" && a.task).length;
+    const walking = agents.filter(a => a.state === "walking").length;
+    billboards[0].lines = [`${agents.length} AGENTS`, working > 0 ? `${working} WORKING` : "ALL IDLE"];
+    billboards[2].lines = [
+      activeCount > 0 ? `${activeCount} ACTIVE` : "STANDBY",
+      working > 0 ? "⚡ BUILDING" : walking > 0 ? "◉ TRANSIT" : "◌ QUIET",
+    ];
   }
 
   for (const bb of billboards) {
@@ -726,9 +746,9 @@ function drawAgentSprite(ctx: CanvasRenderingContext2D, a: AgentSprite, frame: n
 
 // ─── Particles ─────────────────────────────────────────────────
 
-function emitNeonSmoke(p: Particle[], bx: number, by: number, b: BuildingDef) { if (p.length > 350) return; p.push({ x: bx + b.w * 0.55 + (Math.random() - 0.5) * 4, y: by - b.d * 0.6 - b.h - 22, vx: (Math.random() - 0.5) * 0.3, vy: -0.5 - Math.random() * 0.3, life: 60 + Math.random() * 40, maxLife: 100, color: N.orange, size: 2 + Math.random() * 2 }); }
-function emitDataSparkle(p: Particle[], bx: number, by: number, b: BuildingDef) { if (p.length > 350) return; p.push({ x: bx + (Math.random() - 0.5) * b.w * 1.2, y: by - b.h * 0.5 + (Math.random() - 0.5) * b.h * 0.6, vx: (Math.random() - 0.5) * 0.5, vy: -0.7 - Math.random() * 0.5, life: 35 + Math.random() * 25, maxLife: 60, color: N.purple, size: 1 + Math.random() * 1.5 }); }
-function emitCyanSpark(p: Particle[], bx: number, by: number, b: BuildingDef) { if (p.length > 350) return; p.push({ x: bx + (Math.random() - 0.5) * b.w, y: by - b.h - b.d * 2 - 14, vx: (Math.random() - 0.5) * 0.8, vy: -0.3 - Math.random() * 0.4, life: 25 + Math.random() * 20, maxLife: 45, color: N.cyan, size: 1 + Math.random() }); }
+function emitNeonSmoke(p: Particle[], bx: number, by: number, b: BuildingDef) { if (p.length > 150) return; p.push({ x: bx + b.w * 0.55 + (Math.random() - 0.5) * 4, y: by - b.d * 0.6 - b.h - 22, vx: (Math.random() - 0.5) * 0.3, vy: -0.5 - Math.random() * 0.3, life: 60 + Math.random() * 40, maxLife: 100, color: N.orange, size: 2 + Math.random() * 2 }); }
+function emitDataSparkle(p: Particle[], bx: number, by: number, b: BuildingDef) { if (p.length > 150) return; p.push({ x: bx + (Math.random() - 0.5) * b.w * 1.2, y: by - b.h * 0.5 + (Math.random() - 0.5) * b.h * 0.6, vx: (Math.random() - 0.5) * 0.5, vy: -0.7 - Math.random() * 0.5, life: 35 + Math.random() * 25, maxLife: 60, color: N.purple, size: 1 + Math.random() * 1.5 }); }
+function emitCyanSpark(p: Particle[], bx: number, by: number, b: BuildingDef) { if (p.length > 150) return; p.push({ x: bx + (Math.random() - 0.5) * b.w, y: by - b.h - b.d * 2 - 14, vx: (Math.random() - 0.5) * 0.8, vy: -0.3 - Math.random() * 0.4, life: 25 + Math.random() * 20, maxLife: 45, color: N.cyan, size: 1 + Math.random() }); }
 
 function updateParticles(particles: Particle[]) { for (let i = particles.length - 1; i >= 0; i--) { const p = particles[i]; p.x += p.vx; p.y += p.vy; p.life--; if (p.life <= 0) particles.splice(i, 1); } }
 
@@ -865,9 +885,18 @@ export function CityView() {
       w.cronCount = cronJobs.filter(c => c.enabled !== false).length;
 
       w.activeBuildings.clear();
-      if (runningTasks.length > 0) { w.activeBuildings.add("factory"); w.activeBuildings.add("office"); }
-      if (cronJobs.some(c => c.enabled !== false)) w.activeBuildings.add("clock");
-      w.activeBuildings.add("memory"); w.activeBuildings.add("comms"); w.activeBuildings.add("terminal");
+      const activeCronCount = cronJobs.filter(c => c.enabled !== false).length;
+      if (activeCronCount > 0) w.activeBuildings.add("clock");
+      for (const t of runningTasks) {
+        const kind = String(t.kind ?? t.type ?? "").toLowerCase();
+        if (kind.includes("cron")) w.activeBuildings.add("clock");
+        else if (kind.includes("skill") || kind.includes("build") || kind.includes("agent")) w.activeBuildings.add("factory");
+        else if (kind.includes("memory") || kind.includes("search") || kind.includes("embed")) w.activeBuildings.add("memory");
+        else if (kind.includes("channel") || kind.includes("message") || kind.includes("telegram")) w.activeBuildings.add("comms");
+        else w.activeBuildings.add("office");
+      }
+      if (sessions.some(s => s.kind === "chat" || s.kind === "conversation")) w.activeBuildings.add("terminal");
+      if (runningTasks.length > 0 && !w.activeBuildings.has("office")) w.activeBuildings.add("office");
 
       const existingIds = new Set(w.agents.map(a => a.id));
       for (const raw of agents) {
@@ -918,17 +947,44 @@ export function CityView() {
       if (a.state === "walking" && frame % 3 === 0) { a.trail.push({ x: a.x, y: a.y, age: 0 }); if (a.trail.length > 15) a.trail.shift(); }
       for (const t of a.trail) t.age++;
       while (a.trail.length > 0 && a.trail[0].age > 20) a.trail.shift();
+
       if (a.state === "walking") {
         const dx = a.tx - a.x, dy = a.ty - a.y, dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 4) { a.x = a.tx; a.y = a.ty; a.state = "working"; a.timer = 3 + Math.random() * 5; }
-        else { const speed = 48; a.x += (dx / dist) * speed * dt; a.y += (dy / dist) * speed * dt; }
+        if (dist < 4) {
+          a.x = a.tx; a.y = a.ty;
+          a.state = a.task ? "working" : "idle";
+          a.timer = a.task ? 4 + Math.random() * 6 : 5 + Math.random() * 10;
+        } else {
+          const speed = 42; a.x += (dx / dist) * speed * dt; a.y += (dy / dist) * speed * dt;
+        }
       } else if (a.state === "working" && a.timer <= 0) {
-        const target = BUILDINGS[Math.floor(Math.random() * BUILDINGS.length)];
-        a.tx = target.ox + (Math.random() - 0.5) * 12; a.ty = target.oy + (Math.random() - 0.5) * 6; a.state = "walking";
+        if (a.task) {
+          a.timer = 3 + Math.random() * 5;
+        } else {
+          const homeId = AGENT_HOMES[a.id] ?? "office";
+          const home = BUILDINGS.find(b => b.id === homeId)!;
+          a.tx = home.ox + (Math.random() - 0.5) * 10;
+          a.ty = home.oy + (Math.random() - 0.5) * 6;
+          a.state = "walking";
+        }
       } else if (a.state === "idle" && a.timer <= 0) {
-        const homeId = AGENT_HOMES[a.id] ?? "office"; const home = BUILDINGS.find(b => b.id === homeId)!;
-        const target = Math.random() < 0.4 ? home : BUILDINGS[Math.floor(Math.random() * BUILDINGS.length)];
-        a.tx = target.ox + (Math.random() - 0.5) * 12; a.ty = target.oy + (Math.random() - 0.5) * 6; a.state = "walking";
+        if (a.task) {
+          const tb = BUILDINGS.find(b => b.id === (a.targetBldg ?? "office"))!;
+          a.tx = tb.ox + (Math.random() - 0.5) * 10;
+          a.ty = tb.oy + (Math.random() - 0.5) * 6;
+          a.state = "walking";
+        } else {
+          const homeId = AGENT_HOMES[a.id] ?? "office";
+          const home = BUILDINGS.find(b => b.id === homeId)!;
+          const dx = home.ox - a.x, dy = home.oy - a.y;
+          if (Math.sqrt(dx * dx + dy * dy) > 15) {
+            a.tx = home.ox + (Math.random() - 0.5) * 8;
+            a.ty = home.oy + (Math.random() - 0.5) * 4;
+            a.state = "walking";
+          } else {
+            a.timer = 6 + Math.random() * 10;
+          }
+        }
       }
     }
   }, []);
@@ -948,10 +1004,10 @@ export function CityView() {
       if (time - w.lastDataPoll > 15000) { w.lastDataPoll = time; pollData(); }
       updateAgents(dt, w.frame);
       initBillboards(w.billboards);
-      updateDrones(w.drones, w.frame);
-      updateArcs(w.arcs, w.frame, w.canvasW / 2, w.canvasH / 2);
+      updateDrones(w.drones, w.frame, w.activeBuildings);
+      updateArcs(w.arcs, w.frame, w.canvasW / 2, w.canvasH / 2, w.activeBuildings);
 
-      if (w.frame % 3 === 0) {
+      if (w.frame % 8 === 0) {
         for (const b of BUILDINGS) {
           if (!w.activeBuildings.has(b.id)) continue;
           const bx = w.canvasW / 2 + b.ox, by = w.canvasH / 2 + b.oy;
@@ -977,7 +1033,7 @@ export function CityView() {
       drawSky(ctx, cw, ch, w.stars, w.frame, w.shootingStars);
       drawRain(ctx, w.rain, cw, ch);
       drawGround(ctx, cx, cy, w.frame);
-      drawSteamVents(ctx, cx, cy, w.steamVents, w.particles, w.frame);
+      drawSteamVents(ctx, cx, cy, w.steamVents, w.particles, w.frame, w.activeBuildings.size > 0);
       drawPaths(ctx, cx, cy, w.frame, w.pulses);
       drawHoloCore(ctx, cx, cy + 20, w.frame);
 
