@@ -126,7 +126,7 @@ function App() {
       reconnectTimer = setTimeout(async () => {
         if (disposed) return;
         if (openclawClient.isGatewayConnected()) {
-          scheduleReconnect(30_000);
+          scheduleReconnect(60_000);
           return;
         }
         try {
@@ -135,14 +135,14 @@ function App() {
             setGatewayConnected(ok);
             if (ok) useDataStore.getState().prefetchAll();
           }
-          scheduleReconnect(ok ? 30_000 : 10_000);
+          scheduleReconnect(ok ? 60_000 : 15_000);
         } catch {
           if (!disposed) setGatewayConnected(false);
-          scheduleReconnect(10_000);
+          scheduleReconnect(20_000);
         }
       }, delay);
     };
-    scheduleReconnect(8_000);
+    scheduleReconnect(10_000);
 
     return () => {
       disposed = true;

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { cachedCommand } from "@/lib/cache";
 import {
   Radio,
   Loader2,
@@ -197,9 +198,14 @@ async function runCli(command: string): Promise<string> {
   }
 }
 
+async function readCli(command: string, ttl = 60_000): Promise<string> {
+  const result = await cachedCommand(command, { ttl });
+  return result.stdout;
+}
+
 async function fetchChannels(): Promise<Channel[]> {
   try {
-    const statusRaw = await runCli("openclaw channels status --json");
+    const statusRaw = await readCli("openclaw channels status --json");
     const statusData = JSON.parse(statusRaw);
     const channels: Channel[] = [];
     const meta: { id: string; label: string }[] = statusData.channelMeta || [];
@@ -221,7 +227,7 @@ async function fetchChannels(): Promise<Channel[]> {
     }
 
     if (channels.length === 0) {
-      const listRaw = await runCli("openclaw channels list --json");
+      const listRaw = await readCli("openclaw channels list --json");
       const listData = JSON.parse(listRaw);
       const chat: Record<string, string[]> = listData.chat || {};
       for (const [type] of Object.entries(chat)) {
@@ -237,7 +243,7 @@ async function fetchChannels(): Promise<Channel[]> {
 
 async function fetchStatus(): Promise<Record<string, string>> {
   try {
-    const raw = await runCli("openclaw channels status --json");
+    const raw = await readCli("openclaw channels status --json");
     const data = JSON.parse(raw);
     const result: Record<string, string> = {};
     const chMap: Record<string, { configured: boolean; running: boolean }> = data.channels || {};
@@ -257,7 +263,7 @@ async function fetchStatus(): Promise<Record<string, string>> {
 
 async function fetchCapabilities(name: string): Promise<string[]> {
   try {
-    const raw = await runCli("openclaw channels capabilities --json");
+    const raw = await readCli("openclaw channels capabilities --json", 120_000);
     const data = JSON.parse(raw);
     return data[name] ?? data ?? [];
   } catch {

@@ -1116,6 +1116,11 @@ export function SettingsView() {
           </div>
         </Section>
 
+        {/* ───────── OPENSHELL SANDBOX ───────── */}
+        <Section title="OPENSHELL SANDBOX">
+          <SandboxPanel />
+        </Section>
+
         {/* ───────── ABOUT ───────── */}
         <Section title="ABOUT">
           <div style={CARD}>
@@ -1506,6 +1511,325 @@ function AuditBadge({ label, count, color }: { label: string; count: number; col
       <span style={{ width: 6, height: 6, borderRadius: "50%", background: color }} />
       <span style={{ fontSize: 11, color, fontWeight: 600 }}>{count}</span>
       <span style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span>
+    </div>
+  );
+}
+
+/* ── OpenShell Sandbox Panel ── */
+
+function SandboxPanel() {
+  const [installed, setInstalled] = useState<boolean | null>(null);
+  const [sandboxes, setSandboxes] = useState<{ name: string; status: string; image?: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [sandboxMode, setSandboxMode] = useState<"off" | "openshell">("off");
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [logs, setLogs] = useState<string | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+
+  const showFeedback = (type: "success" | "error", text: string) => {
+    setFeedback({ type, text }); setTimeout(() => setFeedback(null), 5000);
+  };
+
+  const checkInstalled = async () => {
+    try {
+      const r = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", { command: "openshell --version", cwd: null });
+      setInstalled(r.code === 0);
+      return r.code === 0;
+    } catch {
+      setInstalled(false);
+      return false;
+    }
+  };
+
+  const loadSandboxes = async () => {
+    try {
+      const r = await invoke<{ stdout: string; code: number }>("execute_command", { command: "openshell sandbox list --json", cwd: null });
+      if (r.code === 0 && r.stdout.trim()) {
+        try {
+          const data = JSON.parse(r.stdout);
+          const list = Array.isArray(data) ? data : data.sandboxes ?? data.items ?? [];
+          setSandboxes(list);
+        } catch {
+          const lines = r.stdout.trim().split("\n").filter(l => l.trim() && !l.startsWith("NAME"));
+          setSandboxes(lines.map(l => {
+            const parts = l.trim().split(/\s{2,}/);
+            return { name: parts[0] || "unknown", status: parts[1] || "unknown", image: parts[2] };
+          }));
+        }
+      } else {
+        setSandboxes([]);
+      }
+    } catch {
+      setSandboxes([]);
+    }
+  };
+
+  const loadSandboxMode = async () => {
+    try {
+      const r = await cachedCommand("openclaw config get agents.defaults.sandbox --json", { ttl: 30_000 });
+      if (r.code === 0 && r.stdout.trim()) {
+        const data = JSON.parse(r.stdout);
+        const mode = data.mode ?? data.value?.mode ?? data ?? "off";
+        setSandboxMode(typeof mode === "string" && mode !== "off" ? "openshell" : "off");
+      }
+    } catch { /* keep default */ }
+  };
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const ok = await checkInstalled();
+      if (ok) {
+        await Promise.all([loadSandboxes(), loadSandboxMode()]);
+      } else {
+        await loadSandboxMode();
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  const handleInstall = async () => {
+    setInstalling(true);
+    try {
+      const r = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: "pip install -U openshell", cwd: null,
+      });
+      if (r.code === 0) {
+        const vr = await invoke<{ stdout: string; code: number }>("execute_command", { command: "openshell --version", cwd: null });
+        if (vr.code === 0) {
+          setInstalled(true);
+          showFeedback("success", `OpenShell installed: ${vr.stdout.trim()}`);
+          await loadSandboxes();
+        } else {
+          showFeedback("error", "Installed but CLI not found. Try: uv tool install -U openshell");
+        }
+      } else {
+        showFeedback("error", `Install failed. Try manually: uv tool install -U openshell`);
+      }
+    } catch (e) {
+      showFeedback("error", `Install error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    setInstalling(false);
+  };
+
+  const handleToggle = async () => {
+    setToggling(true);
+    const enabling = sandboxMode === "off";
+
+    try {
+      if (enabling) {
+        const hasOcSandbox = sandboxes.some(s => s.name === "openclaw" || s.image?.includes("openclaw"));
+        if (!hasOcSandbox && installed) {
+          showFeedback("success", "Creating OpenShell sandbox for OpenClaw...");
+          const createR = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+            command: "openshell sandbox create --from openclaw --name openclaw-crystal", cwd: null,
+          });
+          if (createR.code !== 0) {
+            showFeedback("error", `Sandbox creation failed: ${createR.stderr || createR.stdout}`.slice(0, 120));
+            setToggling(false);
+            return;
+          }
+        }
+
+        await invoke("execute_command", {
+          command: `openclaw config set agents.defaults.sandbox.mode openshell`, cwd: null,
+        });
+        setSandboxMode("openshell");
+        showFeedback("success", "Sandbox mode enabled — agents will run inside OpenShell");
+      } else {
+        await invoke("execute_command", {
+          command: `openclaw config set agents.defaults.sandbox.mode off`, cwd: null,
+        });
+        setSandboxMode("off");
+        showFeedback("success", "Sandbox mode disabled — agents run on host");
+      }
+      await loadSandboxes();
+    } catch (e) {
+      showFeedback("error", `Toggle failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    setToggling(false);
+  };
+
+  const handleViewLogs = async () => {
+    setLogsLoading(true);
+    try {
+      const name = sandboxes[0]?.name || "openclaw-crystal";
+      const r = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `openshell logs ${name} --tail 40`, cwd: null,
+      });
+      setLogs(r.stdout || "(no output)");
+    } catch { setLogs("(failed to fetch logs)"); }
+    setLogsLoading(false);
+  };
+
+  const CARD_S: React.CSSProperties = {
+    background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden",
+  };
+  const ROW_S: React.CSSProperties = {
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    padding: "10px 14px", borderBottom: "1px solid var(--border)",
+  };
+
+  if (loading) {
+    return (
+      <div style={{ ...CARD_S, padding: "20px 14px", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        <IconRefresh spin />
+        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Checking OpenShell...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {feedback && (
+        <div style={{ padding: "8px 12px", borderRadius: 8, fontSize: 11,
+          background: feedback.type === "success" ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
+          color: feedback.type === "success" ? "#4ade80" : "#f87171",
+          border: `1px solid ${feedback.type === "success" ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)"}` }}>
+          {feedback.text}
+        </div>
+      )}
+
+      {/* Main toggle card */}
+      <div style={CARD_S}>
+        <div style={{ ...ROW_S, borderBottom: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{
+              width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
+              background: sandboxMode !== "off" ? "rgba(74,222,128,0.12)" : "rgba(255,255,255,0.04)",
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={sandboxMode !== "off" ? "#4ade80" : "var(--text-muted)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="7" width="20" height="14" rx="2" ry="2" /><path d="M16 7V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v3" /><line x1="12" y1="12" x2="12" y2="16" />
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>Sandbox Mode</div>
+              <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                {sandboxMode !== "off"
+                  ? "Agents execute inside isolated OpenShell containers"
+                  : "Agents execute directly on the host system"}
+              </div>
+            </div>
+          </div>
+
+          {installed ? (
+            <button onClick={handleToggle} disabled={toggling} style={{
+              width: 48, height: 26, borderRadius: 13, border: "none", cursor: toggling ? "wait" : "pointer",
+              background: sandboxMode !== "off" ? "#4ade80" : "rgba(255,255,255,0.12)",
+              position: "relative", transition: "background 0.2s", flexShrink: 0,
+            }}>
+              <div style={{
+                width: 20, height: 20, borderRadius: "50%", background: "#fff",
+                position: "absolute", top: 3,
+                left: sandboxMode !== "off" ? 25 : 3,
+                transition: "left 0.2s",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+              }} />
+            </button>
+          ) : (
+            <button onClick={handleInstall} disabled={installing} style={{
+              padding: "6px 14px", borderRadius: 6, fontSize: 11, fontWeight: 500, cursor: "pointer",
+              background: "var(--accent-bg)", color: "var(--accent)", border: "none",
+              opacity: installing ? 0.6 : 1, display: "flex", alignItems: "center", gap: 4,
+            }}>
+              {installing ? <IconRefresh spin /> : null}
+              {installing ? "Installing..." : "Install OpenShell"}
+            </button>
+          )}
+        </div>
+
+        {/* Status row */}
+        <div style={{ ...ROW_S, borderBottom: expanded ? "1px solid var(--border)" : "none" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{
+              width: 7, height: 7, borderRadius: "50%",
+              background: installed ? "#4ade80" : "#f87171",
+            }} />
+            <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+              {installed === null ? "Checking..." : installed ? "OpenShell CLI available" : "OpenShell not installed"}
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {installed && sandboxes.length > 0 && (
+              <span style={{ fontSize: 10, color: "var(--text-muted)", padding: "2px 8px", borderRadius: 4, background: "rgba(59,130,246,0.08)" }}>
+                {sandboxes.length} sandbox{sandboxes.length !== 1 ? "es" : ""}
+              </span>
+            )}
+            {installed && (
+              <button onClick={() => setExpanded(!expanded)} style={{
+                background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: 10,
+                display: "flex", alignItems: "center", gap: 2, padding: "2px 6px",
+              }}>
+                {expanded ? "▲ Less" : "▼ Details"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Expanded details */}
+        {expanded && installed && (
+          <div style={{ padding: "8px 14px 12px" }}>
+            {/* Sandbox list */}
+            {sandboxes.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
+                <div style={{ fontSize: 9, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 }}>Active Sandboxes</div>
+                {sandboxes.map((sb, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 8px", background: "var(--bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: sb.status === "running" ? "#4ade80" : sb.status === "stopped" ? "#fbbf24" : "var(--text-muted)" }} />
+                      <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text)", fontFamily: "monospace" }}>{sb.name}</span>
+                    </div>
+                    <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{sb.status} {sb.image ? `· ${sb.image}` : ""}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ fontSize: 11, color: "var(--text-muted)", padding: "8px 0" }}>
+                No sandboxes created yet. Toggle sandbox mode to create one.
+              </div>
+            )}
+
+            {/* Actions */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button onClick={() => { loadSandboxes(); loadSandboxMode(); }} style={{
+                padding: "5px 12px", borderRadius: 6, fontSize: 10, background: "var(--bg)", border: "1px solid var(--border)",
+                color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
+              }}><IconRefresh /> Refresh</button>
+              {sandboxes.length > 0 && (
+                <button onClick={handleViewLogs} disabled={logsLoading} style={{
+                  padding: "5px 12px", borderRadius: 6, fontSize: 10, background: "var(--bg)", border: "1px solid var(--border)",
+                  color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
+                  opacity: logsLoading ? 0.5 : 1,
+                }}>
+                  {logsLoading ? <IconRefresh spin /> : null} View Logs
+                </button>
+              )}
+            </div>
+
+            {/* Logs output */}
+            {logs !== null && (
+              <pre style={{
+                marginTop: 8, padding: 10, borderRadius: 6, background: "var(--bg)", border: "1px solid var(--border)",
+                fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace", maxHeight: 200, overflowY: "auto",
+                whiteSpace: "pre-wrap", wordBreak: "break-word",
+              }}>{logs}</pre>
+            )}
+
+            {/* Info */}
+            <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 6, background: "rgba(59,130,246,0.05)", border: "1px solid rgba(59,130,246,0.1)" }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "var(--accent)", marginBottom: 4 }}>About OpenShell</div>
+              <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                <a href="https://github.com/NVIDIA/OpenShell" target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>NVIDIA OpenShell</a> provides
+                sandboxed execution environments with policy-enforced egress routing, filesystem isolation, and process constraints.
+                Each sandbox runs inside a container with kernel-level security (Landlock, seccomp, OPA policy proxy).
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

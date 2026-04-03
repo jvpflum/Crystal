@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import { cachedCommand } from "@/lib/cache";
 
 interface CacheEntry<T> {
   data: T;
@@ -20,6 +20,7 @@ interface DataState {
 
   _inflight: Record<string, Promise<unknown>>;
   _hydrated: boolean;
+  _lastPrefetch: number;
 
   hydrateFromDisk: () => void;
   prefetchAll: () => Promise<void>;
@@ -36,18 +37,19 @@ interface DataState {
 }
 
 const TTL: Record<CacheKey, number> = {
-  skills:        300_000, // 5 min – rarely change
-  agents:        180_000, // 3 min
-  memoryStatus:  120_000, // 2 min
-  cronJobs:      120_000, // 2 min
-  channelStatus: 120_000, // 2 min
-  systemStatus:   60_000, // 1 min
-  tasks:          30_000, // 30 s – more dynamic
-  sessions:       30_000, // 30 s
+  skills:        300_000,
+  agents:        180_000,
+  memoryStatus:  120_000,
+  cronJobs:      120_000,
+  channelStatus: 120_000,
+  systemStatus:   60_000,
+  tasks:          30_000,
+  sessions:       30_000,
 };
 
 const DISK_KEY = "crystal_data_cache";
-const DISK_MAX_AGE = 24 * 60 * 60 * 1000; // 24 h
+const DISK_MAX_AGE = 24 * 60 * 60 * 1000;
+const PREFETCH_COOLDOWN = 30_000;
 
 function isFresh<T>(entry: CacheEntry<T> | null, ttl: number): entry is CacheEntry<T> {
   return entry !== null && Date.now() - entry.fetchedAt < ttl;
@@ -61,7 +63,7 @@ function persistToDisk(state: DataState) {
       if (entry) snapshot[key] = entry as CacheEntry<unknown>;
     }
     localStorage.setItem(DISK_KEY, JSON.stringify(snapshot));
-  } catch { /* quota or serialisation error – ignore */ }
+  } catch { /* quota or serialisation error */ }
 }
 
 function loadFromDisk(): Partial<Record<CacheKey, CacheEntry<unknown>>> {
@@ -79,10 +81,6 @@ function loadFromDisk(): Partial<Record<CacheKey, CacheEntry<unknown>>> {
     }
     return result;
   } catch { return {}; }
-}
-
-async function runCommand(command: string): Promise<{ stdout: string; stderr: string; code: number }> {
-  return invoke<{ stdout: string; stderr: string; code: number }>("execute_command", { command, cwd: null });
 }
 
 function makeGetter<T>(
@@ -117,8 +115,10 @@ function makeGetter<T>(
   };
 }
 
+// All fetchers now go through cachedCommand which has a concurrency limiter
+
 async function fetchCronJobs(): Promise<Record<string, unknown>[]> {
-  const r = await runCommand("openclaw cron list --json --all");
+  const r = await cachedCommand("openclaw cron list --json --all", { ttl: 120_000 });
   if (r.code === 0 && r.stdout.trim()) {
     const p = JSON.parse(r.stdout);
     return Array.isArray(p) ? p : p.jobs ?? [];
@@ -127,7 +127,7 @@ async function fetchCronJobs(): Promise<Record<string, unknown>[]> {
 }
 
 async function fetchAgents(): Promise<Record<string, unknown>[]> {
-  const r = await runCommand("openclaw agents list --json");
+  const r = await cachedCommand("openclaw agents list --json", { ttl: 60_000 });
   if (r.code === 0 && r.stdout.trim()) {
     const d = JSON.parse(r.stdout);
     return Array.isArray(d) ? d : (d.agents ?? d.items ?? []);
@@ -136,18 +136,18 @@ async function fetchAgents(): Promise<Record<string, unknown>[]> {
 }
 
 async function fetchMemoryStatus(): Promise<Record<string, unknown>> {
-  const r = await runCommand("openclaw memory status --json");
+  const r = await cachedCommand("openclaw memory status --json", { ttl: 60_000 });
   if (r.code === 0 && r.stdout.trim()) return JSON.parse(r.stdout);
   return {};
 }
 
 async function fetchSystemStatus(): Promise<Record<string, unknown>> {
-  const r = await runCommand("openclaw health");
+  const r = await cachedCommand("openclaw health", { ttl: 30_000 });
   return { healthy: r.code === 0, text: r.stdout, fetchedAt: Date.now() };
 }
 
 async function fetchTasks(): Promise<Record<string, unknown>[]> {
-  const r = await runCommand("openclaw tasks list --json");
+  const r = await cachedCommand("openclaw tasks list --json", { ttl: 30_000 });
   if (r.code === 0 && r.stdout.trim()) {
     const p = JSON.parse(r.stdout);
     return Array.isArray(p) ? p : p.tasks ?? p.runs ?? [];
@@ -156,13 +156,13 @@ async function fetchTasks(): Promise<Record<string, unknown>[]> {
 }
 
 async function fetchChannelStatus(): Promise<Record<string, unknown>> {
-  const r = await runCommand("openclaw channels status --json");
+  const r = await cachedCommand("openclaw channels status --json", { ttl: 60_000 });
   if (r.code === 0 && r.stdout.trim()) return JSON.parse(r.stdout);
   return {};
 }
 
 async function fetchSkills(): Promise<Record<string, unknown>[]> {
-  const r = await runCommand("openclaw skills list --json");
+  const r = await cachedCommand("openclaw skills list --json", { ttl: 120_000 });
   if (r.code === 0 && r.stdout.trim()) {
     const p = JSON.parse(r.stdout);
     return Array.isArray(p) ? p : p.skills ?? [];
@@ -171,7 +171,7 @@ async function fetchSkills(): Promise<Record<string, unknown>[]> {
 }
 
 async function fetchSessions(): Promise<Record<string, unknown>[]> {
-  const r = await runCommand("openclaw sessions --json");
+  const r = await cachedCommand("openclaw sessions --json", { ttl: 30_000 });
   if (r.code === 0 && r.stdout.trim()) {
     const p = JSON.parse(r.stdout);
     return p.sessions ?? (Array.isArray(p) ? p : []);
@@ -190,6 +190,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   sessions: null,
   _inflight: {},
   _hydrated: false,
+  _lastPrefetch: 0,
 
   hydrateFromDisk: () => {
     if (get()._hydrated) return;
@@ -201,17 +202,31 @@ export const useDataStore = create<DataState>((set, get) => ({
   },
 
   prefetchAll: async () => {
+    const now = Date.now();
+    if (now - get()._lastPrefetch < PREFETCH_COOLDOWN) return;
+    set({ _lastPrefetch: now });
+
     const state = get();
-    const fetchers: Promise<unknown>[] = [];
-    if (!isFresh(state.agents, TTL.agents)) fetchers.push(state.getAgents());
-    if (!isFresh(state.cronJobs, TTL.cronJobs)) fetchers.push(state.getCronJobs());
-    if (!isFresh(state.skills, TTL.skills)) fetchers.push(state.getSkills());
-    if (!isFresh(state.systemStatus, TTL.systemStatus)) fetchers.push(state.getSystemStatus());
-    if (!isFresh(state.channelStatus, TTL.channelStatus)) fetchers.push(state.getChannelStatus());
-    if (!isFresh(state.tasks, TTL.tasks)) fetchers.push(state.getTasks());
-    if (!isFresh(state.sessions, TTL.sessions)) fetchers.push(state.getSessions());
-    if (!isFresh(state.memoryStatus, TTL.memoryStatus)) fetchers.push(state.getMemoryStatus());
-    await Promise.allSettled(fetchers);
+
+    // Batch 1: critical data (agents + system status)
+    const batch1: Promise<unknown>[] = [];
+    if (!isFresh(state.agents, TTL.agents)) batch1.push(state.getAgents());
+    if (!isFresh(state.systemStatus, TTL.systemStatus)) batch1.push(state.getSystemStatus());
+    if (batch1.length > 0) await Promise.allSettled(batch1);
+
+    // Batch 2: secondary data
+    const batch2: Promise<unknown>[] = [];
+    if (!isFresh(state.cronJobs, TTL.cronJobs)) batch2.push(state.getCronJobs());
+    if (!isFresh(state.sessions, TTL.sessions)) batch2.push(state.getSessions());
+    if (!isFresh(state.channelStatus, TTL.channelStatus)) batch2.push(state.getChannelStatus());
+    if (batch2.length > 0) await Promise.allSettled(batch2);
+
+    // Batch 3: less urgent data
+    const batch3: Promise<unknown>[] = [];
+    if (!isFresh(state.skills, TTL.skills)) batch3.push(state.getSkills());
+    if (!isFresh(state.tasks, TTL.tasks)) batch3.push(state.getTasks());
+    if (!isFresh(state.memoryStatus, TTL.memoryStatus)) batch3.push(state.getMemoryStatus());
+    if (batch3.length > 0) await Promise.allSettled(batch3);
   },
 
   getCronJobs: makeGetter("cronJobs", fetchCronJobs),

@@ -129,7 +129,7 @@ export function ModelsView() {
 
   const loadRunning = useCallback(async () => {
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", { command: "ollama ps", cwd: null });
+      const result = await cachedCommand("ollama ps", { ttl: 8_000 });
       if (result.code === 0) setRunning(parseOllamaPs(result.stdout));
     } catch { /* ignore */ }
   }, []);
@@ -151,9 +151,7 @@ export function ModelsView() {
 
   const loadFallbacks = useCallback(async () => {
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw models fallbacks list --json", cwd: null,
-      });
+      const result = await cachedCommand("openclaw models fallbacks list --json", { ttl: 120_000 });
       if (result.code === 0) {
         const data = JSON.parse(result.stdout);
         setFallbacks(data.fallbacks || []);
@@ -190,9 +188,7 @@ export function ModelsView() {
 
   const loadThinkingLevel = useCallback(async () => {
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: 'openclaw config get agents.defaults.thinking --json', cwd: null,
-      });
+      const result = await cachedCommand("openclaw config get agents.defaults.thinking --json", { ttl: 120_000 });
       if (result.code === 0) {
         const data = JSON.parse(result.stdout);
         const val = (data.value || "medium") as ThinkingLevel;
@@ -218,9 +214,7 @@ export function ModelsView() {
   const loadProviderStatus = useCallback(async () => {
     setStatusLoading(true);
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw models status --json", cwd: null,
-      });
+      const result = await cachedCommand("openclaw models status --json", { ttl: 120_000 });
       if (result.code === 0) {
         const data = JSON.parse(result.stdout);
         setProviderStatuses(data.providers || []);

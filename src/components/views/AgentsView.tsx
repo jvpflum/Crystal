@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { escapeShellArg } from "@/lib/tools";
+import { cachedCommand } from "@/lib/cache";
 import { openclawClient } from "@/lib/openclaw";
 import { useAppStore } from "@/stores/appStore";
 
@@ -113,9 +114,7 @@ export function AgentsView() {
 
   const loadBindings = useCallback(async () => {
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw agents bindings --json", cwd: null,
-      });
+      const result = await cachedCommand("openclaw agents bindings --json", { ttl: 60_000 });
       if (result.code === 0) {
         const data = JSON.parse(result.stdout);
         setBindings(Array.isArray(data) ? data : []);
@@ -141,9 +140,7 @@ export function AgentsView() {
 
   const loadModels = useCallback(async () => {
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw models list --json", cwd: null,
-      });
+      const result = await cachedCommand("openclaw models list --json", { ttl: 60_000 });
       if (result.code === 0 && result.stdout.trim()) {
         const jsonStart = result.stdout.indexOf("{");
         const jsonStr = jsonStart >= 0 ? result.stdout.slice(jsonStart) : result.stdout;

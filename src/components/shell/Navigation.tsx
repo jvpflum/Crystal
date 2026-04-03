@@ -1,77 +1,60 @@
+import { useState } from "react";
 import {
   Home,
   MessageSquare,
   LayoutDashboard,
   Bot,
-  Building2,
   Factory,
-  Store,
-  Cpu,
+  Building2,
   Radio,
   Brain,
-  Wrench,
-  Activity,
-  Settings,
-  Anchor,
-  Shield,
-  Stethoscope,
-  Command,
-  FolderOpen,
-  Mail,
-  Users,
-  GitBranch,
-  Smartphone,
-  Webhook,
-  Phone,
+  Cpu,
   Clock,
-  Network,
-  Globe,
-  ListChecks,
-  ShieldCheck,
-  Layers,
-  History,
+  Wrench,
+  Stethoscope,
+  Settings,
+  Command,
   Map,
+  ChevronDown,
+  Anchor,
 } from "lucide-react";
 import { useAppStore, AppView } from "@/stores/appStore";
 
-const navItems: { id: AppView; icon: React.ElementType; label: string; group: "main" | "openclaw" | "system" }[] = [
-  { id: "home",           icon: Home,            label: "Home",     group: "main" },
-  { id: "city",           icon: Map,             label: "City",     group: "main" },
-  { id: "conversation",   icon: MessageSquare,   label: "Chat",     group: "main" },
-  { id: "command-center", icon: LayoutDashboard,  label: "Center",   group: "main" },
-  { id: "agents",         icon: Bot,             label: "Agents",   group: "openclaw" },
-  { id: "factory",        icon: Factory,         label: "Factory",  group: "openclaw" },
-  { id: "office",         icon: Building2,       label: "Office",   group: "openclaw" },
-  { id: "marketplace",    icon: Store,           label: "Skills",   group: "openclaw" },
-  { id: "models",         icon: Cpu,             label: "Models",   group: "openclaw" },
-  { id: "sessions",       icon: History,         label: "Sessions", group: "openclaw" },
-  { id: "channels",       icon: Radio,           label: "Channels", group: "openclaw" },
-  { id: "memory",         icon: Brain,           label: "Memory",   group: "openclaw" },
-  { id: "cron",           icon: Clock,           label: "Cron",     group: "openclaw" },
-  { id: "templates",      icon: Layers,          label: "Workflows", group: "openclaw" },
-  { id: "hooks",          icon: Anchor,          label: "Hooks",    group: "openclaw" },
-  { id: "nodes",          icon: Network,         label: "Nodes",    group: "openclaw" },
-  { id: "workspace",      icon: FolderOpen,      label: "Workspace", group: "openclaw" },
-  { id: "messaging",      icon: Mail,            label: "Messaging", group: "openclaw" },
-  { id: "directory",      icon: Users,           label: "Directory", group: "openclaw" },
-  { id: "subagents",      icon: GitBranch,       label: "Sub-Agents", group: "openclaw" },
-  { id: "tasks",          icon: ListChecks,      label: "Tasks",    group: "system" },
-  { id: "approvals",      icon: ShieldCheck,     label: "Approvals", group: "system" },
-  { id: "tools",          icon: Wrench,          label: "Tools",    group: "system" },
-  { id: "browser",        icon: Globe,           label: "Browser",  group: "system" },
-  { id: "security",       icon: Shield,          label: "Security", group: "system" },
-  { id: "doctor",         icon: Stethoscope,     label: "Doctor",   group: "system" },
-  { id: "activity",       icon: Activity,        label: "Activity", group: "system" },
-  { id: "settings",       icon: Settings,        label: "Settings", group: "system" },
-  { id: "devices",        icon: Smartphone,      label: "Devices",  group: "system" },
-  { id: "webhooks",       icon: Webhook,         label: "Webhooks", group: "system" },
-  { id: "voicecall",      icon: Phone,           label: "Voice",    group: "system" },
+interface NavItem {
+  id: AppView;
+  icon: React.ElementType;
+  label: string;
+}
+
+const PRIMARY: NavItem[] = [
+  { id: "home",           icon: Home,            label: "Home" },
+  { id: "city",           icon: Map,             label: "City" },
+  { id: "conversation",   icon: MessageSquare,   label: "Chat" },
+  { id: "command-center", icon: LayoutDashboard,  label: "Center" },
+];
+
+const OPENCLAW: NavItem[] = [
+  { id: "agents",   icon: Bot,       label: "Agents" },
+  { id: "factory",  icon: Factory,   label: "Factory" },
+  { id: "office",   icon: Building2, label: "Office" },
+  { id: "channels", icon: Radio,     label: "Channels" },
+  { id: "memory",   icon: Brain,     label: "Memory" },
+  { id: "models",   icon: Cpu,       label: "Models" },
+  { id: "cron",     icon: Clock,     label: "Cron" },
+  { id: "hooks",    icon: Anchor,    label: "Hooks" },
+];
+
+const SYSTEM: NavItem[] = [
+  { id: "tools",    icon: Wrench,      label: "Tools" },
+  { id: "doctor",   icon: Stethoscope, label: "Doctor" },
+  { id: "settings", icon: Settings,    label: "Settings" },
 ];
 
 export function Navigation() {
   const currentView = useAppStore(s => s.currentView);
   const setView = useAppStore(s => s.setView);
   const gatewayConnected = useAppStore(s => s.gatewayConnected);
+  const [ocCollapsed, setOcCollapsed] = useState(false);
 
   return (
     <nav style={{
@@ -94,33 +77,49 @@ export function Navigation() {
         <span style={{ fontSize: 7, color: "var(--text-muted)", letterSpacing: 0.8, fontWeight: 600 }}>OC</span>
       </div>
 
-      {navItems.filter(n => n.group === "main").map(item => (
+      {/* Primary nav – always visible */}
+      {PRIMARY.map(item => (
         <NavButton key={item.id} item={item} active={currentView === item.id} onClick={() => setView(item.id)} />
       ))}
 
       <Divider />
 
-      <div style={{
-        flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
-        overflowY: "auto", overflowX: "hidden", width: "100%",
-        scrollbarWidth: "none",
-      }}>
-        <style>{`.nav-scroll::-webkit-scrollbar { display: none; }`}</style>
-        <div className="nav-scroll" style={{
-          display: "flex", flexDirection: "column", alignItems: "center", width: "100%",
-        }}>
-          {navItems.filter(n => n.group === "openclaw").map(item => (
+      {/* OpenClaw section – collapsible */}
+      <button
+        onClick={() => setOcCollapsed(!ocCollapsed)}
+        title={ocCollapsed ? "Expand OpenClaw" : "Collapse OpenClaw"}
+        style={{
+          width: 42, height: 16, display: "flex", alignItems: "center", justifyContent: "center",
+          gap: 2, border: "none", cursor: "pointer", background: "transparent",
+          color: "var(--text-muted)", fontSize: 7, fontWeight: 600,
+          letterSpacing: 0.6, marginBottom: 2,
+        }}
+      >
+        <ChevronDown style={{
+          width: 8, height: 8, transition: "transform 0.2s",
+          transform: ocCollapsed ? "rotate(-90deg)" : "rotate(0deg)",
+        }} />
+        CLAW
+      </button>
+
+      {!ocCollapsed && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+          {OPENCLAW.map(item => (
             <NavButton key={item.id} item={item} active={currentView === item.id} onClick={() => setView(item.id)} />
           ))}
         </div>
-      </div>
+      )}
+
+      <div style={{ flex: 1 }} />
 
       <Divider />
 
-      {navItems.filter(n => n.group === "system").map(item => (
+      {/* System – pinned to bottom */}
+      {SYSTEM.map(item => (
         <NavButton key={item.id} item={item} active={currentView === item.id} onClick={() => setView(item.id)} />
       ))}
 
+      {/* Ctrl+K launcher */}
       <div style={{
         marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center",
         width: 34, height: 22, borderRadius: 6,
@@ -143,7 +142,7 @@ function Divider() {
 }
 
 function NavButton({ item, active, onClick }: {
-  item: typeof navItems[number]; active: boolean; onClick: () => void;
+  item: NavItem; active: boolean; onClick: () => void;
 }) {
   const Icon = item.icon;
   return (

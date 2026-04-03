@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { escapeShellArg } from "@/lib/tools";
+import { cachedCommand } from "@/lib/cache";
 
 /* ─── Types ─── */
 
@@ -682,9 +683,7 @@ class OpenClawClient {
 
   async getMemoryStatus(): Promise<Record<string, unknown> | null> {
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: `${OPENCLAW_CMD} memory status --json`, cwd: null,
-      });
+      const result = await cachedCommand(`${OPENCLAW_CMD} memory status --json`, { ttl: 60_000 });
       if (result.code === 0 && result.stdout.trim()) {
         const parsed = JSON.parse(result.stdout);
         return Array.isArray(parsed) ? parsed[0] : parsed;
@@ -848,9 +847,7 @@ class OpenClawClient {
 
   async listAgents(): Promise<{ id: string; workspace: string; agentDir: string; model: string; bindings: number; isDefault: boolean; routes: string[] }[]> {
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: `${OPENCLAW_CMD} agents list --json`, cwd: null,
-      });
+      const result = await cachedCommand(`${OPENCLAW_CMD} agents list --json`, { ttl: 60_000 });
       if (result.code === 0 && result.stdout.trim()) {
         const data = JSON.parse(result.stdout);
         return Array.isArray(data) ? data : (data.agents ?? data.items ?? []);
@@ -877,9 +874,7 @@ class OpenClawClient {
 
   async getAgentSessions(agentId?: string): Promise<{ key: string; sessionId: string; model: string; modelProvider: string; inputTokens: number; outputTokens: number; totalTokens: number; contextTokens: number; agentId: string; updatedAt: number; ageMs: number; kind: string }[]> {
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: `${OPENCLAW_CMD} sessions --json`, cwd: null,
-      });
+      const result = await cachedCommand(`${OPENCLAW_CMD} sessions --json`, { ttl: 30_000 });
       if (result.code === 0 && result.stdout.trim()) {
         const data = JSON.parse(result.stdout);
         const sessions = data.sessions || [];
@@ -892,9 +887,7 @@ class OpenClawClient {
 
   async listNodes(): Promise<{ id: string; name?: string; label?: string; status?: string; type?: string }[]> {
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: `${OPENCLAW_CMD} nodes list --json`, cwd: null,
-      });
+      const result = await cachedCommand(`${OPENCLAW_CMD} nodes list --json`, { ttl: 60_000 });
       if (result.code === 0 && result.stdout.trim()) {
         const data = JSON.parse(result.stdout);
         return Array.isArray(data) ? data : data.nodes ?? [];
@@ -921,9 +914,7 @@ class OpenClawClient {
 
   async getChannelStatus(): Promise<{ channels: Record<string, { configured: boolean; running: boolean; lastError: string | null }>; channelMeta: { id: string; label: string }[]; channelAccounts: Record<string, { accountId: string; connected: boolean; bot?: { username: string }; lastInboundAt: number | null }[]> }> {
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: `${OPENCLAW_CMD} channels status --json`, cwd: null,
-      });
+      const result = await cachedCommand(`${OPENCLAW_CMD} channels status --json`, { ttl: 60_000 });
       if (result.code === 0 && result.stdout.trim()) {
         return JSON.parse(result.stdout);
       }
@@ -935,9 +926,7 @@ class OpenClawClient {
 
   async listSkills(): Promise<{ name: string; description?: string; eligible: boolean; version?: string; author?: string; enabled?: boolean }[]> {
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: `${OPENCLAW_CMD} skills list --json`, cwd: null,
-      });
+      const result = await cachedCommand(`${OPENCLAW_CMD} skills list --json`, { ttl: 120_000 });
       if (result.code === 0 && result.stdout.trim()) {
         const data = JSON.parse(result.stdout);
         return Array.isArray(data) ? data : data.skills ?? [];
@@ -968,9 +957,7 @@ class OpenClawClient {
 
   async listCronJobs(): Promise<{ id?: string; name: string; schedule: unknown; command?: string; enabled?: boolean }[]> {
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: `${OPENCLAW_CMD} cron list --json`, cwd: null,
-      });
+      const result = await cachedCommand(`${OPENCLAW_CMD} cron list --json`, { ttl: 60_000 });
       if (result.code === 0 && result.stdout.trim()) {
         const data = JSON.parse(result.stdout);
         return Array.isArray(data) ? data : data.jobs ?? data.cron ?? [];

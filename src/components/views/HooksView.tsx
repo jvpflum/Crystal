@@ -14,6 +14,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { cachedCommand } from "@/lib/cache";
 
 interface Hook {
   name: string;
@@ -62,10 +63,7 @@ export function HooksView() {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "openclaw hooks list --json",
-        cwd: null,
-      });
+      const result = await cachedCommand("openclaw hooks list --json", { ttl: 120_000 });
       if (result.stdout.trim()) {
         const parsed = JSON.parse(result.stdout);
         const list: Hook[] = Array.isArray(parsed) ? parsed : (parsed.hooks ?? parsed.items ?? []);
@@ -92,10 +90,7 @@ export function HooksView() {
     setExpandedHook(name);
     setDetailLoading(true);
     try {
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `openclaw hooks info ${name} --json`,
-        cwd: null,
-      });
+      const result = await cachedCommand(`openclaw hooks info ${name} --json`, { ttl: 120_000 });
       if (result.stdout.trim()) {
         try {
           setHookDetail(JSON.parse(result.stdout));
