@@ -10,11 +10,12 @@ import {
   Radio, Bot, Monitor, Activity, Wrench,
   Clock, Shield, Stethoscope, Sun, Zap,
   AlertTriangle, ShieldAlert, Database, Loader2,
-  Cpu, MemoryStick, HardDrive, Bolt, Trash2, Wifi, BatteryFull,
+  Cpu, MemoryStick, HardDrive, Bolt, Trash2, Wifi, BatteryFull, Sparkles,
   Gauge, RefreshCw, Power, RotateCcw, FolderCog, ShieldCheck,
   MonitorDown, Layers, Users, CheckCircle2, XCircle,
 } from "lucide-react";
 import { useDataStore } from "@/stores/dataStore";
+import { useTokenUsageStore, formatLifetimeTokens } from "@/stores/tokenUsageStore";
 
 let _sysStatsCache: { data: Partial<SysStats>; ts: number } | null = null;
 let _metaCache: { data: MetaInfo; ts: number } | null = null;
@@ -27,6 +28,8 @@ interface MetaInfo {
   telegramBot: string;
   heartbeatInterval: string;
   llmModel: string;
+  /** null = not checked yet */
+  ollamaReachable: boolean | null;
 }
 
 function safeParse(stdout: string) {
@@ -35,12 +38,25 @@ function safeParse(stdout: string) {
   try { return JSON.parse(stdout.slice(start)); } catch { return null; }
 }
 
+/** OpenClaw memory status JSON nests counts under `status` (see MemoryView.parseStatus). */
+function memoryChunkCount(mem: Record<string, unknown> | null | undefined): number {
+  if (!mem || typeof mem !== "object") return 0;
+  const st = mem.status as Record<string, unknown> | undefined;
+  if (st && typeof st === "object") {
+    const n = Number(st.chunks ?? st.totalChunks ?? 0);
+    if (Number.isFinite(n)) return n;
+  }
+  const top = Number(mem.totalChunks ?? mem.chunks ?? mem.count ?? 0);
+  return Number.isFinite(top) ? top : 0;
+}
+
 const META_INITIAL: MetaInfo = {
   openclawVersion: "—",
   telegramStatus: "unknown",
   telegramBot: "",
   heartbeatInterval: "—",
   llmModel: "—",
+  ollamaReachable: null,
 };
 
 const card = (extra?: CSSProperties): CSSProperties => ({
@@ -91,6 +107,7 @@ export function HomeView() {
     () => (useDataStore.getState().sessions?.data as unknown[] | undefined)?.length ?? 0
   );
   const [memoryChunks, setMemoryChunks] = useState<number>(0);
+  const lifetimeTokens = useTokenUsageStore(s => s.totalTokens);
   const [statsLoaded, setStatsLoaded] = useState(
     () => !!(useDataStore.getState().agents?.data)
   );
@@ -108,8 +125,7 @@ export function HomeView() {
         if (Array.isArray(cron)) setCronCount(cron.filter((c: Record<string, unknown>) => c.enabled !== false).length);
         if (Array.isArray(skills)) setSkillCount(skills.length);
         if (Array.isArray(sessions)) setSessionCount(sessions.length);
-        const mem = memory as Record<string, unknown> | null;
-        setMemoryChunks(Number(mem?.totalChunks ?? mem?.chunks ?? mem?.count ?? 0));
+        setMemoryChunks(memoryChunkCount(memory as Record<string, unknown> | null));
       } catch { /* degrade gracefully */ }
       if (!cancelled) setStatsLoaded(true);
     })();
@@ -119,28 +135,35 @@ export function HomeView() {
 
   useEffect(() => {
     if (_metaCache && Date.now() - _metaCache.ts < META_TTL) {
-      setMeta(_metaCache.data);
+      setMeta({ ...META_INITIAL, ..._metaCache.data });
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const [versionR, healthR] = await Promise.all([
+        const settled = await Promise.allSettled([
           cachedCommand("openclaw --version", { ttl: 300_000 }),
           cachedCommand("openclaw health", { ttl: 60_000 }),
+          cachedCommand("ollama ps", { ttl: 30_000 }),
         ]);
         if (cancelled) return;
+        const versionR = settled[0].status === "fulfilled" ? settled[0].value : { stdout: "", stderr: "", code: -1 };
+        const healthR = settled[1].status === "fulfilled" ? settled[1].value : { stdout: "", stderr: "", code: -1 };
+        const ollamaR = settled[2].status === "fulfilled" ? settled[2].value : { stdout: "", stderr: "", code: -1 };
         const healthText = healthR.stdout || "";
         const versionMatch = (versionR.stdout || "").match(/OpenClaw\s+([\d.]+\S*)/i);
         const telegramMatch = healthText.match(/Telegram:\s*(\w+)(?:\s*\((@\w+)\))?/i);
         const heartbeatMatch = healthText.match(/Heartbeat interval:\s*(\S+)/i);
         const modelMatch = healthText.match(/agent model:\s*(\S+)/i);
+        let ollamaReachable: boolean | null = null;
+        if (settled[2].status === "fulfilled") ollamaReachable = ollamaR.code === 0;
         const newMeta: MetaInfo = {
           openclawVersion: versionMatch?.[1] ?? "—",
           telegramStatus: telegramMatch?.[1] ?? "unknown",
           telegramBot: telegramMatch?.[2] ?? "",
           heartbeatInterval: heartbeatMatch?.[1] ?? "—",
           llmModel: modelMatch?.[1] ?? openclawClient.getModel() ?? "—",
+          ollamaReachable,
         };
         _metaCache = { data: newMeta, ts: Date.now() };
         setMeta(newMeta);
@@ -164,6 +187,26 @@ export function HomeView() {
 
   const gwConnected = gatewayConnected;
   const loading = !statsLoaded;
+
+  const llmModelKey =
+    meta.llmModel !== "—" && String(meta.llmModel).trim() !== ""
+      ? String(meta.llmModel).trim()
+      : openclawClient.getModel();
+  const llmDisplayValue = openclawClient.getModelDisplayName(llmModelKey);
+  const llmUsesOllama = /^ollama\//i.test(llmModelKey);
+  let llmDetail: string | undefined;
+  if (llmUsesOllama) {
+    if (meta.ollamaReachable === true) llmDetail = "Local · Ollama connected";
+    else if (meta.ollamaReachable === false) llmDetail = "Local · Ollama offline";
+  } else if (meta.ollamaReachable === true) {
+    llmDetail = "Ollama · local stack ready";
+  }
+  const llmColor =
+    !gwConnected
+      ? "var(--error)"
+      : llmUsesOllama && meta.ollamaReachable === false
+        ? "var(--warning)"
+        : "var(--accent)";
 
   const quickActions: { id: string; icon: React.ElementType; label: string; desc: string; color: string; action: () => void }[] = [
     {
@@ -259,8 +302,9 @@ export function HomeView() {
         <StatusCard
           icon={Bot}
           label="LLM"
-          value={meta.llmModel !== "—" ? meta.llmModel : openclawClient.getModel()}
-          color={gwConnected ? "var(--accent)" : "var(--error)"}
+          value={llmDisplayValue}
+          detail={llmDetail}
+          color={llmColor}
           onClick={() => setView("models")}
         />
         <StatusCard
@@ -281,12 +325,19 @@ export function HomeView() {
       </div>
 
       {/* ── Stats Row ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 8, marginBottom: 20 }}>
         <MetricCard icon={Activity} label="Sessions" value={loading ? "…" : sessionCount} color="var(--accent)" />
         <MetricCard icon={Bot} label="Agents" value={loading ? "…" : agentCount} color="#06b6d4" />
-        <MetricCard icon={Clock} label="Cron Jobs" value={loading ? "…" : cronCount} color="var(--warning)" />
+        <MetricCard
+          icon={Clock}
+          label="Cron Jobs"
+          value={loading ? "…" : cronCount}
+          color="var(--warning)"
+          onClick={() => setView("command-center", { centerTab: "scheduled" })}
+        />
         <MetricCard icon={Wrench} label="Skills" value={loading ? "…" : skillCount} color="#a855f7" />
         <MetricCard icon={Database} label="Memory" value={loading ? "…" : memoryChunks} color="var(--success)" />
+        <MetricCard icon={Sparkles} label="Tokens (life)" value={formatLifetimeTokens(lifetimeTokens)} color="#e879f9" onClick={() => setView("settings")} />
         <MetricCard icon={Zap} label="Heartbeat" value={loading ? "…" : meta.heartbeatInterval} color="#f59e0b" />
       </div>
 
@@ -294,7 +345,7 @@ export function HomeView() {
       <TelegramTopics onNavigate={() => setView("channels")} />
 
       {/* ── Cron Health ── */}
-      <CronHealth onNavigate={() => setView("cron")} />
+      <CronHealth onNavigate={() => setView("command-center", { centerTab: "scheduled" })} />
 
       {/* ── System Presence ── */}
       <SystemPresence />
@@ -428,15 +479,22 @@ function StatusCard({ icon: Icon, label, value, detail, color, onClick }: {
   );
 }
 
-function MetricCard({ icon: Icon, label, value, color }: {
+function MetricCard({ icon: Icon, label, value, color, onClick }: {
   icon: React.ElementType; label: string; value: string | number; color: string;
+  onClick?: () => void;
 }) {
+  const interactive = Boolean(onClick);
   return (
     <div
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={interactive ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick?.(); } } : undefined}
       onMouseEnter={hoverIn}
       onMouseLeave={hoverOut}
       style={{
         ...card({ padding: "10px 8px", textAlign: "center" as const }),
+        ...(interactive ? { cursor: "pointer" } : {}),
       }}
     >
       <Icon style={{ width: 14, height: 14, color, marginBottom: 4 }} />
@@ -935,10 +993,10 @@ const OPTIMIZER_ACTIONS: OptimizerAction[] = [
     id: "disable-startup",
     icon: Power,
     label: "Startup Apps",
-    desc: "List & disable heavy startup programs",
+    desc: "Opens Windows Settings to toggle startup programs",
     color: "#ec4899",
-    command: `$items = Get-CimInstance Win32_StartupCommand | Select-Object Name, Command | ConvertTo-Json -Compress; Write-Output "STARTUP:$items"`,
-    successMsg: "Startup apps listed",
+    command: `$opened = $false; try { Start-Process "ms-settings:startupapps" -ErrorAction Stop; $opened = $true } catch { }; if (-not $opened) { try { Start-Process "explorer.exe" -ArgumentList "ms-settings:startupapps" -ErrorAction Stop; $opened = $true } catch { } }; if (-not $opened) { Start-Process "taskmgr.exe"; Write-Output "Opened Task Manager — open the Startup tab to manage programs." } else { Write-Output "Opened Windows Settings (Startup apps)." }`,
+    successMsg: "Opened Windows Startup apps",
   },
   {
     id: "reset-network",

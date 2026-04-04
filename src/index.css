@@ -29,6 +29,19 @@
   --shadow-md: 0 4px 12px rgba(0,0,0,0.25);
   --radius: 10px;
   --radius-lg: 14px;
+
+  /* Glass system — tuned for backdrop-filter over mesh atmosphere */
+  --glass-blur: 22px;
+  --glass-blur-heavy: 32px;
+  --glass-saturate: 1.45;
+  --glass-bg: color-mix(in srgb, var(--bg-surface) 58%, transparent);
+  --glass-bg-strong: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+  --glass-border: color-mix(in srgb, var(--border) 85%, rgba(255,255,255,0.14));
+  --glass-border-soft: color-mix(in srgb, var(--border-subtle) 90%, rgba(255,255,255,0.08));
+  --glass-inner-light: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
+  --glass-inner-glow: inset 0 -1px 0 color-mix(in srgb, #000 12%, transparent);
+  --shadow-glass: 0 4px 24px color-mix(in srgb, #000 45%, transparent);
+  --shadow-glass-lg: 0 12px 48px color-mix(in srgb, #000 55%, transparent), 0 0 0 1px color-mix(in srgb, #fff 4%, transparent);
 }
 
 * {
@@ -46,6 +59,114 @@ html, body, #root {
   color: var(--text);
   transition: background 0.4s ease, color 0.3s ease;
   text-rendering: optimizeLegibility;
+}
+
+/* Full-window depth: soft accent aurora behind glass chrome */
+.app-root {
+  position: relative;
+  isolation: isolate;
+}
+
+.app-atmosphere {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 130% 90% at 15% -15%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 52%),
+    radial-gradient(ellipse 90% 70% at 105% 45%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 48%),
+    radial-gradient(ellipse 80% 55% at 50% 108%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 42%),
+    var(--bg-base);
+}
+
+.app-chrome {
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+}
+
+.app-main {
+  background: transparent;
+}
+
+/* Title bar + nav: frosted glass strips */
+.glass-titlebar {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border-bottom: 1px solid var(--glass-border-soft);
+  box-shadow: var(--glass-inner-light), 0 8px 32px color-mix(in srgb, #000 20%, transparent);
+}
+
+.glass-nav {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border-right: 1px solid var(--glass-border-soft);
+  box-shadow: var(--glass-inner-light), 4px 0 40px color-mix(in srgb, #000 15%, transparent);
+}
+
+.glass-nav-divider {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--border) 80%, rgba(255,255,255,0.1)) 30%,
+    color-mix(in srgb, var(--border) 80%, rgba(255,255,255,0.1)) 70%,
+    transparent
+  );
+}
+
+.glass-nav .nav-btn-active {
+  backdrop-filter: blur(10px) saturate(1.15);
+  -webkit-backdrop-filter: blur(10px) saturate(1.15);
+}
+
+.glass-cmd-chip {
+  background: color-mix(in srgb, var(--bg-input) 70%, transparent) !important;
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  border: 1px solid var(--glass-border-soft) !important;
+  box-shadow: var(--glass-inner-light);
+}
+
+/* Command palette */
+.cp-overlay {
+  background: color-mix(in srgb, var(--bg-base) 40%, rgba(0,0,0,0.5));
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+}
+
+.cp-modal {
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-glass-lg), var(--glass-inner-light);
+}
+
+.cp-modal-header {
+  border-bottom: 1px solid var(--glass-border-soft);
+}
+
+.cp-modal-input {
+  color: var(--text) !important;
+}
+
+.cp-modal-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Toasts */
+.glass-toast {
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border-soft);
+  box-shadow: var(--shadow-glass), var(--glass-inner-light);
+}
+
+.glass-toast-text {
+  color: var(--text);
 }
 
 body {
@@ -121,10 +242,22 @@ button:focus-visible { outline-offset: 2px; }
 .animate-scale-in { animation: scale-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
 main > * { animation: view-fade-in 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
 
-/* ── Glass effects ── */
+/* ── Glass effects (utility) ── */
 .glass {
-  backdrop-filter: blur(20px) saturate(1.2);
-  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border-soft);
+  box-shadow: var(--glass-inner-light);
+}
+
+.surface-glass {
+  background: color-mix(in srgb, var(--bg-elevated) 55%, transparent);
+  backdrop-filter: blur(16px) saturate(1.25);
+  -webkit-backdrop-filter: blur(16px) saturate(1.25);
+  border: 1px solid var(--glass-border-soft);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm), var(--glass-inner-light);
 }
 
 /* ── Smooth button base ── */

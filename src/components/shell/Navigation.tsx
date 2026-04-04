@@ -9,7 +9,6 @@ import {
   Radio,
   Brain,
   Cpu,
-  Clock,
   Wrench,
   Stethoscope,
   Settings,
@@ -40,7 +39,6 @@ const OPENCLAW: NavItem[] = [
   { id: "channels", icon: Radio,     label: "Channels" },
   { id: "memory",   icon: Brain,     label: "Memory" },
   { id: "models",   icon: Cpu,       label: "Models" },
-  { id: "cron",     icon: Clock,     label: "Cron" },
   { id: "hooks",    icon: Anchor,    label: "Hooks" },
 ];
 
@@ -57,11 +55,9 @@ export function Navigation() {
   const [ocCollapsed, setOcCollapsed] = useState(false);
 
   return (
-    <nav style={{
+    <nav className="glass-nav" style={{
       width: 58, flexShrink: 0, display: "flex", flexDirection: "column",
       alignItems: "center", padding: "8px 0 6px",
-      borderRight: "1px solid var(--border-subtle)",
-      background: "var(--bg-surface)",
     }}>
       {/* Gateway indicator */}
       <div style={{
@@ -120,10 +116,9 @@ export function Navigation() {
       ))}
 
       {/* Ctrl+K launcher */}
-      <div style={{
+      <div className="glass-cmd-chip" style={{
         marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center",
         width: 34, height: 22, borderRadius: 6,
-        background: "var(--bg-input)", border: "1px solid var(--border-subtle)",
         cursor: "pointer", transition: "all 0.15s",
       }}
         title="Command Palette (Ctrl+K)"
@@ -138,7 +133,7 @@ export function Navigation() {
 }
 
 function Divider() {
-  return <div style={{ width: 20, height: 1, background: "var(--border-subtle)", margin: "5px 0", flexShrink: 0 }} />;
+  return <div className="glass-nav-divider" style={{ width: 20, height: 1, margin: "5px 0", flexShrink: 0 }} />;
 }
 
 function NavButton({ item, active, onClick }: {
@@ -149,12 +144,14 @@ function NavButton({ item, active, onClick }: {
     <button
       onClick={onClick}
       title={item.label}
+      className={active ? "nav-btn-active" : undefined}
       style={{
         width: 42, height: 38, borderRadius: 10, display: "flex", flexDirection: "column",
         alignItems: "center", justifyContent: "center", gap: 2, border: "none", cursor: "pointer",
         position: "relative", flexShrink: 0, margin: "1px 0",
-        background: active ? "var(--accent-bg)" : "transparent",
+        background: active ? "color-mix(in srgb, var(--accent) 20%, transparent)" : "transparent",
         color: active ? "var(--accent)" : "var(--text-muted)",
+        boxShadow: active ? "inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent)" : "none",
         transition: "all 0.2s cubic-bezier(0.22, 1, 0.36, 1)",
       }}
       onMouseEnter={e => {

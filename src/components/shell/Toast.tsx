@@ -84,10 +84,8 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
   const borderColor = borderColorMap[toast.type];
 
   return (
-    <div style={{
-      minWidth: 280, padding: "12px 16px", borderRadius: 10,
-      background: "rgba(15,15,22,0.95)",
-      border: "1px solid rgba(255,255,255,0.08)",
+    <div className="glass-toast" style={{
+      minWidth: 280, padding: "12px 16px", borderRadius: 12,
       borderLeft: `3px solid ${borderColor}`,
       pointerEvents: "auto",
       animation: exiting ? "toast-out 0.3s ease-in forwards" : "toast-in 0.3s ease-out",
@@ -101,14 +99,14 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
 
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <Icon style={{ width: 16, height: 16, color: borderColor, flexShrink: 0 }} />
-        <span style={{ flex: 1, fontSize: 12, color: "rgba(255,255,255,0.85)", lineHeight: 1.4 }}>
+        <span className="glass-toast-text" style={{ flex: 1, fontSize: 12, lineHeight: 1.4 }}>
           {toast.message}
         </span>
         <button
           onClick={onDismiss}
           style={{
             background: "none", border: "none", cursor: "pointer", padding: 2,
-            color: "rgba(255,255,255,0.3)", display: "flex", flexShrink: 0,
+            color: "var(--text-muted)", display: "flex", flexShrink: 0,
           }}
         >
           <X style={{ width: 12, height: 12 }} />

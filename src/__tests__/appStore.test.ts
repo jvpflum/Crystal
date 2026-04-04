@@ -5,6 +5,7 @@ describe("appStore", () => {
   beforeEach(() => {
     useAppStore.setState({
       currentView: "home",
+      pendingCommandCenterTab: null,
       voiceState: "idle",
       isMinimized: false,
       transcript: "",
@@ -26,7 +27,7 @@ describe("appStore", () => {
     const views: AppView[] = [
       "home", "conversation", "command-center", "agents", "office",
       "factory", "marketplace", "models", "sessions", "templates",
-      "channels", "memory", "tools", "activity", "settings", "cron",
+      "channels", "memory", "tools", "activity", "settings",
       "security", "hooks", "doctor", "nodes", "browser", "workspace",
       "messaging", "directory", "devices", "subagents", "webhooks", "voicecall",
     ];
@@ -34,6 +35,14 @@ describe("appStore", () => {
       useAppStore.getState().setView(view);
       expect(useAppStore.getState().currentView).toBe(view);
     }
+  });
+
+  it("opens Command Center with a specific tab", () => {
+    useAppStore.getState().setView("command-center", { centerTab: "scheduled" });
+    expect(useAppStore.getState().currentView).toBe("command-center");
+    expect(useAppStore.getState().pendingCommandCenterTab).toBe("scheduled");
+    useAppStore.getState().clearPendingCommandCenterTab();
+    expect(useAppStore.getState().pendingCommandCenterTab).toBeNull();
   });
 
   it("does not include 'acp' as a valid view (consolidated into subagents)", () => {

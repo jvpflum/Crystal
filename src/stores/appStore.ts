@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+export type CommandCenterTabId = "calendar" | "workflows" | "scheduled" | "heartbeat";
+
 export type AppView =
   | "home"
   | "conversation"
@@ -16,7 +18,6 @@ export type AppView =
   | "tools"
   | "activity"
   | "settings"
-  | "cron"
   | "security"
   | "hooks"
   | "doctor"
@@ -48,7 +49,10 @@ export type ThinkingLevel = "auto" | "minimal" | "medium" | "high";
 
 interface AppState {
   currentView: AppView;
-  setView: (view: AppView) => void;
+  /** When opening Command Center, switch to this tab once (then cleared). */
+  pendingCommandCenterTab: CommandCenterTabId | null;
+  setView: (view: AppView, opts?: { centerTab?: CommandCenterTabId }) => void;
+  clearPendingCommandCenterTab: () => void;
 
   voiceState: VoiceState;
   setVoiceState: (state: VoiceState) => void;
@@ -68,20 +72,35 @@ interface AppState {
 }
 
 const PERSISTED_VIEW_KEY = "crystal_current_view";
-function loadPersistedView(): AppView {
+
+function loadPersistedNavigation(): { view: AppView; centerTab: CommandCenterTabId | null } {
   try {
     const saved = localStorage.getItem(PERSISTED_VIEW_KEY);
-    if (saved) return saved as AppView;
+    if (saved === "cron") {
+      localStorage.setItem(PERSISTED_VIEW_KEY, "command-center");
+      return { view: "command-center", centerTab: "scheduled" };
+    }
+    if (saved) return { view: saved as AppView, centerTab: null };
   } catch { /* ignore */ }
-  return "home";
+  return { view: "home", centerTab: null };
 }
 
-export const useAppStore = create<AppState>((set) => ({
-  currentView: loadPersistedView(),
-  setView: (view) => {
+const initialNav = loadPersistedNavigation();
+
+export const useAppStore = create<AppState>((set, get) => ({
+  currentView: initialNav.view,
+  pendingCommandCenterTab: initialNav.centerTab,
+  setView: (view, opts) => {
+    let pending = get().pendingCommandCenterTab;
+    if (view === "command-center") {
+      pending = opts?.centerTab ?? null;
+    } else {
+      pending = null;
+    }
     try { localStorage.setItem(PERSISTED_VIEW_KEY, view); } catch { /* ignore */ }
-    set({ currentView: view });
+    set({ currentView: view, pendingCommandCenterTab: pending });
   },
+  clearPendingCommandCenterTab: () => set({ pendingCommandCenterTab: null }),
 
   voiceState: "idle",
   setVoiceState: (state) => set({ voiceState: state }),

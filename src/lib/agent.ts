@@ -1,4 +1,5 @@
 import { openclawClient } from "./openclaw";
+import { useTokenUsageStore } from "@/stores/tokenUsageStore";
 import { invoke } from "@tauri-apps/api/core";
 import { escapeShellArg } from "@/lib/tools";
 
@@ -114,6 +115,7 @@ class AgentService {
       const response = await this.generateImage(imagePrompt);
       const cleaned = this.extractAndEmitActions(response);
       this.emitStep({ action: { type: "response", content: cleaned }, timestamp: new Date() });
+      useTokenUsageStore.getState().recordTokens(2800);
       yield cleaned;
       return;
     }

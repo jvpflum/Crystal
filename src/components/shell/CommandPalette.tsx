@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useAppStore, type AppView } from "@/stores/appStore";
+import { useAppStore, type AppView, type CommandCenterTabId } from "@/stores/appStore";
 import { askCrystalAI, type AiSearchResult } from "@/lib/search-ai";
 import {
   Home, MessageSquare, Building2, Bot, Store, Cpu, Radio, Brain,
@@ -17,6 +17,15 @@ interface CommandItem {
   description: string;
   category: "Navigation" | "Actions" | "OpenClaw" | "AI";
   action: () => void;
+}
+
+function labelForSuggestedView(v: string): string {
+  if (v === "command-center:scheduled") return "Scheduled Jobs";
+  if (v === "command-center:calendar") return "Command Center (Calendar)";
+  if (v === "command-center:workflows") return "Command Center (Workflows)";
+  if (v === "command-center:heartbeat") return "Command Center (Heartbeat)";
+  if (v.startsWith("command-center:")) return "Command Center";
+  return v;
 }
 
 function looksLikeQuestion(q: string): boolean {
@@ -44,14 +53,14 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
   const commands: CommandItem[] = useMemo(() => [
     { id: "home",         icon: Home,          label: "Home",      description: "Dashboard overview",          category: "Navigation", action: () => setView("home" as AppView) },
     { id: "chat",         icon: MessageSquare, label: "Chat",      description: "Open conversation",           category: "Navigation", action: () => setView("conversation" as AppView) },
-    { id: "command-center", icon: Building2,   label: "Command Center", description: "Calendar, workflows & scheduling", category: "Navigation", action: () => setView("command-center" as AppView) },
+    { id: "command-center", icon: Building2,   label: "Command Center", description: "Calendar, workflows, scheduled jobs & heartbeat", category: "Navigation", action: () => setView("command-center" as AppView) },
     // Sidebar views
     { id: "agents",       icon: Bot,           label: "Agents",       description: "Agents, sessions & task dispatch",  category: "Navigation", action: () => setView("agents" as AppView) },
     { id: "factory",      icon: Factory,       label: "The Forge",    description: "Builds, sub-agents & software dev", category: "Navigation", action: () => setView("factory" as AppView) },
     { id: "models",       icon: Cpu,           label: "Models",       description: "Manage LLM models",                 category: "Navigation", action: () => setView("models" as AppView) },
     { id: "channels",     icon: Radio,         label: "Channels",     description: "Communication channels",            category: "Navigation", action: () => setView("channels" as AppView) },
     { id: "memory",       icon: Brain,         label: "Memory",       description: "Knowledge & memory store",          category: "Navigation", action: () => setView("memory" as AppView) },
-    { id: "cron",         icon: Clock,         label: "Cron Jobs",    description: "Scheduled jobs & cron",             category: "Navigation", action: () => setView("cron" as AppView) },
+    { id: "cron",         icon: Clock,         label: "Scheduled Jobs", description: "Command Center → Scheduled tab", category: "Navigation", action: () => setView("command-center" as AppView, { centerTab: "scheduled" }) },
     { id: "hooks",        icon: Anchor,        label: "Hooks",        description: "Event hooks & triggers",            category: "Navigation", action: () => setView("hooks" as AppView) },
     { id: "tools",        icon: Wrench,        label: "Tools & Skills", description: "Skills, sandbox & tool permissions", category: "Navigation", action: () => setView("tools" as AppView) },
     { id: "doctor",       icon: Stethoscope,   label: "Doctor",       description: "System diagnostics & health",       category: "Navigation", action: () => setView("doctor" as AppView) },
@@ -162,7 +171,17 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
   }, [flatItems, selectedIndex, onClose]);
 
   const navigateToView = useCallback((view: string) => {
-    setView(view as AppView);
+    const m = /^command-center:(\w+)$/.exec(view);
+    if (m) {
+      const tab = m[1] as CommandCenterTabId;
+      if (tab === "calendar" || tab === "workflows" || tab === "scheduled" || tab === "heartbeat") {
+        setView("command-center", { centerTab: tab });
+      } else {
+        setView("command-center" as AppView);
+      }
+    } else {
+      setView(view as AppView);
+    }
     onClose();
   }, [setView, onClose]);
 
@@ -202,10 +221,9 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
   return (
     <div
       onClick={onClose}
+      className="cp-overlay"
       style={{
         position: "fixed", inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        backdropFilter: "blur(8px)",
         zIndex: 1000,
         animation: "cp-overlay-in 0.15s ease-out",
       }}
@@ -220,20 +238,18 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
       <div
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
+        className="cp-modal"
         style={{
           width: 520, maxHeight: 500,
           margin: "0 auto", marginTop: 100,
-          background: "rgba(15,15,22,0.98)",
-          border: "1px solid rgba(255,255,255,0.1)",
-          borderRadius: 12, overflow: "hidden",
+          borderRadius: 14, overflow: "hidden",
           display: "flex", flexDirection: "column",
           animation: "cp-modal-in 0.18s ease-out",
         }}
       >
-        <div style={{
+        <div className="cp-modal-header" style={{
           display: "flex", alignItems: "center", gap: 8,
           padding: "0 16px",
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
         }}>
           {isQuestion ? (
             <Sparkles style={{ width: 14, height: 14, color: "#a855f7", flexShrink: 0 }} />
@@ -245,12 +261,12 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search commands or ask a question..."
+            className="cp-modal-input"
             style={{
               flex: 1, fontSize: 14,
               padding: "14px 0",
               background: "transparent",
               border: "none", outline: "none",
-              color: "rgba(255,255,255,0.9)",
             }}
           />
           {aiLoading && (
@@ -326,7 +342,7 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
                         onMouseLeave={e => { e.currentTarget.style.background = "rgba(59,130,246,0.15)"; }}
                       >
                         <ArrowRight style={{ width: 11, height: 11 }} />
-                        Go to {aiResult.suggestedView}
+                        Go to {labelForSuggestedView(aiResult.suggestedView)}
                       </button>
                     )}
                     <button

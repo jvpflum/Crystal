@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback, type CSSProperties } from "react";
 import {
   Box, Globe, Shield, RefreshCw, Loader2, AlertTriangle,
   Terminal, Info, ChevronDown, ChevronRight, Search,
-  CheckCircle2, XCircle, Zap, Play,
+  CheckCircle2, XCircle, Zap, Play, KeyRound,
 } from "lucide-react";
+import { OpenClawKeysTab } from "@/components/tools/OpenClawKeysTab";
 import { cachedCommand } from "@/lib/cache";
 import { useDataStore } from "@/stores/dataStore";
 import { openclawClient } from "@/lib/openclaw";
@@ -21,7 +22,7 @@ interface OCSkill {
   missing: { bins: string[]; anyBins: string[]; env: string[]; config: string[]; os: string[] };
 }
 
-type TabId = "skills" | "sandbox";
+type TabId = "skills" | "sandbox" | "keys";
 
 export function ToolsView() {
   const [tab, setTab] = useState<TabId>("skills");
@@ -33,11 +34,12 @@ export function ToolsView() {
       <div style={{ padding: "14px 20px 0", flexShrink: 0 }}>
         <h2 style={{ color: "var(--text)", fontSize: 15, fontWeight: 600, margin: 0 }}>Tools &amp; Skills</h2>
         <p style={{ margin: "2px 0 10px", fontSize: 10, color: "var(--text-muted)" }}>
-          OpenClaw skills, sandbox containers, and tool permissions
+          OpenClaw skills, keys, sandbox, and tool permissions
         </p>
         <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--border)" }}>
           {([
             { id: "skills" as TabId, label: "Skills", icon: <Zap style={{ width: 11, height: 11 }} /> },
+            { id: "keys" as TabId, label: "Keys", icon: <KeyRound style={{ width: 11, height: 11 }} /> },
             { id: "sandbox" as TabId, label: "Sandbox & Tools", icon: <Box style={{ width: 11, height: 11 }} /> },
           ]).map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
@@ -52,7 +54,7 @@ export function ToolsView() {
         </div>
       </div>
 
-      {tab === "skills" ? <SkillsTab /> : <SandboxTab />}
+      {tab === "skills" ? <SkillsTab /> : tab === "keys" ? <OpenClawKeysTab /> : <SandboxTab />}
     </div>
   );
 }
@@ -63,7 +65,7 @@ export function ToolsView() {
 
 function parseSkill(s: Record<string, unknown>): OCSkill {
   return {
-    name: String(s.name || ""),
+    name: String(s.name || s.id || s.skillId || s.key || ""),
     description: String(s.description || ""),
     emoji: String(s.emoji || ""),
     eligible: s.eligible === true,
@@ -167,7 +169,7 @@ function SkillsTab() {
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 8 }}>
                   {workspaceSkills.map(s => (
-                    <SkillCard key={s.name} skill={s} selected={selectedSkill?.name === s.name} onSelect={() => setSelectedSkill(selectedSkill?.name === s.name ? null : s)} />
+                    <SkillCard key={`${s.name}:${s.source}`} skill={s} selected={selectedSkill?.name === s.name} onSelect={() => setSelectedSkill(selectedSkill?.name === s.name ? null : s)} />
                   ))}
                 </div>
               </div>
@@ -179,7 +181,7 @@ function SkillsTab() {
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 8 }}>
                   {bundledSkills.map(s => (
-                    <SkillCard key={s.name} skill={s} selected={selectedSkill?.name === s.name} onSelect={() => setSelectedSkill(selectedSkill?.name === s.name ? null : s)} />
+                    <SkillCard key={`${s.name}:${s.source}`} skill={s} selected={selectedSkill?.name === s.name} onSelect={() => setSelectedSkill(selectedSkill?.name === s.name ? null : s)} />
                   ))}
                 </div>
               </div>
@@ -278,6 +280,29 @@ function SkillCard({ skill, selected, onSelect }: { skill: OCSkill; selected: bo
    SANDBOX & TOOLS TAB
    ══════════════════════════════════════════════════════════════════════ */
 
+function extractCliJsonObject(text: string): Record<string, unknown> | null {
+  const c = text.trim();
+  if (!c) return null;
+  const first = c.indexOf("{");
+  const last = c.lastIndexOf("}");
+  if (first < 0 || last <= first) return null;
+  try {
+    return JSON.parse(c.slice(first, last + 1)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/** `config get tools` may return `{ tools: { allow, deny, profile } }` or a flat tools section. */
+function normalizeToolsConfigPayload(parsed: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!parsed) return null;
+  const inner = parsed.tools;
+  if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+    return inner as Record<string, unknown>;
+  }
+  return parsed;
+}
+
 interface SandboxContainer { id: string; name: string; status: string; image?: string; }
 interface SandboxBrowser { id: string; url?: string; status: string; }
 interface SandboxData { containers: SandboxContainer[]; browsers: SandboxBrowser[]; }
@@ -293,8 +318,13 @@ function SandboxTab() {
   const loadSandbox = useCallback(async () => {
     try {
       const result = await cachedCommand("openclaw sandbox list --json", { ttl: 60_000 });
-      if (result.code === 0) {
-        try { setSandbox(JSON.parse(result.stdout)); } catch { setSandbox({ containers: [], browsers: [] }); }
+      const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
+      const raw = extractCliJsonObject(combined);
+      if (raw) {
+        setSandbox({
+          containers: Array.isArray(raw.containers) ? (raw.containers as SandboxContainer[]) : [],
+          browsers: Array.isArray(raw.browsers) ? (raw.browsers as SandboxBrowser[]) : [],
+        });
       }
     } catch { /* non-critical */ }
   }, []);
@@ -302,19 +332,20 @@ function SandboxTab() {
   const loadPolicy = useCallback(async () => {
     try {
       const result = await cachedCommand("openclaw sandbox explain --json", { ttl: 120_000 });
-      if (result.code === 0) {
-        try { setPolicy(JSON.parse(result.stdout)); } catch { setPolicy(null); }
-      }
+      const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
+      setPolicy(extractCliJsonObject(combined));
     } catch { /* non-critical */ }
   }, []);
 
   const loadToolPermissions = useCallback(async () => {
     try {
       const result = await cachedCommand("openclaw config get tools --json", { ttl: 120_000 });
-      if (result.code === 0) {
-        try { setToolPermissions(JSON.parse(result.stdout)); } catch { setToolPermissions(null); }
-      }
-    } catch { /* non-critical */ }
+      const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
+      const parsed = extractCliJsonObject(combined);
+      setToolPermissions(normalizeToolsConfigPayload(parsed));
+    } catch {
+      setToolPermissions(null);
+    }
   }, []);
 
   const loadAll = useCallback(async () => {

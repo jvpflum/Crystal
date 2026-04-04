@@ -10,11 +10,10 @@ export function TitleBar() {
   return (
     <div
       data-tauri-drag-region
+      className="glass-titlebar"
       style={{
         height: 38, padding: "0 12px 0 16px", display: "flex",
         alignItems: "center", justifyContent: "space-between", flexShrink: 0,
-        background: "var(--bg-surface)",
-        borderBottom: "1px solid var(--border-subtle)",
         WebkitAppRegion: "drag" as unknown as string,
         appRegion: "drag",
       } as React.CSSProperties}

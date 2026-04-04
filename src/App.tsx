@@ -5,9 +5,10 @@ import { Navigation } from "@/components/shell/Navigation";
 import { CommandPalette } from "@/components/shell/CommandPalette";
 import { LobsterIcon } from "@/components/LobsterIcon";
 import { ToastProvider } from "@/components/shell/Toast";
+import { TokenMilestoneListener } from "@/components/shell/TokenMilestoneListener";
 import { ErrorBoundary } from "@/components/shell/ErrorBoundary";
 import { Onboarding } from "@/components/shell/Onboarding";
-import { useAppStore } from "@/stores/appStore";
+import { useAppStore, type AppView, type CommandCenterTabId } from "@/stores/appStore";
 import { useDataStore } from "@/stores/dataStore";
 import { useToggleWindowShortcut } from "@/hooks/useGlobalShortcut";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -31,7 +32,6 @@ const MemoryView = lazy(() => import("@/components/views/MemoryView").then(m => 
 const ToolsView = lazy(() => import("@/components/views/ToolsView").then(m => ({ default: m.ToolsView })));
 const ActivityView = lazy(() => import("@/components/views/ActivityView").then(m => ({ default: m.ActivityView })));
 const SettingsView = lazy(() => import("@/components/views/SettingsView").then(m => ({ default: m.SettingsView })));
-const CronView = lazy(() => import("@/components/views/CronView").then(m => ({ default: m.CronView })));
 const SecurityView = lazy(() => import("@/components/views/SecurityView").then(m => ({ default: m.SecurityView })));
 const HooksView = lazy(() => import("@/components/views/HooksView").then(m => ({ default: m.HooksView })));
 const DoctorView = lazy(() => import("@/components/views/DoctorView").then(m => ({ default: m.DoctorView })));
@@ -118,8 +118,13 @@ function App() {
 
   useEffect(() => {
     const handler = (e: Event) => {
-      const view = (e as CustomEvent).detail;
-      if (view) setView(view);
+      const d = (e as CustomEvent).detail;
+      if (!d) return;
+      if (typeof d === "string") setView(d as AppView);
+      else if (typeof d === "object" && d && "view" in d && typeof (d as { view: unknown }).view === "string") {
+        const o = d as { view: AppView; centerTab?: CommandCenterTabId };
+        setView(o.view, o.centerTab ? { centerTab: o.centerTab } : undefined);
+      }
     };
     window.addEventListener("crystal:navigate", handler);
     return () => window.removeEventListener("crystal:navigate", handler);
@@ -174,8 +179,9 @@ function App() {
 
   if (!isInitialized) {
     return (
-      <div className="h-screen w-screen" style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-base)" }}>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+      <div className="app-root h-screen w-screen" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div className="app-atmosphere" aria-hidden />
+        <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
           <Loader2 style={{ width: 32, height: 32, color: "var(--accent)" }} className="animate-spin" />
           <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>Loading Crystal...</p>
         </div>
@@ -187,12 +193,14 @@ function App() {
 
   return (
     <ToastProvider>
-      <div className="h-screen w-screen overflow-hidden" style={{ background: "var(--bg-base)" }}>
-        <div style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <TokenMilestoneListener />
+      <div className="app-root h-screen w-screen overflow-hidden">
+        <div className="app-atmosphere" aria-hidden />
+        <div className="app-chrome" style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <TitleBar />
           <div style={{ flex: 1, display: "flex", minHeight: 0, overflow: "hidden" }}>
             <Navigation />
-            <main style={{ flex: 1, minWidth: 0, overflow: "hidden", background: "var(--bg-base)", position: "relative" }}>
+            <main className="app-main" style={{ flex: 1, minWidth: 0, overflow: "hidden", position: "relative" }}>
               <ErrorBoundary>
                 <Suspense fallback={<ViewFallback />}>
                   <ViewSlot id="home" active={currentView === "home"}><HomeView /></ViewSlot>
@@ -208,7 +216,6 @@ function App() {
                   <ViewSlot id="tools" active={currentView === "tools"}><ToolsView /></ViewSlot>
                   <ViewSlot id="activity" active={currentView === "activity"}><ActivityView /></ViewSlot>
                   <ViewSlot id="settings" active={currentView === "settings"}><SettingsView /></ViewSlot>
-                  <ViewSlot id="cron" active={currentView === "cron"}><CronView /></ViewSlot>
                   <ViewSlot id="security" active={currentView === "security"}><SecurityView /></ViewSlot>
                   <ViewSlot id="hooks" active={currentView === "hooks"}><HooksView /></ViewSlot>
                   <ViewSlot id="doctor" active={currentView === "doctor"}><DoctorView /></ViewSlot>
@@ -230,8 +237,8 @@ function App() {
               </ErrorBoundary>
             </main>
           </div>
+          <CommandPalette isOpen={cmdPaletteOpen} onClose={() => setCmdPaletteOpen(false)} />
         </div>
-        <CommandPalette isOpen={cmdPaletteOpen} onClose={() => setCmdPaletteOpen(false)} />
       </div>
       {showOnboarding && (
         <Onboarding
@@ -250,16 +257,19 @@ function FloatingOrb() {
   const setVoiceState = useAppStore(s => s.setVoiceState);
   const voiceState = useAppStore(s => s.voiceState);
   return (
-    <div className="h-screen w-screen" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div className="app-root h-screen w-screen" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div className="app-atmosphere" aria-hidden />
       <button
+        className="glass"
         onClick={() => voiceState === "idle" ? setVoiceState("listening") : setMinimized(false)}
         onDoubleClick={() => setMinimized(false)}
         style={{
+          position: "relative", zIndex: 1,
           width: 64, height: 64, borderRadius: "50%",
-          background: "linear-gradient(135deg, rgba(59,130,246,0.5), rgba(168,85,247,0.5))",
-          border: "1px solid var(--border)",
+          background: "linear-gradient(135deg, color-mix(in srgb, var(--accent) 45%, transparent), color-mix(in srgb, #a855f7 40%, transparent))",
           display: "flex", alignItems: "center", justifyContent: "center",
-          cursor: "pointer", transition: "transform 0.2s",
+          cursor: "pointer", transition: "transform 0.2s, box-shadow 0.2s",
+          boxShadow: "var(--shadow-glass-lg)",
         }}
       >
         <LobsterIcon size={36} />

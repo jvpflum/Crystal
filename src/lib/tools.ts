@@ -5,6 +5,11 @@ export function escapeShellArg(s: string): string {
   return s.replace(/[`$"\\]/g, (ch) => `\`${ch}`).replace(/\n/g, " ");
 }
 
+/** Single-quoted PowerShell literal for job ids (UUIDs, etc.) inside `powershell -Command "..."`. */
+export function quotePowerShellSingleQuoted(s: string): string {
+  return `'${String(s).replace(/'/g, "''")}'`;
+}
+
 export interface ToolResult {
   success: boolean;
   output: string;

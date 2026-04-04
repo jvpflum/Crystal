@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useAppStore } from "@/stores/appStore";
 import {
   Users,
   Search,
@@ -500,10 +501,9 @@ function PeersTab({ channel }: { channel: string }) {
       JSON.stringify({ channel, target: targetId }),
     );
     try {
-      const { useAppStore } = require("@/stores/appStore");
-      useAppStore.getState().setView("messaging" as never);
+      useAppStore.getState().setView("messaging");
     } catch {
-      /* appStore may not have messaging view yet */
+      /* navigation unavailable */
     }
   };
 
@@ -785,10 +785,9 @@ function GroupsTab({ channel }: { channel: string }) {
       JSON.stringify({ channel, target: targetId }),
     );
     try {
-      const { useAppStore } = require("@/stores/appStore");
-      useAppStore.getState().setView("messaging" as never);
+      useAppStore.getState().setView("messaging");
     } catch {
-      /* appStore may not have messaging view yet */
+      /* navigation unavailable */
     }
   };
 

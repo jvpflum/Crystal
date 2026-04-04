@@ -30,6 +30,22 @@ export interface AgentRun {
   createdAt: number;
 }
 
+/** Saved Forge night / recurring build definitions (registered separately with OpenClaw cron). */
+export interface ForgeSchedule {
+  id: string;
+  name: string;
+  projectId: string | null;
+  task: string;
+  cwd: string;
+  runtime: string;
+  model: string;
+  thinking: string;
+  cronExpression: string;
+  openclawJobName?: string;
+  lastRegisteredAt?: number;
+  createdAt: number;
+}
+
 export interface FileSnapshot {
   before: Map<string, number>;
   after: Map<string, number>;
@@ -38,6 +54,7 @@ export interface FileSnapshot {
 interface FactoryState {
   projects: FactoryProject[];
   runs: AgentRun[];
+  forgeSchedules: ForgeSchedule[];
   selectedProjectId: string | null;
   focusedRunId: string | null;
   fileSnapshots: Record<string, FileSnapshot>;
@@ -55,6 +72,10 @@ interface FactoryState {
 
   setFocusedRun: (id: string | null) => void;
   setFileSnapshot: (runId: string, snapshot: FileSnapshot) => void;
+
+  addForgeSchedule: (s: Omit<ForgeSchedule, "id" | "createdAt">) => string;
+  updateForgeSchedule: (id: string, update: Partial<Omit<ForgeSchedule, "id" | "createdAt">>) => void;
+  removeForgeSchedule: (id: string) => void;
 }
 
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -64,6 +85,7 @@ export const useFactoryStore = create<FactoryState>()(
     (set) => ({
       projects: [],
       runs: [],
+      forgeSchedules: [],
       selectedProjectId: null,
       focusedRunId: null,
       fileSnapshots: {},
@@ -133,12 +155,34 @@ export const useFactoryStore = create<FactoryState>()(
         set((s) => ({
           fileSnapshots: { ...s.fileSnapshots, [runId]: snapshot },
         })),
+
+      addForgeSchedule: (row) => {
+        const id = uid();
+        const now = Date.now();
+        set((s) => ({
+          forgeSchedules: [...s.forgeSchedules, { ...row, id, createdAt: now }],
+        }));
+        return id;
+      },
+
+      updateForgeSchedule: (id, update) =>
+        set((s) => ({
+          forgeSchedules: s.forgeSchedules.map((f) =>
+            f.id === id ? { ...f, ...update } : f
+          ),
+        })),
+
+      removeForgeSchedule: (id) =>
+        set((s) => ({
+          forgeSchedules: s.forgeSchedules.filter((f) => f.id !== id),
+        })),
     }),
     {
       name: "crystal-factory",
       partialize: (state) => ({
         projects: state.projects,
         runs: state.runs,
+        forgeSchedules: state.forgeSchedules,
         selectedProjectId: state.selectedProjectId,
       }),
     }

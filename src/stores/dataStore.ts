@@ -1,5 +1,19 @@
 import { create } from "zustand";
-import { cachedCommand } from "@/lib/cache";
+import { cachedCommand, invalidateCache } from "@/lib/cache";
+
+/** CLI string used by `fetchCronJobs`; bust this cache after any cron add/remove/toggle/run. */
+export const CRON_LIST_JSON_ALL_CMD = "openclaw cron list --json --all";
+
+export function invalidateCronJobsCliCache(): void {
+  invalidateCache(CRON_LIST_JSON_ALL_CMD);
+}
+
+/** CLI string used by `fetchSkills`; bust when forcing refresh on Tools → Skills. */
+export const SKILLS_LIST_JSON_CMD = "openclaw skills list --json";
+
+export function invalidateSkillsCliCache(): void {
+  invalidateCache(SKILLS_LIST_JSON_CMD);
+}
 
 interface CacheEntry<T> {
   data: T;
@@ -143,7 +157,7 @@ function makeGetter<T>(
 // All fetchers now go through cachedCommand which has a concurrency limiter
 
 async function fetchCronJobs(): Promise<Record<string, unknown>[]> {
-  const r = await cachedCommand("openclaw cron list --json --all", { ttl: 120_000 });
+  const r = await cachedCommand(CRON_LIST_JSON_ALL_CMD, { ttl: 120_000 });
   if (r.code === 0 && r.stdout.trim()) {
     const p = JSON.parse(r.stdout);
     return Array.isArray(p) ? p : p.jobs ?? [];
@@ -162,8 +176,25 @@ async function fetchAgents(): Promise<Record<string, unknown>[]> {
 
 async function fetchMemoryStatus(): Promise<Record<string, unknown>> {
   const r = await cachedCommand("openclaw memory status --json", { ttl: 60_000 });
-  if (r.code === 0 && r.stdout.trim()) return JSON.parse(r.stdout);
-  return {};
+  if (r.code !== 0 || !r.stdout.trim()) return {};
+  try {
+    const parsed = JSON.parse(r.stdout.trim()) as unknown;
+    const base = (Array.isArray(parsed) ? parsed[0] : parsed) as Record<string, unknown> | null;
+    if (!base || typeof base !== "object") return {};
+    const st = base.status as Record<string, unknown> | undefined;
+    let chunks = NaN;
+    if (st && typeof st === "object") {
+      const n = Number(st.chunks ?? st.totalChunks ?? 0);
+      if (Number.isFinite(n)) chunks = n;
+    }
+    if (!Number.isFinite(chunks)) {
+      const top = Number(base.chunks ?? base.totalChunks ?? base.count ?? 0);
+      chunks = Number.isFinite(top) ? top : 0;
+    }
+    return { ...base, chunks, totalChunks: chunks };
+  } catch {
+    return {};
+  }
 }
 
 async function fetchSystemStatus(): Promise<Record<string, unknown>> {
@@ -186,14 +217,62 @@ async function fetchChannelStatus(): Promise<Record<string, unknown>> {
   return {};
 }
 
-async function fetchSkills(): Promise<Record<string, unknown>[]> {
-  const r = await cachedCommand("openclaw skills list --json", { ttl: 120_000 });
-  if (r.code === 0 && r.stdout.trim()) {
-    const p = JSON.parse(r.stdout);
-    return Array.isArray(p) ? p : p.skills ?? [];
+/** Parse `openclaw skills list --json` from stdout and/or stderr (CLI may log to either stream). */
+export function parseSkillsCliOutput(stdout: string, stderr: string): Record<string, unknown>[] {
+  const combined = `${stdout || ""}\n${stderr || ""}`.trim();
+  const toArray = (p: unknown): Record<string, unknown>[] | null => {
+    if (Array.isArray(p)) return p as Record<string, unknown>[];
+    if (p && typeof p === "object") {
+      const obj = p as Record<string, unknown>;
+      const skills =
+        obj.skills ??
+        obj.items ??
+        obj.entries ??
+        obj.list ??
+        obj.data ??
+        obj.results;
+      if (Array.isArray(skills)) return skills as Record<string, unknown>[];
+    }
+    return null;
+  };
+
+  const tryParse = (s: string): Record<string, unknown>[] | null => {
+    const t = s.trim();
+    if (!t) return null;
+    try {
+      return toArray(JSON.parse(t));
+    } catch {
+      return null;
+    }
+  };
+
+  let found = tryParse(combined);
+  if (found) return found;
+
+  const firstArr = combined.indexOf("[");
+  const firstObj = combined.indexOf("{");
+  const slices: string[] = [];
+  if (firstArr >= 0 && (firstObj < 0 || firstArr < firstObj)) {
+    const last = combined.lastIndexOf("]");
+    if (last > firstArr) slices.push(combined.slice(firstArr, last + 1));
+  }
+  if (firstObj >= 0) {
+    const last = combined.lastIndexOf("}");
+    if (last > firstObj) slices.push(combined.slice(firstObj, last + 1));
+  }
+  for (const slice of slices) {
+    found = tryParse(slice);
+    if (found) return found;
   }
   return [];
 }
+
+async function fetchSkills(): Promise<Record<string, unknown>[]> {
+  const r = await cachedCommand(SKILLS_LIST_JSON_CMD, { ttl: 120_000 });
+  return parseSkillsCliOutput(r.stdout || "", r.stderr || "");
+}
+
+const getSkillsBase = makeGetter("skills", fetchSkills);
 
 async function fetchSessions(): Promise<Record<string, unknown>[]> {
   const r = await cachedCommand("openclaw sessions --json", { ttl: 30_000 });
@@ -260,7 +339,10 @@ export const useDataStore = create<DataState>((set, get) => ({
   getSystemStatus: makeGetter("systemStatus", fetchSystemStatus),
   getTasks: makeGetter("tasks", fetchTasks),
   getChannelStatus: makeGetter("channelStatus", fetchChannelStatus),
-  getSkills: makeGetter("skills", fetchSkills),
+  getSkills: async (force = false) => {
+    if (force) invalidateSkillsCliCache();
+    return getSkillsBase(force);
+  },
   getSessions: makeGetter("sessions", fetchSessions),
 
   invalidate: (key) => {

@@ -18,6 +18,44 @@ interface AllowlistEntry {
   scope?: string;
 }
 
+/** PowerShell single-quoted literal: embed ' as '' */
+function escapePowerShellSingleQuoted(s: string): string {
+  return s.replace(/'/g, "''");
+}
+
+/** OpenClaw expects `allowlist add|remove <pattern> [--agent id]` (not `--add`). */
+function allowlistCli(action: "add" | "remove", pattern: string, agent: string): string {
+  const p = escapePowerShellSingleQuoted(pattern.trim());
+  const agentArg = agent === "*" ? "--agent '*'" : `--agent ${agent}`;
+  return `openclaw approvals allowlist ${action} '${p}' ${agentArg}`;
+}
+
+/** `openclaw approvals get --json` nests allowlists under file.agents.<id>.allowlist */
+function parseAllowlistRows(data: Record<string, unknown>): AllowlistEntry[] {
+  const legacy = data.allowlist ?? data.allowed;
+  if (Array.isArray(legacy) && legacy.length > 0) {
+    return legacy.map((a: Record<string, unknown>) => ({
+      pattern: String(a.pattern ?? a.command ?? ""),
+      agent: String(a.agent ?? a.agentId ?? "main"),
+      scope: a.scope ? String(a.scope) : undefined,
+    }));
+  }
+  const file = data.file as Record<string, unknown> | undefined;
+  const agents = file?.agents as Record<string, Record<string, unknown>> | undefined;
+  if (!agents || typeof agents !== "object") return [];
+  const out: AllowlistEntry[] = [];
+  for (const [agentId, agent] of Object.entries(agents)) {
+    const list = agent?.allowlist;
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
+      const e = entry as Record<string, unknown>;
+      const pattern = String(e.pattern ?? "").trim();
+      if (pattern) out.push({ pattern, agent: agentId });
+    }
+  }
+  return out;
+}
+
 export function ApprovalsView() {
   const [approvals, setApprovals] = useState<ApprovalEntry[]>([]);
   const [allowlist, setAllowlist] = useState<AllowlistEntry[]>([]);
@@ -42,12 +80,7 @@ export function ApprovalsView() {
           approvedAt: a.approvedAt ? String(a.approvedAt) : undefined,
           scope: a.scope ? String(a.scope) : undefined,
         })));
-        const allow = data.allowlist ?? data.allowed ?? [];
-        setAllowlist(allow.map((a: Record<string, unknown>) => ({
-          pattern: String(a.pattern ?? a.command ?? ""),
-          agent: String(a.agent ?? a.agentId ?? "main"),
-          scope: a.scope ? String(a.scope) : undefined,
-        })));
+        setAllowlist(parseAllowlistRows(data));
         setError(null);
       }
     } catch (e) {
@@ -67,7 +100,7 @@ export function ApprovalsView() {
     setAdding(true);
     try {
       await invoke("execute_command", {
-        command: `openclaw approvals allowlist --add "${newPattern.replace(/"/g, '\\"')}" --agent ${newAgent}`,
+        command: allowlistCli("add", newPattern, newAgent),
         cwd: null,
       });
       setNewPattern("");
@@ -81,7 +114,7 @@ export function ApprovalsView() {
   const removeFromAllowlist = async (pattern: string, agent: string) => {
     try {
       await invoke("execute_command", {
-        command: `openclaw approvals allowlist --remove "${pattern.replace(/"/g, '\\"')}" --agent ${agent}`,
+        command: allowlistCli("remove", pattern, agent),
         cwd: null,
       });
       await loadApprovals();
@@ -163,9 +196,13 @@ export function ApprovalsView() {
           <>
             <div style={{ marginBottom: 16, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
               <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 6 }}>Add Allowlist Pattern</span>
+              <p style={{ fontSize: 10, color: "var(--text-muted)", margin: "0 0 8px", lineHeight: 1.45 }}>
+                Use the resolved executable path or a glob (e.g. <code style={{ fontSize: 9 }}>**/openhue.exe</code>).
+                Cron jobs need the binary allowlisted for the job&apos;s agent; chained commands (<code style={{ fontSize: 9 }}>&amp;&amp;</code>) require each segment&apos;s binary to match.
+              </p>
               <div style={{ display: "flex", gap: 8 }}>
                 <input value={newPattern} onChange={e => setNewPattern(e.target.value)}
-                  placeholder="e.g. npm install *" onKeyDown={e => { if (e.key === "Enter") addToAllowlist(); }}
+                  placeholder="e.g. C:\...\openhue.exe or **/openhue.exe" onKeyDown={e => { if (e.key === "Enter") addToAllowlist(); }}
                   style={{ flex: 1, padding: "6px 10px", borderRadius: 6, background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 12, fontFamily: "monospace", outline: "none" }} />
                 <select value={newAgent} onChange={e => setNewAgent(e.target.value)}
                   style={{ padding: "6px 8px", borderRadius: 6, background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 11, outline: "none" }}>

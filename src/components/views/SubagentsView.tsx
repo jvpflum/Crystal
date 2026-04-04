@@ -4,7 +4,12 @@ import {
   FileText, Navigation, Send, Bot, ChevronDown, ChevronRight,
   Terminal, Settings, XCircle,
 } from "lucide-react";
-import { openclawClient } from "@/lib/openclaw";
+import {
+  openclawClient,
+  extractJsonFromAgentOutput,
+  pickSubagentListJson,
+  pickAcpSessionsJson,
+} from "@/lib/openclaw";
 
 interface SubAgent {
   id: string;
@@ -113,34 +118,35 @@ export function SubagentsView() {
     ]);
 
     if (subResult.status === "fulfilled" && subResult.value.code === 0 && subResult.value.stdout.trim()) {
-      try {
-        const data = JSON.parse(subResult.value.stdout);
-        const list = Array.isArray(data) ? data : (data.subagents ?? data.agents ?? data.items ?? data.result ?? []);
-        if (Array.isArray(list)) {
-          items.push(...list.map((s: SubAgent) => ({ ...s, source: "subagent" as const })));
-        }
-      } catch {
-        if (subResult.value.stdout.trim()) {
-          setOutput({ title: "Sub-Agents", content: subResult.value.stdout });
-        }
+      const data = extractJsonFromAgentOutput(subResult.value.stdout.trim());
+      if (data !== null) {
+        const list = pickSubagentListJson(data);
+        items.push(
+          ...list.map((s: unknown) => ({ ...(s as SubAgent), source: "subagent" as const }))
+        );
+      } else if (subResult.value.stdout.trim()) {
+        setOutput({ title: "Sub-Agents (raw)", content: subResult.value.stdout });
       }
     }
 
     if (acpResult.status === "fulfilled" && acpResult.value.code === 0 && acpResult.value.stdout.trim()) {
-      try {
-        const parsed = JSON.parse(acpResult.value.stdout);
-        const raw = parsed.sessions ?? parsed.agents ?? parsed.active ?? [];
-        const acpList: SubAgent[] = (Array.isArray(raw) ? raw : []).map((s: Record<string, unknown>) => ({
-          id: String(s.id ?? s.sessionId ?? ""),
-          runtime: String(s.runtime ?? s.type ?? ""),
-          status: String(s.status ?? s.state ?? "unknown"),
-          task: String(s.task ?? s.message ?? s.prompt ?? ""),
-          model: s.model ? String(s.model) : undefined,
-          cwd: s.cwd ? String(s.cwd) : undefined,
-          source: "acp" as const,
-        }));
+      const data = extractJsonFromAgentOutput(acpResult.value.stdout.trim());
+      if (data !== null) {
+        const raw = pickAcpSessionsJson(data);
+        const acpList: SubAgent[] = raw.map((s: unknown) => {
+          const r = s as Record<string, unknown>;
+          return {
+            id: String(r.id ?? r.sessionId ?? ""),
+            runtime: String(r.runtime ?? r.type ?? ""),
+            status: String(r.status ?? r.state ?? "unknown"),
+            task: String(r.task ?? r.message ?? r.prompt ?? ""),
+            model: r.model ? String(r.model) : undefined,
+            cwd: r.cwd ? String(r.cwd) : undefined,
+            source: "acp" as const,
+          };
+        });
         items.push(...acpList);
-      } catch { /* ignore parse errors */ }
+      }
     }
 
     if (subResult.status === "rejected" && acpResult.status === "rejected") {

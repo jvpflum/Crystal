@@ -14,7 +14,63 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { cachedCommand } from "@/lib/cache";
+import { cachedCommand, invalidateCache } from "@/lib/cache";
+
+const HOOKS_LIST_CMD = "openclaw hooks list --json";
+
+/** PowerShell single-quoted literal (safe for hook names with @, spaces, etc.). */
+function psSingleQuoted(s: string): string {
+  return `'${s.replace(/'/g, "''")}'`;
+}
+
+function extractJsonObjectOrArray(stdout: string): string {
+  const t = stdout.trim();
+  const a = t.indexOf("[");
+  const o = t.indexOf("{");
+  if (o === -1 && a === -1) return t;
+  const start = a === -1 ? o : o === -1 ? a : Math.min(a, o);
+  return t.slice(start);
+}
+
+function normalizeHooksList(parsed: unknown): Hook[] {
+  const rawList: unknown[] = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === "object"
+      ? (Array.isArray((parsed as Record<string, unknown>).hooks)
+          ? ((parsed as Record<string, unknown>).hooks as unknown[])
+          : Array.isArray((parsed as Record<string, unknown>).items)
+            ? ((parsed as Record<string, unknown>).items as unknown[])
+            : [])
+      : [];
+  return rawList
+    .map((row) => {
+      const o = row as Record<string, unknown>;
+      const name = String(o.name ?? o.id ?? o.hook ?? "").trim();
+      if (!name) return null;
+      let enabled: boolean | undefined;
+      if (typeof o.enabled === "boolean") enabled = o.enabled;
+      else if (typeof o.enabled === "string") {
+        const e = o.enabled.toLowerCase();
+        enabled = e === "true" || e === "1" || e === "yes";
+      }
+      if (enabled === undefined && typeof o.active === "boolean") enabled = o.active;
+      if (enabled === undefined && typeof o.status === "string") {
+        const s = o.status.toLowerCase();
+        enabled = s === "enabled" || s === "active" || s === "on";
+      }
+      if (enabled === undefined) enabled = false;
+      return {
+        ...o,
+        name,
+        enabled,
+        version: o.version != null ? String(o.version) : undefined,
+        description: o.description != null ? String(o.description) : undefined,
+        type: o.type != null ? String(o.type) : undefined,
+        source: o.source != null ? String(o.source) : undefined,
+      } as Hook;
+    })
+    .filter((h): h is Hook => h != null);
+}
 
 interface Hook {
   name: string;
@@ -59,14 +115,15 @@ export function HooksView() {
   const [eligibility, setEligibility] = useState<EligibilityItem[] | null>(null);
   const [checkingEligibility, setCheckingEligibility] = useState(false);
 
-  const loadHooks = useCallback(async () => {
+  const loadHooks = useCallback(async (opts?: { bypassCache?: boolean }) => {
     setError(null);
+    if (opts?.bypassCache) invalidateCache(HOOKS_LIST_CMD);
     try {
-      const result = await cachedCommand("openclaw hooks list --json", { ttl: 120_000 });
+      const result = await cachedCommand(HOOKS_LIST_CMD, { ttl: 120_000 });
       if (result.stdout.trim()) {
-        const parsed = JSON.parse(result.stdout);
-        const list: Hook[] = Array.isArray(parsed) ? parsed : (parsed.hooks ?? parsed.items ?? []);
-        setHooks(list);
+        const jsonSlice = extractJsonObjectOrArray(result.stdout);
+        const parsed = JSON.parse(jsonSlice);
+        setHooks(normalizeHooksList(parsed));
       } else {
         setHooks([]);
       }
@@ -105,18 +162,21 @@ export function HooksView() {
 
   const toggleHook = async (name: string, currentlyEnabled: boolean) => {
     setToggling(name);
+    setError(null);
     try {
+      const q = psSingleQuoted(name);
       const cmd = currentlyEnabled
-        ? `openclaw hooks disable ${name}`
-        : `openclaw hooks enable ${name}`;
+        ? `openclaw hooks disable ${q}`
+        : `openclaw hooks enable ${q}`;
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
         command: cmd,
         cwd: null,
       });
-      if (result.code !== 0 && result.stderr) {
-        setError(result.stderr);
+      const errText = (result.stderr || "").trim() || (result.stdout || "").trim();
+      if (result.code !== 0) {
+        setError(errText || `Hook toggle failed (exit ${result.code})`);
       }
-      await loadHooks();
+      await loadHooks({ bypassCache: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Toggle failed");
     }
@@ -132,12 +192,13 @@ export function HooksView() {
         command: `openclaw hooks install ${installSpec.trim()}`,
         cwd: null,
       });
-      if (result.code !== 0 && result.stderr) {
-        setError(result.stderr);
+      const errOut = (result.stderr || "").trim() || (result.stdout || "").trim();
+      if (result.code !== 0) {
+        setError(errOut || `Install failed (exit ${result.code})`);
       } else {
         setInstallSpec("");
         setShowInstall(false);
-        await loadHooks();
+        await loadHooks({ bypassCache: true });
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Install failed");
@@ -153,10 +214,11 @@ export function HooksView() {
         command: "openclaw hooks update",
         cwd: null,
       });
-      if (result.code !== 0 && result.stderr) {
-        setError(result.stderr);
+      const errUp = (result.stderr || "").trim() || (result.stdout || "").trim();
+      if (result.code !== 0) {
+        setError(errUp || `Update failed (exit ${result.code})`);
       }
-      await loadHooks();
+      await loadHooks({ bypassCache: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Update failed");
     }
@@ -242,7 +304,7 @@ export function HooksView() {
             Check
           </button>
           <button
-            onClick={() => loadHooks()}
+            onClick={() => { setLoading(true); void loadHooks({ bypassCache: true }); }}
             disabled={loading}
             style={{
               display: "flex", alignItems: "center", gap: 4, padding: "4px 8px",

@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Message, ChatAttachment, Surface, openclawClient } from "@/lib/openclaw";
 import { useAppStore, type AppView } from "@/stores/appStore";
 import { voiceService } from "@/lib/voice";
+import { useTokenUsageStore, roughTokenPairEstimate } from "@/stores/tokenUsageStore";
 
 /* ── Conversation types ── */
 
@@ -221,7 +222,7 @@ export function ConversationView() {
     { cmd: "/agents", label: "Agents", description: "Manage AI agents", action: () => setView("agents") },
     { cmd: "/memory", label: "Memory", description: "Search agent memory", action: () => setView("memory") },
     { cmd: "/channels", label: "Channels", description: "Connect messaging apps", action: () => setView("channels") },
-    { cmd: "/cron", label: "Cron", description: "Scheduled tasks", action: () => setView("cron") },
+    { cmd: "/cron", label: "Cron", description: "Scheduled jobs (Command Center)", action: () => setView("command-center", { centerTab: "scheduled" }) },
     { cmd: "/hooks", label: "Hooks", description: "Agent lifecycle hooks", action: () => setView("hooks") },
     { cmd: "/nodes", label: "Nodes", description: "Multi-node management", action: () => setView("nodes") },
     { cmd: "/browser", label: "Browser", description: "Browser automation", action: () => setView("browser") },
@@ -638,6 +639,8 @@ export function ConversationView() {
           : m),
         updatedAt: Date.now(),
       }));
+
+      useTokenUsageStore.getState().recordTokens(roughTokenPairEstimate(messageToSend, finalContent));
 
       if (voiceTriggeredRef.current && finalContent) {
         voiceTriggeredRef.current = false;

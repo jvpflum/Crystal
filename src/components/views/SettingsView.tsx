@@ -4,10 +4,17 @@ import { homeDir } from "@tauri-apps/api/path";
 import { cachedCommand } from "@/lib/cache";
 import { useOpenClaw } from "@/hooks/useOpenClaw";
 import { useVoice } from "@/hooks/useVoice";
-import { openclawClient } from "@/lib/openclaw";
+import { openclawClient, getSystemPromptFromOpenClawConfig } from "@/lib/openclaw";
 import { useAppStore, type ThinkingLevel } from "@/stores/appStore";
 import { useThemeStore, THEMES } from "@/stores/themeStore";
+import {
+  useTokenUsageStore,
+  TOKEN_MILESTONES,
+  formatLifetimeTokens,
+  nextMilestoneAfter,
+} from "@/stores/tokenUsageStore";
 import { LobsterIcon } from "@/components/LobsterIcon";
+import { parseOpenClawSecurityAuditJson } from "@/lib/securityAudit";
 
 /* ── Keyframes ── */
 
@@ -15,6 +22,10 @@ const KEYFRAMES = `
 @keyframes _spin { to { transform: rotate(360deg) } }
 @keyframes _pulse { 0%,100% { opacity:1 } 50% { opacity:.4 } }
 `;
+
+const LEGACY_AI_SYSTEM_PROMPT_KEY = "crystal_ai_system_prompt";
+const DEFAULT_AI_SYSTEM_PROMPT_FALLBACK =
+  "You are Crystal, an intelligent AI assistant powered by OpenClaw.";
 
 /* ── Shared style tokens ── */
 
@@ -113,8 +124,9 @@ export function SettingsView() {
   const [maxTokens, setMaxTokens] = useState(() => localStorage.getItem("crystal_ai_max_tokens") || "1024");
   const [contextWindow, setContextWindow] = useState(() => localStorage.getItem("crystal_ai_context_window") || "32768");
   const [systemPrompt, setSystemPrompt] = useState(
-    () => localStorage.getItem("crystal_ai_system_prompt") || "You are Crystal, an intelligent AI assistant powered by OpenClaw."
+    () => localStorage.getItem(LEGACY_AI_SYSTEM_PROMPT_KEY) || DEFAULT_AI_SYSTEM_PROMPT_FALLBACK,
   );
+  const [systemPromptSaveError, setSystemPromptSaveError] = useState<string | null>(null);
 
   const [auditResult, setAuditResult] = useState<{ pass: number; warn: number; fail: number; details?: string } | null>(null);
   const [auditing, setAuditing] = useState(false);
@@ -206,12 +218,22 @@ export function SettingsView() {
 
   const loadConfig = async () => {
     setLoadingConfig(true);
+    setSystemPromptSaveError(null);
     try {
-      const cfg = await openclawClient.getConfig();
+      const cfg = await openclawClient.getConfig(true);
       setConfigText(JSON.stringify(cfg, null, 2));
-    } catch { setConfigText("{}"); }
-    const savedPrompt = localStorage.getItem("crystal_ai_system_prompt");
-    if (savedPrompt) setSystemPrompt(savedPrompt);
+      const ocPrompt = getSystemPromptFromOpenClawConfig(cfg as Record<string, unknown>);
+      if (ocPrompt) {
+        setSystemPrompt(ocPrompt);
+      } else {
+        const legacy = localStorage.getItem(LEGACY_AI_SYSTEM_PROMPT_KEY);
+        setSystemPrompt(legacy || DEFAULT_AI_SYSTEM_PROMPT_FALLBACK);
+      }
+    } catch {
+      setConfigText("{}");
+      const legacy = localStorage.getItem(LEGACY_AI_SYSTEM_PROMPT_KEY);
+      if (legacy) setSystemPrompt(legacy);
+    }
     const savedContext = localStorage.getItem("crystal_ai_context_window");
     if (savedContext) setContextWindow(savedContext);
     setLoadingConfig(false);
@@ -256,17 +278,39 @@ export function SettingsView() {
     setAuditing(true);
     setAuditResult(null);
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
         command: "openclaw security audit --json", cwd: null,
       });
-      if (result.code === 0) {
-        const data = JSON.parse(result.stdout);
-        setAuditResult({ pass: data.pass ?? 0, warn: data.warn ?? 0, fail: data.fail ?? 0, details: result.stdout.trim() });
+      const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
+      const parsed = parseOpenClawSecurityAuditJson(combined);
+      const details = combined.trim() || result.stdout?.trim() || result.stderr?.trim();
+
+      if (parsed) {
+        setAuditResult({ ...parsed, details });
+      } else if (result.code === 0) {
+        setAuditResult({
+          pass: 0,
+          warn: 0,
+          fail: 0,
+          details:
+            details
+            || "Audit exited successfully but JSON could not be parsed. If the CLI printed only human-readable text, try upgrading OpenClaw or run `openclaw security audit --json` in a terminal and compare output.",
+        });
       } else {
-        setAuditResult({ pass: 0, warn: 0, fail: 1, details: result.stdout });
+        setAuditResult({
+          pass: 0,
+          warn: 0,
+          fail: 1,
+          details: details || "Audit command failed",
+        });
       }
-    } catch {
-      setAuditResult({ pass: 0, warn: 0, fail: 1, details: "Audit command failed" });
+    } catch (e) {
+      setAuditResult({
+        pass: 0,
+        warn: 0,
+        fail: 1,
+        details: e instanceof Error ? e.message : "Audit command failed",
+      });
     }
     setAuditing(false);
   };
@@ -326,11 +370,28 @@ export function SettingsView() {
     setRestarting(false);
   };
 
-  const saveAISettings = () => {
+  const persistLocalAIModelSettings = () => {
     localStorage.setItem("crystal_ai_temperature", temperature.toString());
     localStorage.setItem("crystal_ai_max_tokens", maxTokens);
     localStorage.setItem("crystal_ai_context_window", contextWindow);
-    localStorage.setItem("crystal_ai_system_prompt", systemPrompt);
+  };
+
+  const flushSystemPromptToOpenClaw = async () => {
+    setSystemPromptSaveError(null);
+    try {
+      await openclawClient.setAgentsDefaultSystemPrompt(systemPrompt);
+      localStorage.removeItem(LEGACY_AI_SYSTEM_PROMPT_KEY);
+      try {
+        const cfg = await openclawClient.getConfig(true);
+        setConfigText(JSON.stringify(cfg, null, 2));
+      } catch {
+        /* raw JSON panel optional */
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Could not write openclaw.json";
+      setSystemPromptSaveError(msg);
+      localStorage.setItem(LEGACY_AI_SYSTEM_PROMPT_KEY, systemPrompt);
+    }
   };
 
   const checkDaemonStatus = async () => {
@@ -545,7 +606,7 @@ export function SettingsView() {
         {/* ───────── THEME ───────── */}
         <Section title="THEME">
           <div style={CARD}>
-            <div style={{ padding: "12px 14px", display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+            <div style={{ padding: "12px 14px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))", gap: 8 }}>
               {THEMES.map((theme) => {
                 const active = themeId === theme.id;
                 return (
@@ -568,6 +629,8 @@ export function SettingsView() {
             </div>
           </div>
         </Section>
+
+        <TokenStatsSection />
 
         {/* ───────── OPENCLAW GATEWAY ───────── */}
         <Section title="OPENCLAW GATEWAY">
@@ -721,7 +784,7 @@ export function SettingsView() {
 
             <div style={{ ...ROW, borderBottom: "none" }}>
               <span style={LABEL}>Context Window</span>
-              <input type="text" value={contextWindow} onChange={(e) => setContextWindow(e.target.value)} onBlur={saveAISettings} style={{ ...INPUT, width: 80, textAlign: "right" }} />
+              <input type="text" value={contextWindow} onChange={(e) => setContextWindow(e.target.value)} onBlur={persistLocalAIModelSettings} style={{ ...INPUT, width: 80, textAlign: "right" }} />
             </div>
           </div>
         </Section>
@@ -766,17 +829,27 @@ export function SettingsView() {
             <div style={ROW}>
               <span style={LABEL}>Temperature</span>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <input type="range" min="0" max="2" step="0.05" value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))} onMouseUp={saveAISettings} style={{ width: 100, height: 4, accentColor: "var(--accent)", cursor: "pointer" }} />
+                <input type="range" min="0" max="2" step="0.05" value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))} onMouseUp={persistLocalAIModelSettings} style={{ width: 100, height: 4, accentColor: "var(--accent)", cursor: "pointer" }} />
                 <span style={{ ...VALUE, ...MONO, fontSize: 11, minWidth: 28, textAlign: "right" }}>{temperature.toFixed(2)}</span>
               </div>
             </div>
             <div style={ROW}>
               <span style={LABEL}>Max Tokens</span>
-              <input type="text" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} onBlur={saveAISettings} style={{ ...INPUT, width: 80, textAlign: "right" }} />
+              <input type="text" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} onBlur={persistLocalAIModelSettings} style={{ ...INPUT, width: 80, textAlign: "right" }} />
             </div>
             <div style={{ padding: "10px 14px", borderBottom: "none" }}>
-              <span style={{ ...LABEL, display: "block", marginBottom: 6 }}>System Prompt</span>
-              <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} onBlur={saveAISettings} spellCheck={false} rows={5} style={{ width: "100%", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 10px", color: "var(--text-secondary)", fontSize: 11, lineHeight: 1.6, resize: "vertical", outline: "none", ...MONO, boxSizing: "border-box" }} />
+              <span style={{ ...LABEL, display: "block", marginBottom: 4 }}>System Prompt</span>
+              <p style={{ fontSize: 10, color: "var(--text-muted)", margin: "0 0 8px", lineHeight: 1.45 }}>
+                Synced with OpenClaw as <code style={{ ...MONO, fontSize: 9 }}>agents.defaults.systemPrompt</code> in{" "}
+                <code style={{ ...MONO, fontSize: 9 }}>~/.openclaw/openclaw.json</code> (merged into the gateway-built system prompt). If that field is empty, Crystal shows{" "}
+                <code style={{ ...MONO, fontSize: 9 }}>agents.list</code> entry <code style={{ ...MONO, fontSize: 9 }}>id: &quot;main&quot;</code> when present.
+              </p>
+              <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} onBlur={() => { persistLocalAIModelSettings(); void flushSystemPromptToOpenClaw(); }} spellCheck={false} rows={5} style={{ width: "100%", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 10px", color: "var(--text-secondary)", fontSize: 11, lineHeight: 1.6, resize: "vertical", outline: "none", ...MONO, boxSizing: "border-box" }} />
+              {systemPromptSaveError && (
+                <p style={{ fontSize: 10, color: "var(--error)", margin: "6px 0 0" }}>
+                  {systemPromptSaveError} — kept a local copy; fix file permissions or path and try again.
+                </p>
+              )}
             </div>
           </div>
         </Section>
@@ -1144,6 +1217,78 @@ export function SettingsView() {
         <div style={{ height: 20 }} />
       </div>
     </div>
+  );
+}
+
+function TokenStatsSection() {
+  const totalTokens = useTokenUsageStore(s => s.totalTokens);
+  const resetLifetimeStats = useTokenUsageStore(s => s.resetLifetimeStats);
+  const next = nextMilestoneAfter(totalTokens);
+  const progress = next ? Math.min(100, (totalTokens / next.threshold) * 100) : 100;
+
+  return (
+    <Section title="TOKEN STATS & REWARDS">
+      <div style={CARD}>
+        <div style={{ padding: "14px 14px 10px" }}>
+          <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 8, lineHeight: 1.45 }}>
+            Lifetime total in Crystal. Command-palette AI uses billed tokens when OpenAI returns them; chat uses a rough estimate (~4 characters per token) because the gateway stream does not expose usage.
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 28, fontWeight: 800, color: "var(--accent)", ...MONO }}>{formatLifetimeTokens(totalTokens)}</span>
+            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>tokens all-time</span>
+          </div>
+          {next ? (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text-muted)", marginBottom: 4 }}>
+                <span>Next reward: {next.emoji} {next.title}</span>
+                <span>{formatLifetimeTokens(totalTokens)} / {formatLifetimeTokens(next.threshold)}</span>
+              </div>
+              <div style={{ height: 6, borderRadius: 3, background: "var(--bg-input)", overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${progress}%`, background: "var(--accent)", borderRadius: 3, transition: "width 0.4s ease" }} />
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginTop: 10, fontSize: 11, color: "var(--success)" }}>Every milestone unlocked. Absolute legend.</div>
+          )}
+        </div>
+        <div style={{ padding: "0 10px 12px", display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {TOKEN_MILESTONES.map((m) => {
+            const ok = totalTokens >= m.threshold;
+            return (
+              <div
+                key={m.id}
+                title={m.flavor}
+                style={{
+                  fontSize: 10,
+                  padding: "4px 8px",
+                  borderRadius: 6,
+                  border: `1px solid ${ok ? "var(--accent)" : "var(--border)"}`,
+                  background: ok ? "var(--accent-bg)" : "var(--bg-elevated)",
+                  color: ok ? "var(--accent)" : "var(--text-muted)",
+                  opacity: ok ? 1 : 0.62,
+                }}
+              >
+                {m.emoji} {m.title}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ ...ROW, borderTop: "1px solid var(--border)", borderBottom: "none" }}>
+          <span style={LABEL}>Reset lifetime stats</span>
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm("Clear all-time token total and milestone history? This cannot be undone.")) {
+                resetLifetimeStats();
+              }
+            }}
+            style={{ ...BTN_GHOST, fontSize: 10 }}
+          >
+            Reset
+          </button>
+        </div>
+      </div>
+    </Section>
   );
 }
 

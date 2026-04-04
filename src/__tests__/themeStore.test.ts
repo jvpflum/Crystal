@@ -6,8 +6,8 @@ describe("themeStore", () => {
     localStorage.clear();
   });
 
-  it("has 6 themes", () => {
-    expect(THEMES).toHaveLength(6);
+  it("has 11 themes", () => {
+    expect(THEMES).toHaveLength(11);
   });
 
   it("all themes have valid structure", () => {
@@ -37,6 +37,11 @@ describe("themeStore", () => {
     expect(ids).toContain("ember");
     expect(ids).toContain("slate");
     expect(ids).toContain("nvidia");
+    expect(ids).toContain("cyberpunk");
+    expect(ids).toContain("forest");
+    expect(ids).toContain("ocean");
+    expect(ids).toContain("rose");
+    expect(ids).toContain("aurora");
   });
 
   it("defaults to midnight theme", () => {

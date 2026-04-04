@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { resolveOpenAiApiKeyForCrystal } from "@/lib/openclawSecrets";
+import { useTokenUsageStore } from "@/stores/tokenUsageStore";
 
 const SYSTEM_PROMPT = `You are Crystal AI, a smart assistant embedded in the Crystal desktop app — a command center for OpenClaw, an autonomous AI agent stack. You answer questions, help navigate the tool, and provide operational guidance.
 
@@ -7,9 +8,8 @@ Key views in Crystal:
 - Chat/Conversation: Talk with the OpenClaw agent
 - Office: Live agent monitoring — shows all agents (main, research, home, finance) with sessions and tasks
 - Factory: Skill launcher grid (18+ workspace skills like bill-sweep, bounty-hunter, car-broker, etc.) plus project builder
-- Command Center: Calendar view of cron jobs, workflows, scheduled tasks, heartbeat
+- Command Center: Calendar, workflows, scheduled jobs (cron), and heartbeat — use the Scheduled tab for cron management
 - Workflows/Templates: Pre-built automation sequences mapped to real skills
-- Cron: Manage 60+ cron jobs — add, remove, enable/disable, run manually
 - Channels: Telegram configuration with topic management (Finance #16, Home #17, System #38, Neighborhood #89, Factory #1195)
 - Memory: Knowledge store with hot/warm/cold tiers
 - Models: LLM model management
@@ -27,16 +27,20 @@ Keep answers concise (2-4 sentences max). If the question is about navigating Cr
 
 let cachedApiKey: string | null = null;
 
+/** Call after the user updates OpenClaw keys in Settings / Tools so the next AI search reloads. */
+export function clearOpenAiSearchKeyCache(): void {
+  cachedApiKey = null;
+}
+
 async function getApiKey(): Promise<string> {
   if (cachedApiKey) return cachedApiKey;
-  const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-    command: `(Get-Content "$env:USERPROFILE\\.openclaw\\agents\\main\\agent\\auth-profiles.json" | ConvertFrom-Json).profiles.'openai:default'.key`,
-    cwd: null,
-  });
-  if (result.code !== 0 || !result.stdout.trim()) {
-    throw new Error("Could not retrieve OpenAI API key from auth-profiles.json");
+  const key = await resolveOpenAiApiKeyForCrystal();
+  if (!key) {
+    throw new Error(
+      "No OpenAI API key found. Add an OpenAI profile in OpenClaw (Settings → API keys or Tools → Keys), or put an OpenAI sk-… key under an openai-related path in openclaw.json / auth-profiles.json.",
+    );
   }
-  cachedApiKey = result.stdout.trim();
+  cachedApiKey = key;
   return cachedApiKey;
 }
 
@@ -70,8 +74,22 @@ export async function askCrystalAI(question: string): Promise<AiSearchResult> {
     throw new Error(`OpenAI API error ${response.status}: ${errorText}`);
   }
 
-  const data = await response.json();
+  const data = await response.json() as {
+    choices?: { message?: { content?: string } }[];
+    usage?: { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number };
+  };
   const answer: string = data.choices?.[0]?.message?.content || "No response.";
+
+  const u = data.usage;
+  const billed =
+    typeof u?.total_tokens === "number" && u.total_tokens > 0
+      ? u.total_tokens
+      : Math.max(0, (u?.prompt_tokens ?? 0) + (u?.completion_tokens ?? 0));
+  if (billed > 0) {
+    useTokenUsageStore.getState().recordTokens(billed);
+  } else {
+    useTokenUsageStore.getState().recordTokens(Math.max(1, Math.ceil((question.length + answer.length) / 4)));
+  }
 
   const viewMatch = answer.match(/Navigate to:\s*(.+?)(?:\.|$)/i);
   const suggestedView = viewMatch ? mapViewName(viewMatch[1].trim()) : undefined;
@@ -90,8 +108,8 @@ const VIEW_MAP: Record<string, string> = {
   calendar: "command-center",
   workflows: "templates",
   templates: "templates",
-  cron: "cron",
-  "scheduled jobs": "cron",
+  cron: "command-center:scheduled",
+  "scheduled jobs": "command-center:scheduled",
   channels: "channels",
   telegram: "channels",
   memory: "memory",

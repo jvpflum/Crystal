@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { escapeShellArg } from "@/lib/tools";
+import { escapeShellArg, quotePowerShellSingleQuoted } from "@/lib/tools";
 import { openclawClient } from "@/lib/openclaw";
-import { useDataStore } from "@/stores/dataStore";
+import { useDataStore, invalidateCronJobsCliCache } from "@/stores/dataStore";
+import { useAppStore, type CommandCenterTabId } from "@/stores/appStore";
 import { BUILTIN_WORKFLOWS, CATEGORY_COLORS, loadCustomWorkflows, saveCustomWorkflows, type WorkflowDefinition, type WorkflowStep } from "@/lib/workflows";
 import {
   Calendar as CalendarIcon, Workflow, Clock, Plus, Play, Trash2,
@@ -28,12 +29,14 @@ interface CronJob {
   atIso?: string;
   deliveryChannel?: string;
   deliveryTarget?: string;
+  duplicateGroupSize?: number;
+  duplicateIndex?: number;
 }
 
 type WorkflowDef = WorkflowDefinition;
 interface StepResult { stepId: string; output: string; success: boolean; }
 
-type TabId = "calendar" | "workflows" | "scheduled" | "heartbeat";
+type TabId = CommandCenterTabId;
 
 /* ── Constants ── */
 
@@ -86,8 +89,10 @@ function parseCronJob(raw: Record<string, unknown>): CronJob {
   const state = raw.state as Record<string, unknown> | undefined;
   const nextRunMs = state?.nextRunAtMs ? Number(state.nextRunAtMs) : undefined;
   const delivery = raw.delivery as Record<string, unknown> | undefined;
+  const idRaw = raw.id ?? raw.jobId;
+  const id = typeof idRaw === "string" ? idRaw.trim() : String(idRaw ?? "").trim();
   return {
-    id: String(raw.id || ""), name: raw.name ? String(raw.name) : undefined,
+    id, name: raw.name ? String(raw.name) : undefined,
     schedule: scheduleStr, message, agent: String(raw.agentId || raw.agent || "main"),
     enabled: raw.enabled !== false,
     nextRun: nextRunMs ? new Date(nextRunMs).toLocaleString() : undefined,
@@ -95,6 +100,26 @@ function parseCronJob(raw: Record<string, unknown>): CronJob {
     deliveryChannel: delivery?.channel ? String(delivery.channel) : undefined,
     deliveryTarget: delivery?.to ? String(delivery.to) : delivery?.threadId ? `thread:${delivery.threadId}` : undefined,
   };
+}
+
+function withDuplicateMetaScheduled(jobs: CronJob[]): CronJob[] {
+  const key = (j: CronJob) =>
+    `${(j.name ?? "").trim().toLowerCase()}|${j.schedule}|${j.message.trim()}`;
+  const buckets = new Map<string, CronJob[]>();
+  for (const j of jobs) {
+    const k = key(j);
+    if (!buckets.has(k)) buckets.set(k, []);
+    buckets.get(k)!.push(j);
+  }
+  const counters = new Map<string, number>();
+  return jobs.map(j => {
+    const list = buckets.get(key(j))!;
+    if (list.length < 2) return { ...j };
+    const k = key(j);
+    const next = (counters.get(k) ?? 0) + 1;
+    counters.set(k, next);
+    return { ...j, duplicateGroupSize: list.length, duplicateIndex: next };
+  });
 }
 
 const THREAD_NAMES: Record<number, string> = {
@@ -165,7 +190,16 @@ function cronMatchesDay(expr: string, day: Date): boolean {
    ══════════════════════════════════════════════════════════════ */
 
 export function CommandCenterView() {
-  const [tab, setTab] = useState<TabId>("calendar");
+  const pendingTab = useAppStore(s => s.pendingCommandCenterTab);
+  const clearPendingCommandCenterTab = useAppStore(s => s.clearPendingCommandCenterTab);
+  const [tab, setTab] = useState<TabId>(() => useAppStore.getState().pendingCommandCenterTab ?? "calendar");
+
+  useLayoutEffect(() => {
+    if (pendingTab) {
+      setTab(pendingTab);
+      clearPendingCommandCenterTab();
+    }
+  }, [pendingTab, clearPendingCommandCenterTab]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -221,7 +255,7 @@ function CalendarTab() {
   });
   const [jobs, setJobs] = useState<CronJob[]>(() => {
     const cached = useDataStore.getState().cronJobs?.data;
-    return Array.isArray(cached) ? cached.map(parseCronJob) : [];
+    return Array.isArray(cached) ? withDuplicateMetaScheduled(cached.map(parseCronJob)) : [];
   });
   const [loading, setLoading] = useState(() => !useDataStore.getState().cronJobs?.data);
   const [error, setError] = useState<string | null>(null);
@@ -235,11 +269,10 @@ function CalendarTab() {
   const loadJobs = useCallback(async (force = false) => {
     try {
       const raw = await getCronJobs(force);
-      const cronJobs = raw.map(parseCronJob);
-      setJobs(cronJobs);
+      setJobs(withDuplicateMetaScheduled(raw.map(parseCronJob)));
       setError(null);
     } catch (e) {
-      if (jobs.length === 0) setError(e instanceof Error ? e.message : "Failed to load jobs");
+      setError(e instanceof Error ? e.message : "Failed to load jobs");
     }
     setLoading(false);
   }, [getCronJobs]);
@@ -312,7 +345,8 @@ function CalendarTab() {
         cwd: null,
       });
       setNewSchedule(""); setNewMessage(""); setNewName(""); setShowAddModal(null);
-      await loadJobs();
+      invalidateCronJobsCliCache();
+      await loadJobs(true);
     } catch { /* ignore */ }
     setAdding(false);
   };
@@ -898,11 +932,10 @@ function ScheduledTab() {
   const loadJobs = useCallback(async (force = false) => {
     try {
       const raw = await getCronJobs(force);
-      const cronJobs = raw.map(parseCronJob);
-      setJobs(cronJobs);
+      setJobs(withDuplicateMetaScheduled(raw.map(parseCronJob)));
       setError(null);
     } catch (e) {
-      if (jobs.length === 0) setError(e instanceof Error ? e.message : "Failed to load cron jobs");
+      setError(e instanceof Error ? e.message : "Failed to load cron jobs");
     }
     setLoading(false);
   }, [getCronJobs]);
@@ -914,22 +947,44 @@ function ScheduledTab() {
   }, [loadJobs]);
 
   const toggleJob = async (job: CronJob) => {
+    if (!job.id.trim()) return;
+    const qid = quotePowerShellSingleQuoted(job.id);
     const cmd = job.enabled ? "disable" : "enable";
-    try { await invoke("execute_command", { command: `openclaw cron ${cmd} ${job.id}`, cwd: null }); } catch { return; }
-    await loadJobs();
+    try {
+      const r = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", { command: `openclaw cron ${cmd} ${qid}`, cwd: null });
+      if (r.code !== 0) setError(r.stderr || r.stdout || `Failed to ${cmd} job`);
+    } catch { return; }
+    invalidateCronJobsCliCache();
+    await loadJobs(true);
   };
   const runNow = async (id: string) => {
+    if (!id.trim()) return;
+    const qid = quotePowerShellSingleQuoted(id);
     setRunningId(id); setRunResult(null);
     try {
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", { command: `openclaw cron run ${id}`, cwd: null });
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", { command: `openclaw cron run ${qid}`, cwd: null });
       setRunResult({ id, text: result.stdout?.trim() || result.stderr?.trim() || "Job triggered", ok: result.code === 0 });
     } catch (e) { setRunResult({ id, text: e instanceof Error ? e.message : "Failed", ok: false }); }
-    setRunningId(null); await loadJobs();
+    setRunningId(null);
+    invalidateCronJobsCliCache();
+    await loadJobs(true);
   };
   const removeJob = async (id: string) => {
+    if (!id.trim()) {
+      setError("Missing job id — cannot remove.");
+      return;
+    }
+    const qid = quotePowerShellSingleQuoted(id);
     setRemovingId(id);
-    try { await invoke("execute_command", { command: `openclaw cron rm ${id}`, cwd: null }); } catch { /* ignore */ }
-    setRemovingId(null); await loadJobs();
+    try {
+      const r = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", { command: `openclaw cron rm ${qid}`, cwd: null });
+      if (r.code !== 0) setError([r.stderr, r.stdout].filter(Boolean).join("\n").trim() || "Failed to remove job");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to remove job");
+    }
+    setRemovingId(null);
+    invalidateCronJobsCliCache();
+    await loadJobs(true);
   };
   const addJob = async (schedule?: string, message?: string, name?: string) => {
     const sched = schedule || newSchedule; const msg = message || newMessage;
@@ -940,7 +995,11 @@ function ScheduledTab() {
       const escapedSched = escapeShellArg(sched);
       const namePart = (name || newName) ? ` --name "${escapeShellArg(name || newName)}"` : "";
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", { command: `openclaw cron add --cron "${escapedSched}" --message "${escaped}" --agent main${namePart}`, cwd: null });
-      if (result.code === 0) { setNewSchedule(""); setNewMessage(""); setNewName(""); setShowAdd(false); await loadJobs(); }
+      if (result.code === 0) {
+        setNewSchedule(""); setNewMessage(""); setNewName(""); setShowAdd(false);
+        invalidateCronJobsCliCache();
+        await loadJobs(true);
+      }
       else setError(result.stderr || "Failed to add job");
     } catch (e) { setError(e instanceof Error ? e.message : "Failed to add job"); }
     setAdding(false);
@@ -952,7 +1011,7 @@ function ScheduledTab() {
     setHistoryLoading(jobId);
     try {
       const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: `openclaw cron runs --id ${jobId} --json --limit 5`, cwd: null,
+        command: `openclaw cron runs --id ${quotePowerShellSingleQuoted(jobId)} --json --limit 5`, cwd: null,
       });
       if (result.code === 0 && result.stdout.trim()) {
         const parsed = JSON.parse(result.stdout);
@@ -1051,10 +1110,10 @@ function ScheduledTab() {
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
-            {jobs.map(job => {
+            {jobs.map((job, ji) => {
               const isHb = job.name?.toLowerCase().includes("heartbeat") ?? false;
               return (
-                <div key={job.id} style={{
+                <div key={job.id ? `${job.id}:${ji}` : `sched-${ji}`} style={{
                   padding: "10px 14px", borderRadius: 10,
                   background: isHb ? "rgba(168,85,247,0.06)" : "var(--bg-elevated)",
                   border: isHb ? "1px solid rgba(168,85,247,0.2)" : "1px solid var(--border)",
@@ -1063,8 +1122,21 @@ function ScheduledTab() {
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     {isHb && <Heart style={{ width: 14, height: 14, color: "#a855f7", flexShrink: 0 }} />}
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2, flexWrap: "wrap" }}>
                         {job.name && <span style={{ fontSize: 12, fontWeight: 600, color: isHb ? "#a855f7" : "var(--text)" }}>{job.name}</span>}
+                        {job.duplicateGroupSize != null && job.duplicateGroupSize > 1 && job.duplicateIndex != null && (
+                          <span style={{
+                            fontSize: 8, fontWeight: 600, textTransform: "uppercase", padding: "2px 6px", borderRadius: 6,
+                            background: "rgba(251,191,36,0.12)", color: "#fbbf24", border: "1px solid rgba(251,191,36,0.25)",
+                          }} title="Separate gateway jobs with the same name/schedule — safe to delete extras">
+                            Duplicate {job.duplicateIndex}/{job.duplicateGroupSize}
+                          </span>
+                        )}
+                        {job.id && (job.duplicateGroupSize ?? 0) > 1 && (
+                          <span style={{ fontSize: 9, fontFamily: "monospace", color: "var(--text-muted)" }} title={job.id}>
+                            id {job.id.slice(0, 8)}…
+                          </span>
+                        )}
                         <span style={{ fontSize: 10, fontFamily: "monospace", color: isHb ? "#a855f7" : "var(--accent)", padding: "1px 6px", borderRadius: 4, background: isHb ? "rgba(168,85,247,0.1)" : "var(--accent-bg)" }}>{job.schedule}</span>
                         <span style={{ fontSize: 9, color: "var(--text-muted)" }}>{cronToReadable(job.schedule)}</span>
                       </div>

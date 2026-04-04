@@ -97,10 +97,86 @@ export interface OpenClawConfig {
   gateway?: Record<string, unknown>;
   memory?: Record<string, unknown>;
   acp?: Record<string, unknown>;
+  agents?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
+/** Reads extra system prompt text OpenClaw merges into the agent prompt (`agents.defaults.systemPrompt`, else `main` agent). */
+export function getSystemPromptFromOpenClawConfig(cfg: Record<string, unknown>): string {
+  const agents = cfg.agents as Record<string, unknown> | undefined;
+  if (!agents || typeof agents !== "object") return "";
+  const defaults = agents.defaults as Record<string, unknown> | undefined;
+  const d = defaults?.systemPrompt;
+  if (typeof d === "string" && d.trim()) return d;
+  const list = agents.list as Array<Record<string, unknown>> | undefined;
+  if (!Array.isArray(list)) return "";
+  const main = list.find(a => a.id === "main") || list.find(a => a.default === true) || list[0];
+  if (!main || typeof main !== "object") return "";
+  const m = main.systemPrompt;
+  return typeof m === "string" && m.trim() ? m : "";
+}
+
 const OPENCLAW_CMD = "openclaw";
+
+/**
+ * Agent replies often wrap JSON in prose or mix logs; Sub-Agents view may show raw text while Forge needs a parseable payload.
+ */
+export function extractJsonFromAgentOutput(text: string): unknown | null {
+  const combined = text.trim();
+  if (!combined) return null;
+  const tryParse = (s: string): unknown | null => {
+    try {
+      return JSON.parse(s) as unknown;
+    } catch {
+      return null;
+    }
+  };
+  let v = tryParse(combined);
+  if (v !== null) return v;
+  const firstObj = combined.indexOf("{");
+  const lastObj = combined.lastIndexOf("}");
+  if (firstObj >= 0 && lastObj > firstObj) {
+    v = tryParse(combined.slice(firstObj, lastObj + 1));
+    if (v !== null) return v;
+  }
+  const firstArr = combined.indexOf("[");
+  const lastArr = combined.lastIndexOf("]");
+  if (firstArr >= 0 && lastArr > firstArr) {
+    v = tryParse(combined.slice(firstArr, lastArr + 1));
+    if (v !== null) return v;
+  }
+  return null;
+}
+
+export function pickSubagentListJson(data: unknown): unknown[] {
+  if (Array.isArray(data)) return data;
+  if (!data || typeof data !== "object") return [];
+  const o = data as Record<string, unknown>;
+  const keys = ["subagents", "agents", "items", "result", "data", "list", "runs", "rows"] as const;
+  for (const k of keys) {
+    const c = o[k];
+    if (Array.isArray(c)) return c;
+    if (c && typeof c === "object" && Array.isArray((c as Record<string, unknown>).items)) {
+      return (c as Record<string, unknown>).items as unknown[];
+    }
+  }
+  return [];
+}
+
+export function pickAcpSessionsJson(data: unknown): unknown[] {
+  if (Array.isArray(data)) return data;
+  if (!data || typeof data !== "object") return [];
+  const o = data as Record<string, unknown>;
+  const keys = ["sessions", "agents", "active", "data", "results", "session"] as const;
+  for (const k of keys) {
+    const c = o[k];
+    if (Array.isArray(c)) return c;
+    if (c && typeof c === "object" && !Array.isArray(c)) {
+      return [c];
+    }
+  }
+  return [];
+}
 
 /* ─── Supported channels ─── */
 
@@ -741,6 +817,11 @@ class OpenClawClient {
     return this._dirCache;
   }
 
+  /** Resolves `%USERPROFILE%\\.openclaw` (Windows). */
+  async getOpenClawHomeDir(): Promise<string> {
+    return this.getOpenClawDir();
+  }
+
   /* ── Config (file-based) ── */
 
   async getConfig(fresh = false): Promise<OpenClawConfig> {
@@ -764,6 +845,24 @@ class OpenClawClient {
     const merged = { ...existing, ...updates };
     await invoke("write_file", { path, content: JSON.stringify(merged, null, 2) });
     this._configCache = { data: merged, ts: Date.now() };
+  }
+
+  /**
+   * Persists the operator system prompt override OpenClaw merges into each run (same as `agents.defaults.systemPrompt` in openclaw.json).
+   * Deep-preserves other `agents` keys (list, per-agent settings, etc.).
+   */
+  async setAgentsDefaultSystemPrompt(systemPrompt: string): Promise<void> {
+    const existing = await this.getConfig(true);
+    const agents = { ...((existing.agents as Record<string, unknown>) || {}) };
+    const defaults = { ...((agents.defaults as Record<string, unknown>) || {}) };
+    const t = systemPrompt.trim();
+    if (t) {
+      defaults.systemPrompt = systemPrompt;
+    } else {
+      delete defaults.systemPrompt;
+    }
+    agents.defaults = defaults;
+    await this.updateConfig({ agents } as Partial<OpenClawConfig>);
   }
 
   /* ── Channels ── */
@@ -876,6 +975,69 @@ class OpenClawClient {
       command: cmd,
       cwd: opts?.cwd ?? null,
     });
+  }
+
+  /** Forge / background builds: durable task registry (subagent, acp, etc.). */
+  async listBackgroundTasks(): Promise<{ count: number; tasks: unknown[] } | null> {
+    try {
+      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} tasks list --json`,
+        cwd: null,
+      });
+      const combined = `${result.stdout || ""}\n${result.stderr || ""}`.trim();
+      if (!combined) return null;
+      const first = combined.indexOf("{");
+      const last = combined.lastIndexOf("}");
+      const text = first >= 0 && last > first ? combined.slice(first, last + 1) : combined;
+      let data: { count?: number; tasks?: unknown; runs?: unknown[] };
+      try {
+        data = JSON.parse(text) as { count?: number; tasks?: unknown; runs?: unknown[] };
+      } catch {
+        return null;
+      }
+      const tasks = Array.isArray(data.tasks)
+        ? data.tasks
+        : Array.isArray(data.runs)
+          ? data.runs
+          : null;
+      if (!tasks) return null;
+      return {
+        count: typeof data.count === "number" ? data.count : tasks.length,
+        tasks,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Forge UI: same sources as Sub-Agents view — `/subagents list` + `/acp status` on main agent.
+   * (Plain `tasks list` is a different queue and often does not include live builders.)
+   */
+  async fetchForgeAgentLists(): Promise<{ subagents: unknown[]; acpSessions: unknown[] }> {
+    const subagents: unknown[] = [];
+    const acpSessions: unknown[] = [];
+    const combine = (stdout: string, stderr: string) => `${stdout || ""}\n${stderr || ""}`.trim();
+
+    try {
+      const sub = await this.dispatchToAgent("main", "/subagents list");
+      const subText = combine(sub.stdout, sub.stderr);
+      if (sub.code === 0 && subText) {
+        const data = extractJsonFromAgentOutput(subText);
+        if (data !== null) subagents.push(...pickSubagentListJson(data));
+      }
+    } catch { /* ignore */ }
+
+    try {
+      const acp = await this.dispatchToAgent("main", "/acp status");
+      const acpText = combine(acp.stdout, acp.stderr);
+      if (acp.code === 0 && acpText) {
+        const data = extractJsonFromAgentOutput(acpText);
+        if (data !== null) acpSessions.push(...pickAcpSessionsJson(data));
+      }
+    } catch { /* ignore */ }
+
+    return { subagents, acpSessions };
   }
 
   async getAgentSessions(agentId?: string): Promise<{ key: string; sessionId: string; model: string; modelProvider: string; inputTokens: number; outputTokens: number; totalTokens: number; contextTokens: number; agentId: string; updatedAt: number; ageMs: number; kind: string }[]> {
