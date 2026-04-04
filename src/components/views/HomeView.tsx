@@ -16,47 +16,18 @@ import {
 } from "lucide-react";
 import { useDataStore } from "@/stores/dataStore";
 
-// Global caches so data survives tab switches without re-fetching
-let _dashboardCache: { data: DashboardData; ts: number } | null = null;
 let _sysStatsCache: { data: Partial<SysStats>; ts: number } | null = null;
-const DASHBOARD_TTL = 60_000; // refresh dashboard every 60s
+let _metaCache: { data: MetaInfo; ts: number } | null = null;
 const SYS_POLL_INTERVAL = 30_000;
+const META_TTL = 120_000;
 
-interface DashboardData {
-  gateway: { connected: boolean; latencyMs: number };
-  llmModel: string;
-  osLabel: string;
-  activeSessions: number;
-  readySkills: number;
-  tokenPercentUsed: number;
-  memoryChunks: number;
-  securityCritical: number;
-  securityWarn: number;
+interface MetaInfo {
   openclawVersion: string;
   telegramStatus: string;
   telegramBot: string;
-  cronJobsCount: number;
   heartbeatInterval: string;
-  agentCount: number;
+  llmModel: string;
 }
-
-const INITIAL: DashboardData = {
-  gateway: { connected: false, latencyMs: 0 },
-  llmModel: "—",
-  osLabel: "—",
-  activeSessions: 0,
-  readySkills: 0,
-  tokenPercentUsed: 0,
-  memoryChunks: 0,
-  securityCritical: 0,
-  securityWarn: 0,
-  openclawVersion: "—",
-  telegramStatus: "unknown",
-  telegramBot: "",
-  cronJobsCount: 0,
-  heartbeatInterval: "—",
-  agentCount: 0,
-};
 
 function safeParse(stdout: string) {
   const start = stdout.indexOf("{");
@@ -64,6 +35,13 @@ function safeParse(stdout: string) {
   try { return JSON.parse(stdout.slice(start)); } catch { return null; }
 }
 
+const META_INITIAL: MetaInfo = {
+  openclawVersion: "—",
+  telegramStatus: "unknown",
+  telegramBot: "",
+  heartbeatInterval: "—",
+  llmModel: "—",
+};
 
 const card = (extra?: CSSProperties): CSSProperties => ({
   background: "var(--bg-elevated)",
@@ -89,83 +67,87 @@ const hoverOut = (e: React.MouseEvent<HTMLElement>) => {
 export function HomeView() {
   const setView = useAppStore(s => s.setView);
   const gatewayConnected = useAppStore(s => s.gatewayConnected);
-  const [data, setData] = useState<DashboardData>(INITIAL);
-  const [loading, setLoading] = useState(true);
   const [actionRunning, setActionRunning] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<string | null>(null);
+  const [meta, setMeta] = useState<MetaInfo>(_metaCache?.data ?? META_INITIAL);
+
+  const getAgents = useDataStore(s => s.getAgents);
+  const getCronJobs = useDataStore(s => s.getCronJobs);
+  const getSkills = useDataStore(s => s.getSkills);
+  const getSessions = useDataStore(s => s.getSessions);
+  const getMemoryStatus = useDataStore(s => s.getMemoryStatus);
+
+  const [agentCount, setAgentCount] = useState<number>(
+    () => (useDataStore.getState().agents?.data as unknown[] | undefined)?.length ?? 0
+  );
+  const [cronCount, setCronCount] = useState<number>(() => {
+    const cached = useDataStore.getState().cronJobs?.data as Record<string, unknown>[] | undefined;
+    return cached?.filter(c => c.enabled !== false).length ?? 0;
+  });
+  const [skillCount, setSkillCount] = useState<number>(
+    () => (useDataStore.getState().skills?.data as unknown[] | undefined)?.length ?? 0
+  );
+  const [sessionCount, setSessionCount] = useState<number>(
+    () => (useDataStore.getState().sessions?.data as unknown[] | undefined)?.length ?? 0
+  );
+  const [memoryChunks, setMemoryChunks] = useState<number>(0);
+  const [statsLoaded, setStatsLoaded] = useState(
+    () => !!(useDataStore.getState().agents?.data)
+  );
 
   useEffect(() => {
-    if (_dashboardCache && Date.now() - _dashboardCache.ts < DASHBOARD_TTL) {
-      setData(_dashboardCache.data);
-      setLoading(false);
-      return;
-    }
-
     let cancelled = false;
+
     (async () => {
       try {
-        const [statusR, modelsR, skillsR, sessionsR, versionR, healthR] = await Promise.all([
-          cachedCommand("openclaw status --json", { ttl: 60_000 }),
-          cachedCommand("openclaw models list --json", { ttl: 60_000 }),
-          cachedCommand("openclaw skills list --json", { ttl: 60_000 }),
-          cachedCommand("openclaw sessions --json", { ttl: 60_000 }),
-          cachedCommand("openclaw --version", { ttl: 300_000 }),
-          cachedCommand("openclaw health", { ttl: 30_000 }),
+        const [agents, cron, skills, sessions, memory] = await Promise.all([
+          getAgents(), getCronJobs(), getSkills(), getSessions(), getMemoryStatus(),
         ]);
-
         if (cancelled) return;
-
-        const status = safeParse(statusR.stdout);
-        const models = safeParse(modelsR.stdout);
-        const skills = safeParse(skillsR.stdout);
-        const sessions = safeParse(sessionsR.stdout);
-        const healthText = healthR.stdout || "";
-
-        const defaultModel = models?.models?.find((m: { tags?: string[] }) => m.tags?.includes("default"));
-        const firstSession = sessions?.sessions?.[0];
-
-        const versionMatch = (versionR.stdout || "").match(/OpenClaw\s+([\d.]+\S*)/i);
-        const telegramMatch = healthText.match(/Telegram:\s*(\w+)(?:\s*\((@\w+)\))?/i);
-        const agentsMatch = healthText.match(/Agents:\s*(.+)/i);
-        const heartbeatMatch = healthText.match(/Heartbeat interval:\s*(\S+)/i);
-
-        const agentList = agentsMatch?.[1]?.split(",") ?? [];
-
-        const newData: DashboardData = {
-          gateway: {
-            connected: status?.gateway?.connected ?? gatewayConnected,
-            latencyMs: status?.gateway?.connectLatencyMs ?? 0,
-          },
-          llmModel: status?.sessions?.defaults?.model
-            || defaultModel?.name
-            || defaultModel?.key
-            || "—",
-          osLabel: status?.os?.label ?? "—",
-          activeSessions: sessions?.count ?? sessions?.sessions?.length ?? 0,
-          readySkills: (skills?.skills?.filter((s: { eligible: boolean }) => s.eligible) ?? []).length,
-          tokenPercentUsed: firstSession?.tokenUsage?.percentUsed ?? 0,
-          memoryChunks: status?.memory?.totalChunks ?? status?.memory?.chunks ?? 0,
-          securityCritical: status?.securityAudit?.summary?.critical ?? 0,
-          securityWarn: status?.securityAudit?.summary?.warn ?? 0,
-          openclawVersion: versionMatch?.[1] ?? "—",
-          telegramStatus: telegramMatch?.[1] ?? "unknown",
-          telegramBot: telegramMatch?.[2] ?? "",
-          cronJobsCount: status?.cron?.count ?? 0,
-          heartbeatInterval: heartbeatMatch?.[1] ?? "—",
-          agentCount: agentList.length,
-        };
-
-        _dashboardCache = { data: newData, ts: Date.now() };
-        setData(newData);
-      } catch {
-        /* dashboard degrades gracefully */
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+        if (Array.isArray(agents)) setAgentCount(agents.length);
+        if (Array.isArray(cron)) setCronCount(cron.filter((c: Record<string, unknown>) => c.enabled !== false).length);
+        if (Array.isArray(skills)) setSkillCount(skills.length);
+        if (Array.isArray(sessions)) setSessionCount(sessions.length);
+        const mem = memory as Record<string, unknown> | null;
+        setMemoryChunks(Number(mem?.totalChunks ?? mem?.chunks ?? mem?.count ?? 0));
+      } catch { /* degrade gracefully */ }
+      if (!cancelled) setStatsLoaded(true);
     })();
 
     return () => { cancelled = true; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [getAgents, getCronJobs, getSkills, getSessions, getMemoryStatus]);
+
+  useEffect(() => {
+    if (_metaCache && Date.now() - _metaCache.ts < META_TTL) {
+      setMeta(_metaCache.data);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [versionR, healthR] = await Promise.all([
+          cachedCommand("openclaw --version", { ttl: 300_000 }),
+          cachedCommand("openclaw health", { ttl: 60_000 }),
+        ]);
+        if (cancelled) return;
+        const healthText = healthR.stdout || "";
+        const versionMatch = (versionR.stdout || "").match(/OpenClaw\s+([\d.]+\S*)/i);
+        const telegramMatch = healthText.match(/Telegram:\s*(\w+)(?:\s*\((@\w+)\))?/i);
+        const heartbeatMatch = healthText.match(/Heartbeat interval:\s*(\S+)/i);
+        const modelMatch = healthText.match(/agent model:\s*(\S+)/i);
+        const newMeta: MetaInfo = {
+          openclawVersion: versionMatch?.[1] ?? "—",
+          telegramStatus: telegramMatch?.[1] ?? "unknown",
+          telegramBot: telegramMatch?.[2] ?? "",
+          heartbeatInterval: heartbeatMatch?.[1] ?? "—",
+          llmModel: modelMatch?.[1] ?? openclawClient.getModel() ?? "—",
+        };
+        _metaCache = { data: newMeta, ts: Date.now() };
+        setMeta(newMeta);
+      } catch { /* non-fatal */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const runAction = async (id: string, fn: () => Promise<string>) => {
     setActionRunning(id);
@@ -179,6 +161,9 @@ export function HomeView() {
       setActionRunning(null);
     }
   };
+
+  const gwConnected = gatewayConnected;
+  const loading = !statsLoaded;
 
   const quickActions: { id: string; icon: React.ElementType; label: string; desc: string; color: string; action: () => void }[] = [
     {
@@ -234,8 +219,6 @@ export function HomeView() {
     },
   ];
 
-  const gwConnected = data.gateway.connected || gatewayConnected;
-
   return (
     <div style={{
       display: "flex", flexDirection: "column", height: "100%",
@@ -270,29 +253,28 @@ export function HomeView() {
           icon={Radio}
           label="Gateway"
           value={gwConnected ? "Connected" : "Offline"}
-          detail={gwConnected ? `${data.gateway.latencyMs}ms` : undefined}
           color={gwConnected ? "var(--success)" : "var(--error)"}
           onClick={() => setView("settings")}
         />
         <StatusCard
           icon={Bot}
           label="LLM"
-          value={data.llmModel !== "—" ? data.llmModel : openclawClient.getModel()}
+          value={meta.llmModel !== "—" ? meta.llmModel : openclawClient.getModel()}
           color={gwConnected ? "var(--accent)" : "var(--error)"}
           onClick={() => setView("models")}
         />
         <StatusCard
           icon={Radio}
           label="Telegram"
-          value={data.telegramStatus === "ok" ? "Connected" : data.telegramStatus}
-          detail={data.telegramBot || undefined}
-          color={data.telegramStatus === "ok" ? "var(--success)" : "var(--warning)"}
+          value={meta.telegramStatus === "ok" ? "Connected" : meta.telegramStatus}
+          detail={meta.telegramBot || undefined}
+          color={meta.telegramStatus === "ok" ? "var(--success)" : "var(--warning)"}
           onClick={() => setView("channels")}
         />
         <StatusCard
           icon={Monitor}
-          label="System"
-          value={data.osLabel}
+          label="Version"
+          value={meta.openclawVersion !== "—" ? `v${meta.openclawVersion}` : "—"}
           color="var(--text-secondary)"
           onClick={() => setView("settings")}
         />
@@ -300,12 +282,12 @@ export function HomeView() {
 
       {/* ── Stats Row ── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8, marginBottom: 20 }}>
-        <MetricCard icon={Activity} label="Sessions" value={loading ? "…" : data.activeSessions} color="var(--accent)" />
-        <MetricCard icon={Bot} label="Agents" value={loading ? "…" : data.agentCount} color="#06b6d4" />
-        <MetricCard icon={Clock} label="Cron Jobs" value={loading ? "…" : data.cronJobsCount} color="var(--warning)" />
-        <MetricCard icon={Wrench} label="Skills" value={loading ? "…" : data.readySkills} color="#a855f7" />
-        <MetricCard icon={Database} label="Memory" value={loading ? "…" : data.memoryChunks} color="var(--success)" />
-        <MetricCard icon={Zap} label="Heartbeat" value={loading ? "…" : data.heartbeatInterval} color="#f59e0b" />
+        <MetricCard icon={Activity} label="Sessions" value={loading ? "…" : sessionCount} color="var(--accent)" />
+        <MetricCard icon={Bot} label="Agents" value={loading ? "…" : agentCount} color="#06b6d4" />
+        <MetricCard icon={Clock} label="Cron Jobs" value={loading ? "…" : cronCount} color="var(--warning)" />
+        <MetricCard icon={Wrench} label="Skills" value={loading ? "…" : skillCount} color="#a855f7" />
+        <MetricCard icon={Database} label="Memory" value={loading ? "…" : memoryChunks} color="var(--success)" />
+        <MetricCard icon={Zap} label="Heartbeat" value={loading ? "…" : meta.heartbeatInterval} color="#f59e0b" />
       </div>
 
       {/* ── Telegram Topics ── */}
@@ -357,38 +339,27 @@ export function HomeView() {
       )}
 
       {/* ── Security Summary ── */}
-      {(data.securityCritical > 0 || data.securityWarn > 0) && (
-        <>
-          <SectionLabel text="Security" />
-          <div
-            onClick={() => setView("security")}
-            onMouseEnter={hoverIn}
-            onMouseLeave={hoverOut}
-            style={{
-              ...card({ padding: "12px 16px", marginBottom: 16, cursor: "pointer" }),
-              display: "flex", alignItems: "center", gap: 14,
-            }}
-          >
-            <Shield style={{ width: 18, height: 18, color: data.securityCritical > 0 ? "var(--error)" : "var(--warning)" }} />
-            <div style={{ flex: 1 }}>
-              <p style={{ margin: 0, fontSize: 12, color: "var(--text)", fontWeight: 600 }}>
-                Security Audit
-              </p>
-              <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
-                <span style={{ fontSize: 11, color: "var(--error)", display: "flex", alignItems: "center", gap: 4 }}>
-                  <AlertTriangle style={{ width: 12, height: 12 }} />
-                  {data.securityCritical} critical
-                </span>
-                <span style={{ fontSize: 11, color: "var(--warning)", display: "flex", alignItems: "center", gap: 4 }}>
-                  <AlertTriangle style={{ width: 12, height: 12 }} />
-                  {data.securityWarn} warnings
-                </span>
-              </div>
-            </div>
-            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>View &rarr;</span>
-          </div>
-        </>
-      )}
+      <SectionLabel text="Security" />
+      <div
+        onClick={() => setView("security")}
+        onMouseEnter={hoverIn}
+        onMouseLeave={hoverOut}
+        style={{
+          ...card({ padding: "12px 16px", marginBottom: 16, cursor: "pointer" }),
+          display: "flex", alignItems: "center", gap: 14,
+        }}
+      >
+        <Shield style={{ width: 18, height: 18, color: "var(--success)" }} />
+        <div style={{ flex: 1 }}>
+          <p style={{ margin: 0, fontSize: 12, color: "var(--text)", fontWeight: 600 }}>
+            Security Audit
+          </p>
+          <p style={{ margin: "2px 0 0", fontSize: 10, color: "var(--text-muted)" }}>
+            Run a full security scan
+          </p>
+        </div>
+        <span style={{ fontSize: 10, color: "var(--text-muted)" }}>View &rarr;</span>
+      </div>
 
       {/* ── System Monitor ── */}
       <SectionLabel text="System Monitor" />
@@ -404,7 +375,7 @@ export function HomeView() {
 
       <div style={{ marginTop: "auto", paddingTop: 16, textAlign: "center" }}>
         <p style={{ fontSize: 10, color: "var(--text-muted)", margin: 0 }}>
-          Powered by OpenClaw {data.openclawVersion !== "—" ? `v${data.openclawVersion}` : ""} &middot; Crystal v0.5.0
+          Powered by OpenClaw {meta.openclawVersion !== "—" ? `v${meta.openclawVersion}` : ""} &middot; Crystal v0.6.0
         </p>
       </div>
     </div>

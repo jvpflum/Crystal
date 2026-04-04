@@ -87,7 +87,7 @@ export function OfficeView() {
   const [ocAgents, setOcAgents] = useState<OCAgent[]>([]);
   const [sessions, setSessions] = useState<AgentSession[]>([]);
   const [bgTasks, setBgTasks] = useState<AgentTask[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   const [tasks, setTasks] = useState<OfficeTask[]>([]);
   const [taskLogs, setTaskLogs] = useState<Record<string, TaskLogEntry[]>>({});
@@ -101,56 +101,56 @@ export function OfficeView() {
   const getSessions = useDataStore(s => s.getSessions);
   const getTasks = useDataStore(s => s.getTasks);
 
+  const parseAgents = useCallback((data: Record<string, unknown>[]) => {
+    setOcAgents(data.map(a => ({
+      id: String(a.id || ""), name: String(a.identityName || a.name || a.id || ""),
+      emoji: String(a.identityEmoji || ""), model: String(a.model || ""),
+      isDefault: a.isDefault === true, workspace: String(a.workspace || ""),
+    })));
+  }, []);
+
+  const parseSessions = useCallback((data: Record<string, unknown>[]) => {
+    setSessions(data.map(s => ({
+      sessionId: String(s.sessionId || s.key || ""), model: String(s.model || ""),
+      inputTokens: Number(s.inputTokens || 0), outputTokens: Number(s.outputTokens || 0),
+      totalTokens: Number(s.totalTokens || 0), agentId: String(s.agentId || "main"),
+      updatedAt: Number(s.updatedAt || 0), ageMs: Number(s.ageMs || 0), kind: String(s.kind || ""),
+    })));
+  }, []);
+
+  const parseTasks = useCallback((data: Record<string, unknown>[]) => {
+    setBgTasks(data.map(t => ({
+      id: String(t.id || ""), kind: String(t.kind || ""), status: String(t.status || ""),
+      label: t.label ? String(t.label) : undefined, agentId: t.agentId ? String(t.agentId) : undefined,
+    })));
+  }, []);
+
   const loadData = useCallback(async (force = false) => {
+    if (force) setLoading(true);
     try {
       const [agentsData, sessionsData, tasksData] = await Promise.all([
-        getAgents(force),
-        getSessions(force),
-        getTasks(force),
+        getAgents(force), getSessions(force), getTasks(force),
       ]);
-
-      if (Array.isArray(agentsData)) {
-        setOcAgents(agentsData.map((a: Record<string, unknown>) => ({
-          id: String(a.id || ""),
-          name: String(a.identityName || a.name || a.id || ""),
-          emoji: String(a.identityEmoji || ""),
-          model: String(a.model || ""),
-          isDefault: a.isDefault === true,
-          workspace: String(a.workspace || ""),
-        })));
-      }
-
-      if (Array.isArray(sessionsData)) {
-        setSessions(sessionsData.map((s: Record<string, unknown>) => ({
-          sessionId: String(s.sessionId || s.key || ""),
-          model: String(s.model || ""),
-          inputTokens: Number(s.inputTokens || 0),
-          outputTokens: Number(s.outputTokens || 0),
-          totalTokens: Number(s.totalTokens || 0),
-          agentId: String(s.agentId || "main"),
-          updatedAt: Number(s.updatedAt || 0),
-          ageMs: Number(s.ageMs || 0),
-          kind: String(s.kind || ""),
-        })));
-      }
-
-      if (Array.isArray(tasksData)) {
-        setBgTasks(tasksData.map((t: Record<string, unknown>) => ({
-          id: String(t.id || ""),
-          kind: String(t.kind || ""),
-          status: String(t.status || ""),
-          label: t.label ? String(t.label) : undefined,
-          agentId: t.agentId ? String(t.agentId) : undefined,
-        })));
-      }
+      if (Array.isArray(agentsData)) parseAgents(agentsData);
+      if (Array.isArray(sessionsData)) parseSessions(sessionsData);
+      if (Array.isArray(tasksData)) parseTasks(tasksData);
     } catch { /* ignore */ }
     setLoading(false);
-  }, [getAgents, getSessions, getTasks]);
-
-  useEffect(() => { loadData(); }, [loadData]);
+  }, [getAgents, getSessions, getTasks, parseAgents, parseSessions, parseTasks]);
 
   useEffect(() => {
-    const interval = setInterval(() => loadData(), 15_000);
+    const ds = useDataStore.getState();
+    const cachedAgents = ds.agents?.data;
+    const cachedSessions = ds.sessions?.data;
+    const cachedTasks = ds.tasks?.data;
+    if (Array.isArray(cachedAgents) && cachedAgents.length > 0) parseAgents(cachedAgents as Record<string, unknown>[]);
+    if (Array.isArray(cachedSessions)) parseSessions(cachedSessions as Record<string, unknown>[]);
+    if (Array.isArray(cachedTasks)) parseTasks(cachedTasks as Record<string, unknown>[]);
+    loadData();
+  }, [loadData, parseAgents, parseSessions, parseTasks]);
+
+  useEffect(() => {
+    const interval = setInterval(() => loadData(), 30_000);
     return () => clearInterval(interval);
   }, [loadData]);
 

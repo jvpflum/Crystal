@@ -60,7 +60,6 @@ export function HooksView() {
   const [checkingEligibility, setCheckingEligibility] = useState(false);
 
   const loadHooks = useCallback(async () => {
-    setLoading(true);
     setError(null);
     try {
       const result = await cachedCommand("openclaw hooks list --json", { ttl: 120_000 });

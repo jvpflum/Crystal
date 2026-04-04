@@ -121,7 +121,6 @@ export function MemoryView() {
   }, []);
 
   const loadMemory = async () => {
-    setLoading(true);
     const [curated, daily] = await Promise.all([openclawClient.getMemory(), openclawClient.getDailyMemory()]);
     setCuratedMemory(curated); setDailyMemory(daily); setLoading(false);
   };

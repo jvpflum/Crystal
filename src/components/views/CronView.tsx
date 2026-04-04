@@ -182,8 +182,12 @@ export function CronView() {
 
   useEffect(() => {
     let active = true;
+    const ds = useDataStore.getState();
+    if (Array.isArray(ds.cronJobs?.data) && ds.cronJobs!.data.length > 0) {
+      setJobs(ds.cronJobs!.data.map(parseCronJob));
+      setLoading(false);
+    }
     (async () => {
-      setLoading(true);
       await Promise.all([loadJobs(), loadStatus()]);
       if (active) setLoading(false);
     })();

@@ -45,29 +45,31 @@ const N = {
 // ─── Buildings ─────────────────────────────────────────────────
 
 const BUILDINGS: BuildingDef[] = [
-  { id: "clock",    name: "CHRONO SPIRE",  ox:    0, oy: -135, w: 22, d: 16, h: 88,  top: "#1a1a2e", left: "#0d0d1a", right: "#141428", accent: N.amber,   linkedView: "cron",         icon: "⏱" },
-  { id: "memory",   name: "MEMORY CORE",   ox: -170, oy:  -25, w: 28, d: 22, h: 55,  top: "#1a102e", left: "#0d0818", right: "#140e24", accent: N.purple,  linkedView: "memory",       icon: "◈" },
-  { id: "office",   name: "COMMAND HQ",    ox:  170, oy:  -25, w: 30, d: 22, h: 68,  top: "#101a2e", left: "#080d1a", right: "#0e1428", accent: N.blue,    linkedView: "office",       icon: "◉" },
-  { id: "factory",  name: "THE FORGE",     ox: -170, oy:  100, w: 35, d: 25, h: 48,  top: "#2e1a10", left: "#1a0d08", right: "#28140e", accent: N.orange,  linkedView: "factory",      icon: "⚙" },
-  { id: "comms",    name: "COMM ARRAY",    ox:  170, oy:  100, w: 20, d: 15, h: 92,  top: "#102e2e", left: "#081a1a", right: "#0e2828", accent: N.cyan,    linkedView: "channels",     icon: "◇" },
-  { id: "terminal", name: "THE TERMINAL",  ox:    0, oy:  185, w: 32, d: 20, h: 38,  top: "#102e10", left: "#081a08", right: "#0e280e", accent: N.green,   linkedView: "conversation", icon: "▣" },
+  { id: "clock",    name: "CHRONO SPIRE",    ox:    0, oy: -135, w: 22, d: 16, h: 88,  top: "#1a1a2e", left: "#0d0d1a", right: "#141428", accent: N.amber,   linkedView: "cron",         icon: "⏱" },
+  { id: "barracks", name: "AGENT BARRACKS",  ox: -100, oy:  -68, w: 26, d: 18, h: 50,  top: "#1a2e1a", left: "#0d1a0d", right: "#142814", accent: N.lime,    linkedView: "agents",       icon: "⬡" },
+  { id: "memory",   name: "MEMORY CORE",     ox: -195, oy:   20, w: 28, d: 22, h: 55,  top: "#1a102e", left: "#0d0818", right: "#140e24", accent: N.purple,  linkedView: "memory",       icon: "◈" },
+  { id: "office",   name: "COMMAND HQ",      ox:  195, oy:   20, w: 30, d: 22, h: 68,  top: "#101a2e", left: "#080d1a", right: "#0e1428", accent: N.blue,    linkedView: "office",       icon: "◉" },
+  { id: "factory",  name: "THE FORGE",       ox: -195, oy:  140, w: 35, d: 25, h: 48,  top: "#2e1a10", left: "#1a0d08", right: "#28140e", accent: N.orange,  linkedView: "factory",      icon: "⚙" },
+  { id: "comms",    name: "COMM ARRAY",      ox:  195, oy:  140, w: 20, d: 15, h: 92,  top: "#102e2e", left: "#081a1a", right: "#0e2828", accent: N.cyan,    linkedView: "channels",     icon: "◇" },
+  { id: "vault",    name: "TOOL VAULT",      ox:  100, oy:  -68, w: 24, d: 16, h: 42,  top: "#2e2e1a", left: "#1a1a0d", right: "#282814", accent: N.pink,    linkedView: "tools",        icon: "⚒" },
+  { id: "terminal", name: "THE TERMINAL",    ox:    0, oy:  215, w: 32, d: 20, h: 38,  top: "#102e10", left: "#081a08", right: "#0e280e", accent: N.green,   linkedView: "conversation", icon: "▣" },
 ];
 
-const AGENT_HOMES: Record<string, string> = { main: "office", research: "memory", home: "terminal", finance: "factory" };
+const AGENT_HOMES: Record<string, string> = { main: "office", research: "memory", home: "terminal", finance: "factory", default: "barracks" };
 const AGENT_COLORS: Record<string, string> = { main: N.blue, research: N.purple, home: N.green, finance: N.amber };
 const AGENT_EMOJI: Record<string, string> = { main: "🦉", research: "🔬", home: "🏡", finance: "💰" };
 
 const PYLON_POS: [number, number][] = [
-  [-90, -95], [90, -95], [-250, 30], [250, 30],
-  [-100, 45], [105, 45], [-70, 155], [75, 155],
-  [0, -75], [-40, 145], [45, 145], [-250, 120], [250, 120],
+  [-50, -110], [50, -110], [-275, 75], [275, 75],
+  [-130, 75], [130, 75], [-90, 190], [90, 190],
+  [0, -50], [-50, 175], [50, 175], [-275, 160], [275, 160],
 ];
 
 const STEAM_VENTS: SteamVent[] = [
-  { x: -60, y: -40, timer: 0, interval: 120 },
-  { x: 80, y: 50, timer: 40, interval: 150 },
-  { x: -120, y: 130, timer: 80, interval: 100 },
-  { x: 130, y: -70, timer: 20, interval: 180 },
+  { x: -60, y: -20, timer: 0, interval: 120 },
+  { x: 80, y: 80, timer: 40, interval: 150 },
+  { x: -140, y: 170, timer: 80, interval: 100 },
+  { x: 150, y: -40, timer: 20, interval: 180 },
   { x: 0, y: 100, timer: 60, interval: 130 },
 ];
 
@@ -465,9 +467,9 @@ function drawDrones(ctx: CanvasRenderingContext2D, drones: Drone[], cx: number, 
 function initBillboards(billboards: Billboard[]) {
   if (billboards.length > 0) return;
   billboards.push(
-    { x: -280, y: -80, w: 60, h: 28, lines: ["OPENCLAW", "NETWORK"], accent: N.cyan, phase: 0 },
-    { x: 280, y: -60, w: 55, h: 28, lines: ["CRYSTAL", "SYSTEMS"], accent: N.magenta, phase: 2 },
-    { x: 0, y: -200, w: 70, h: 22, lines: ["AI AGENTS ONLINE"], accent: N.green, phase: 4 },
+    { x: -310, y: -100, w: 60, h: 28, lines: ["OPENCLAW", "NETWORK"], accent: N.cyan, phase: 0 },
+    { x: 310, y: -80, w: 55, h: 28, lines: ["CRYSTAL", "SYSTEMS"], accent: N.magenta, phase: 2 },
+    { x: 0, y: -230, w: 70, h: 22, lines: ["AI AGENTS ONLINE"], accent: N.green, phase: 4 },
   );
 }
 
@@ -477,7 +479,7 @@ function drawBillboards(ctx: CanvasRenderingContext2D, billboards: Billboard[], 
     const walking = agents.filter(a => a.state === "walking").length;
     billboards[0].lines = [`${agents.length} AGENTS`, working > 0 ? `${working} WORKING` : "ALL IDLE"];
     billboards[2].lines = [
-      activeCount > 0 ? `${activeCount} ACTIVE` : "STANDBY",
+      activeCount > 0 ? `${activeCount} BLDG ACTIVE` : "STANDBY",
       working > 0 ? "⚡ BUILDING" : walking > 0 ? "◉ TRANSIT" : "◌ QUIET",
     ];
   }
@@ -601,6 +603,47 @@ function drawBuildingExtras(ctx: CanvasRenderingContext2D, b: BuildingDef, bx: n
       ctx.strokeStyle = N.blue; ctx.globalAlpha = 0.4; ctx.lineWidth = 0.8; ctx.strokeRect(bx - 3, by - 8, 6, 8); ctx.globalAlpha = 1;
       break;
     }
+    case "barracks": {
+      for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 2; col++) {
+          const wx = bx + (col - 0.5) * 10; const wy = by - b.h * (0.25 + row * 0.2);
+          const lit = active || ((row + col + Math.floor(frame / 90)) % 3) !== 0;
+          ctx.fillStyle = lit ? N.lime : "#0a1a0a"; ctx.globalAlpha = lit ? 0.45 + Math.sin(frame * 0.03 + row) * 0.1 : 0.2;
+          ctx.fillRect(wx - 2, wy - 2, 4, 3);
+        }
+      }
+      ctx.globalAlpha = 1;
+      if (active) {
+        for (let i = 0; i < 3; i++) {
+          const pulseR = ((frame * 0.6 + i * 20) % 40) + 5;
+          ctx.strokeStyle = N.lime; ctx.globalAlpha = Math.max(0, 0.3 - pulseR / 130); ctx.lineWidth = 0.8;
+          ctx.beginPath(); ctx.arc(bx, by - b.h * 0.6, pulseR, 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = "#0a140a"; ctx.fillRect(bx - 3, by - 6, 6, 6);
+      ctx.strokeStyle = N.lime; ctx.globalAlpha = 0.4; ctx.lineWidth = 0.7; ctx.strokeRect(bx - 3, by - 6, 6, 6); ctx.globalAlpha = 1;
+      break;
+    }
+    case "vault": {
+      ctx.fillStyle = "#1a1a0d"; ctx.beginPath();
+      ctx.arc(bx, by - b.h - b.d + 2, b.w * 0.6, Math.PI, 0); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = N.pink; ctx.globalAlpha = 0.5; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(bx, by - b.h - b.d + 2, b.w * 0.6, Math.PI, 0); ctx.stroke(); ctx.globalAlpha = 1;
+      if (active) {
+        ctx.save(); ctx.translate(bx, by - b.h * 0.55);
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2 + frame * 0.02;
+          ctx.fillStyle = N.pink; ctx.globalAlpha = 0.4 + Math.sin(frame * 0.04 + i) * 0.15;
+          ctx.beginPath(); ctx.arc(Math.cos(a) * 6, Math.sin(a) * 6, 1.5, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.restore(); ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = N.pink; ctx.globalAlpha = active ? 0.6 : 0.15;
+      ctx.font = "bold 8px monospace"; ctx.textAlign = "center";
+      ctx.fillText("⚒", bx, by - b.h * 0.35); ctx.globalAlpha = 1;
+      break;
+    }
     case "terminal": {
       const scA = active ? 0.5 : 0.15;
       ctx.fillStyle = N.green; ctx.globalAlpha = scA; ctx.fillRect(bx + 3, by - b.h * 0.8, b.w * 0.45, b.h * 0.45);
@@ -614,15 +657,20 @@ function drawBuildingExtras(ctx: CanvasRenderingContext2D, b: BuildingDef, bx: n
   }
 }
 
-function drawBuildingLabel(ctx: CanvasRenderingContext2D, b: BuildingDef, bx: number, by: number, hovered: boolean) {
+function drawBuildingLabel(ctx: CanvasRenderingContext2D, b: BuildingDef, bx: number, by: number, hovered: boolean, stat?: { count: number; label: string }) {
   const ly = by - b.h - b.d * 2 - (b.id === "clock" ? 40 : 16);
   ctx.font = hovered ? "bold 9px monospace" : "8px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   const label = `${b.icon} ${b.name}`; const lw = ctx.measureText(label).width + 16;
+  const totalH = stat ? 30 : 18;
   ctx.fillStyle = hovered ? "rgba(0,0,0,0.85)" : "rgba(0,0,0,0.5)";
-  ctx.beginPath(); ctx.roundRect(bx - lw / 2, ly - 9, lw, 18, 3); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(bx - lw / 2, ly - 9, lw, totalH, 3); ctx.fill();
   ctx.strokeStyle = b.accent; ctx.globalAlpha = hovered ? 0.9 : 0.3; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.roundRect(bx - lw / 2, ly - 9, lw, 18, 3); ctx.stroke(); ctx.globalAlpha = 1;
+  ctx.beginPath(); ctx.roundRect(bx - lw / 2, ly - 9, lw, totalH, 3); ctx.stroke(); ctx.globalAlpha = 1;
   ctx.fillStyle = hovered ? b.accent : N.white; ctx.fillText(label, bx, ly);
+  if (stat) {
+    ctx.font = "bold 6px monospace"; ctx.fillStyle = b.accent; ctx.globalAlpha = 0.7;
+    ctx.fillText(stat.label, bx, ly + 12); ctx.globalAlpha = 1;
+  }
   if (hovered) {
     ctx.strokeStyle = b.accent; ctx.globalAlpha = 0.4; ctx.lineWidth = 0.6;
     ctx.beginPath(); ctx.moveTo(bx - lw / 2 - 4, ly); ctx.lineTo(bx - lw / 2 - 18, ly); ctx.stroke();
@@ -763,7 +811,7 @@ function drawParticles(ctx: CanvasRenderingContext2D, particles: Particle[]) {
 
 // ─── HUD ───────────────────────────────────────────────────────
 
-function drawHUD(ctx: CanvasRenderingContext2D, w: number, h: number, agents: AgentSprite[], activeCount: number, frame: number, activityLog: ActivityEntry[], cronCount: number) {
+function drawHUD(ctx: CanvasRenderingContext2D, w: number, h: number, agents: AgentSprite[], activeCount: number, frame: number, activityLog: ActivityEntry[], cronCount: number, skillCount: number, channelCount: number) {
   // Title panel
   ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.beginPath(); ctx.roundRect(12, 10, 200, 34, 5); ctx.fill();
   ctx.strokeStyle = N.cyan; ctx.globalAlpha = 0.35; ctx.lineWidth = 1;
@@ -774,16 +822,18 @@ function drawHUD(ctx: CanvasRenderingContext2D, w: number, h: number, agents: Ag
   ctx.fillText("OPENCLAW NETWORK v2", 130, 28); ctx.globalAlpha = 1;
 
   // Stats panel (top right)
-  ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.beginPath(); ctx.roundRect(w - 230, 10, 218, 50, 5); ctx.fill();
+  ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.beginPath(); ctx.roundRect(w - 250, 10, 238, 60, 5); ctx.fill();
   ctx.strokeStyle = N.purple; ctx.globalAlpha = 0.35; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.roundRect(w - 230, 10, 218, 50, 5); ctx.stroke(); ctx.globalAlpha = 1;
+  ctx.beginPath(); ctx.roundRect(w - 250, 10, 238, 60, 5); ctx.stroke(); ctx.globalAlpha = 1;
   const dotCol = activeCount > 0 ? N.green : N.red;
   ctx.save(); ctx.shadowColor = dotCol; ctx.shadowBlur = 8;
-  ctx.fillStyle = dotCol; ctx.beginPath(); ctx.arc(w - 214, 27, 4, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+  ctx.fillStyle = dotCol; ctx.beginPath(); ctx.arc(w - 234, 27, 4, 0, Math.PI * 2); ctx.fill(); ctx.restore();
   ctx.font = "9px monospace"; ctx.fillStyle = N.white; ctx.globalAlpha = 0.8;
-  ctx.fillText(`${agents.length} AGENTS | ${activeCount} ACTIVE`, w - 204, 22);
+  ctx.fillText(`${agents.length} AGENTS | ${activeCount} BLDG ACTIVE`, w - 224, 22);
   ctx.font = "8px monospace"; ctx.fillStyle = N.amber; ctx.globalAlpha = 0.6;
-  ctx.fillText(`CRON: ${cronCount} JOBS | TIME: ${new Date().toLocaleTimeString("en-US", { hour12: false })}`, w - 218, 38);
+  ctx.fillText(`CRON: ${cronCount} | SKILLS: ${skillCount} | CH: ${channelCount}`, w - 238, 38);
+  ctx.fillStyle = N.cyan; ctx.globalAlpha = 0.5;
+  ctx.fillText(`TIME: ${new Date().toLocaleTimeString("en-US", { hour12: false })}`, w - 238, 50);
   ctx.globalAlpha = 1;
 
   // Agent roster (right side)
@@ -857,8 +907,10 @@ export function CityView() {
     activityLog: [] as ActivityEntry[], steamVents: [...STEAM_VENTS],
     frame: 0, hoveredBuilding: null as string | null, hoveredAgent: null as string | null,
     mouseX: 0, mouseY: 0, activeBuildings: new Set<string>(),
+    buildingStats: {} as Record<string, { count: number; label: string }>,
     stars: Array.from({ length: 120 }, () => ({ x: Math.random(), y: Math.random(), phase: Math.random() * Math.PI * 2, bright: Math.random() })) as Star[],
     canvasW: 900, canvasH: 600, lastDataPoll: 0, rainInited: false, cronCount: 0,
+    skillCount: 0, channelCount: 0,
   });
 
   const setView = useAppStore(s => s.setView);
@@ -866,6 +918,8 @@ export function CityView() {
   const getTasks = useDataStore(s => s.getTasks);
   const getCronJobs = useDataStore(s => s.getCronJobs);
   const getSessions = useDataStore(s => s.getSessions);
+  const getSkills = useDataStore(s => s.getSkills);
+  const getChannelStatus = useDataStore(s => s.getChannelStatus);
 
   const addActivity = useCallback((text: string, color: string) => {
     const w = worldRef.current;
@@ -876,27 +930,61 @@ export function CityView() {
   const pollData = useCallback(async () => {
     const w = worldRef.current;
     try {
-      const [agentsRaw, tasksRaw, cronRaw, sessionsRaw] = await Promise.all([getAgents(), getTasks(), getCronJobs(), getSessions()]);
+      const [agentsRaw, tasksRaw, cronRaw, sessionsRaw, skillsRaw, channelRaw] = await Promise.all([
+        getAgents(), getTasks(), getCronJobs(), getSessions(), getSkills(), getChannelStatus(),
+      ]);
       const agents = (agentsRaw ?? []) as Record<string, unknown>[];
       const tasks = (tasksRaw ?? []) as Record<string, unknown>[];
       const sessions = (sessionsRaw ?? []) as Record<string, unknown>[];
       const runningTasks = tasks.filter(t => t.status === "running" || t.status === "in_progress");
       const cronJobs = (cronRaw ?? []) as Record<string, unknown>[];
-      w.cronCount = cronJobs.filter(c => c.enabled !== false).length;
+      const skills = Array.isArray(skillsRaw) ? skillsRaw : [];
+      const channels = channelRaw as Record<string, unknown>;
+      const channelList = Array.isArray(channels?.channels) ? channels.channels as Record<string, unknown>[] : [];
+      const activeCronCount = cronJobs.filter(c => c.enabled !== false).length;
+      w.cronCount = activeCronCount;
+      w.skillCount = skills.length;
+      w.channelCount = channelList.length;
 
       w.activeBuildings.clear();
-      const activeCronCount = cronJobs.filter(c => c.enabled !== false).length;
+      const stats: Record<string, { count: number; label: string }> = {};
+
+      stats.clock = { count: activeCronCount, label: activeCronCount > 0 ? `${activeCronCount} JOBS` : "IDLE" };
       if (activeCronCount > 0) w.activeBuildings.add("clock");
+
+      stats.barracks = { count: agents.length, label: `${agents.length} AGENTS` };
+      if (agents.length > 0) w.activeBuildings.add("barracks");
+
+      const activeChannels = channelList.filter(c => c.status === "connected" || c.status === "active" || c.connected === true);
+      stats.comms = { count: activeChannels.length, label: activeChannels.length > 0 ? `${activeChannels.length} LIVE` : `${channelList.length} CH` };
+      if (activeChannels.length > 0) w.activeBuildings.add("comms");
+
+      const enabledSkills = skills.filter(s => (s as Record<string, unknown>).enabled !== false);
+      stats.vault = { count: enabledSkills.length, label: `${enabledSkills.length} SKILLS` };
+      if (enabledSkills.length > 0) w.activeBuildings.add("vault");
+
+      let forgeTaskCount = 0;
+      let memoryTaskCount = 0;
+      let commsTaskCount = 0;
+      let officeTaskCount = 0;
       for (const t of runningTasks) {
         const kind = String(t.kind ?? t.type ?? "").toLowerCase();
-        if (kind.includes("cron")) w.activeBuildings.add("clock");
-        else if (kind.includes("skill") || kind.includes("build") || kind.includes("agent")) w.activeBuildings.add("factory");
-        else if (kind.includes("memory") || kind.includes("search") || kind.includes("embed")) w.activeBuildings.add("memory");
-        else if (kind.includes("channel") || kind.includes("message") || kind.includes("telegram")) w.activeBuildings.add("comms");
-        else w.activeBuildings.add("office");
+        if (kind.includes("cron")) { w.activeBuildings.add("clock"); }
+        else if (kind.includes("skill") || kind.includes("build")) { w.activeBuildings.add("factory"); forgeTaskCount++; }
+        else if (kind.includes("memory") || kind.includes("search") || kind.includes("embed")) { w.activeBuildings.add("memory"); memoryTaskCount++; }
+        else if (kind.includes("channel") || kind.includes("message") || kind.includes("telegram")) { w.activeBuildings.add("comms"); commsTaskCount++; }
+        else { w.activeBuildings.add("office"); officeTaskCount++; }
       }
-      if (sessions.some(s => s.kind === "chat" || s.kind === "conversation")) w.activeBuildings.add("terminal");
+      stats.factory = { count: forgeTaskCount, label: forgeTaskCount > 0 ? `${forgeTaskCount} BUILDS` : "IDLE" };
+      stats.memory = { count: memoryTaskCount, label: memoryTaskCount > 0 ? `${memoryTaskCount} OPS` : "READY" };
+      stats.office = { count: officeTaskCount + runningTasks.length, label: runningTasks.length > 0 ? `${runningTasks.length} TASKS` : "CLEAR" };
+
+      const chatSessions = sessions.filter(s => s.kind === "chat" || s.kind === "conversation");
+      stats.terminal = { count: chatSessions.length, label: chatSessions.length > 0 ? `${chatSessions.length} CHATS` : "IDLE" };
+      if (chatSessions.length > 0) w.activeBuildings.add("terminal");
       if (runningTasks.length > 0 && !w.activeBuildings.has("office")) w.activeBuildings.add("office");
+
+      w.buildingStats = stats;
 
       const existingIds = new Set(w.agents.map(a => a.id));
       for (const raw of agents) {
@@ -905,7 +993,7 @@ export function CityView() {
         const shortName = name.length > 12 ? name.split(/[\s(]/)[0] : name;
         const agentTasks = runningTasks.filter(t => String(t.agentId ?? "") === id);
         const agentSessions = sessions.filter(s => String(s.agentId ?? "") === id);
-        const homeId = AGENT_HOMES[id] ?? "office";
+        const homeId = AGENT_HOMES[id] ?? "barracks";
         const home = BUILDINGS.find(b => b.id === homeId)!;
         const model = String(raw.model ?? "");
 
@@ -927,9 +1015,11 @@ export function CityView() {
             sprite.task = newTask;
             let targetBldg = "office";
             if (taskKind.includes("cron")) targetBldg = "clock";
-            else if (taskKind.includes("skill") || taskKind.includes("agent") || taskKind.includes("build")) targetBldg = "factory";
-            else if (taskKind.includes("memory") || taskKind.includes("search")) targetBldg = "memory";
+            else if (taskKind.includes("build") || taskKind.includes("skill")) targetBldg = "factory";
+            else if (taskKind.includes("agent")) targetBldg = "barracks";
+            else if (taskKind.includes("memory") || taskKind.includes("search") || taskKind.includes("embed")) targetBldg = "memory";
             else if (taskKind.includes("channel") || taskKind.includes("message")) targetBldg = "comms";
+            else if (taskKind.includes("tool")) targetBldg = "vault";
             sprite.targetBldg = targetBldg;
             const tb = BUILDINGS.find(b => b.id === targetBldg)!;
             sprite.tx = tb.ox + (Math.random() - 0.5) * 10; sprite.ty = tb.oy + (Math.random() - 0.5) * 6;
@@ -938,7 +1028,7 @@ export function CityView() {
         }
       }
     } catch { /* non-fatal */ }
-  }, [getAgents, getTasks, getCronJobs, getSessions, addActivity]);
+  }, [getAgents, getTasks, getCronJobs, getSessions, getSkills, getChannelStatus, addActivity]);
 
   const updateAgents = useCallback((dt: number, frame: number) => {
     const w = worldRef.current;
@@ -961,7 +1051,7 @@ export function CityView() {
         if (a.task) {
           a.timer = 3 + Math.random() * 5;
         } else {
-          const homeId = AGENT_HOMES[a.id] ?? "office";
+          const homeId = AGENT_HOMES[a.id] ?? "barracks";
           const home = BUILDINGS.find(b => b.id === homeId)!;
           a.tx = home.ox + (Math.random() - 0.5) * 10;
           a.ty = home.oy + (Math.random() - 0.5) * 6;
@@ -969,12 +1059,12 @@ export function CityView() {
         }
       } else if (a.state === "idle" && a.timer <= 0) {
         if (a.task) {
-          const tb = BUILDINGS.find(b => b.id === (a.targetBldg ?? "office"))!;
+          const tb = BUILDINGS.find(b => b.id === (a.targetBldg ?? "barracks"))!;
           a.tx = tb.ox + (Math.random() - 0.5) * 10;
           a.ty = tb.oy + (Math.random() - 0.5) * 6;
           a.state = "walking";
         } else {
-          const homeId = AGENT_HOMES[a.id] ?? "office";
+          const homeId = AGENT_HOMES[a.id] ?? "barracks";
           const home = BUILDINGS.find(b => b.id === homeId)!;
           const dx = home.ox - a.x, dy = home.oy - a.y;
           if (Math.sqrt(dx * dx + dy * dy) > 15) {
@@ -1052,7 +1142,7 @@ export function CityView() {
           drawIsoBox(ctx, bx, by, b.w, b.d, b.h, b.top, b.left, b.right);
           if (hovered) ctx.restore();
           drawBuildingExtras(ctx, b, bx, by, w.frame, w.activeBuildings.has(b.id));
-          drawBuildingLabel(ctx, b, bx, by, hovered);
+          drawBuildingLabel(ctx, b, bx, by, hovered, w.buildingStats[b.id]);
         } else if (d.type === "agent") {
           drawAgentSprite(ctx, w.agents[d.idx], w.frame, cx, cy, w.hoveredAgent === w.agents[d.idx].id);
         } else if (d.type === "drone") {
@@ -1063,7 +1153,7 @@ export function CityView() {
       drawArcs(ctx, w.arcs);
       drawBillboards(ctx, w.billboards, cx, cy, w.frame, w.agents, w.activeBuildings.size);
       drawParticles(ctx, w.particles);
-      drawHUD(ctx, cw, ch, w.agents, w.activeBuildings.size, w.frame, w.activityLog, w.cronCount);
+      drawHUD(ctx, cw, ch, w.agents, w.activeBuildings.size, w.frame, w.activityLog, w.cronCount, w.skillCount, w.channelCount);
       drawScanlines(ctx, cw, ch, w.frame);
 
       ctx.restore();

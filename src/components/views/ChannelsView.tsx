@@ -299,7 +299,6 @@ export function ChannelsView() {
   const channelDef = CHANNEL_TYPES[addType];
 
   const loadAll = useCallback(async () => {
-    setLoading(true);
     try {
       const [list, statusMap] = await Promise.all([fetchChannels(), fetchStatus()]);
       const merged = list.map((ch) => ({

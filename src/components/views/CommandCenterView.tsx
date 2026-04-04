@@ -219,8 +219,11 @@ function CalendarTab() {
   const [weekStart, setWeekStart] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - d.getDay()); d.setHours(0, 0, 0, 0); return d;
   });
-  const [jobs, setJobs] = useState<CronJob[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [jobs, setJobs] = useState<CronJob[]>(() => {
+    const cached = useDataStore.getState().cronJobs?.data;
+    return Array.isArray(cached) ? cached.map(parseCronJob) : [];
+  });
+  const [loading, setLoading] = useState(() => !useDataStore.getState().cronJobs?.data);
   const [error, setError] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState<Date | null>(null);
   const [newSchedule, setNewSchedule] = useState("");
@@ -870,8 +873,11 @@ interface CronRunEntry {
 }
 
 function ScheduledTab() {
-  const [jobs, setJobs] = useState<CronJob[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [jobs, setJobs] = useState<CronJob[]>(() => {
+    const cached = useDataStore.getState().cronJobs?.data;
+    return Array.isArray(cached) ? cached.map(parseCronJob) : [];
+  });
+  const [loading, setLoading] = useState(() => !useDataStore.getState().cronJobs?.data);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);

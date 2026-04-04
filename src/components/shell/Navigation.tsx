@@ -35,7 +35,7 @@ const PRIMARY: NavItem[] = [
 
 const OPENCLAW: NavItem[] = [
   { id: "agents",   icon: Bot,       label: "Agents" },
-  { id: "factory",  icon: Factory,   label: "Factory" },
+  { id: "factory",  icon: Factory,   label: "Forge" },
   { id: "office",   icon: Building2, label: "Office" },
   { id: "channels", icon: Radio,     label: "Channels" },
   { id: "memory",   icon: Brain,     label: "Memory" },

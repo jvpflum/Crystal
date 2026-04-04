@@ -109,7 +109,6 @@ export function ModelsView() {
   const currentView = useAppStore(s => s.currentView);
 
   const loadModels = useCallback(async () => {
-    setLoading(true);
     setError(null);
     try {
       const result = await cachedCommand("openclaw models list --json", { ttl: 30_000 });

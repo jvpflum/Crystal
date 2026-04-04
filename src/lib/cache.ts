@@ -13,7 +13,7 @@ const DEFAULT_TTL = 120_000;
 // Concurrency limiter: at most MAX_CONCURRENT CLI commands running at once.
 // Each `openclaw` CLI call opens a WS connection to the gateway; flooding it
 // causes handshake timeouts and lane wait stalls.
-const MAX_CONCURRENT = 3;
+const MAX_CONCURRENT = 5;
 let running = 0;
 const waiting: (() => void)[] = [];
 

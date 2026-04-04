@@ -89,10 +89,36 @@ function makeGetter<T>(
 ) {
   return async (force = false): Promise<T> => {
     const state = useDataStore.getState();
-    if (!force && isFresh(state[key] as CacheEntry<T> | null, TTL[key])) {
-      return (state[key] as CacheEntry<T>).data;
+    const existing = state[key] as CacheEntry<T> | null;
+
+    if (!force && isFresh(existing, TTL[key])) {
+      return existing!.data;
     }
-    if (key in state._inflight) return state._inflight[key] as Promise<T>;
+
+    if (existing && !force) {
+      if (!(key in state._inflight)) {
+        const bgPromise = fetcher()
+          .then(data => {
+            useDataStore.setState({ [key]: { data, fetchedAt: Date.now() } } as Partial<DataState>);
+            persistToDisk(useDataStore.getState());
+          })
+          .catch(() => {})
+          .finally(() => {
+            const inf = { ...useDataStore.getState()._inflight };
+            delete inf[key];
+            useDataStore.setState({ _inflight: inf });
+          });
+        useDataStore.setState({ _inflight: { ...state._inflight, [key]: bgPromise } });
+      }
+      return existing.data;
+    }
+
+    if (key in state._inflight) {
+      return state._inflight[key]!.then(() => {
+        const refreshed = useDataStore.getState()[key] as CacheEntry<T> | null;
+        return refreshed?.data ?? (Array.isArray(existing?.data) ? [] : {}) as T;
+      });
+    }
 
     const promise = fetcher()
       .then(data => {
@@ -101,8 +127,7 @@ function makeGetter<T>(
         return data;
       })
       .catch(() => {
-        const fallback = useDataStore.getState()[key];
-        return (fallback as CacheEntry<T> | null)?.data ?? (Array.isArray((useDataStore.getState()[key] as CacheEntry<T> | null)?.data) ? [] : {}) as T;
+        return existing?.data ?? (Array.isArray(existing?.data) ? [] : {}) as T;
       })
       .finally(() => {
         const inf = { ...useDataStore.getState()._inflight };
@@ -110,7 +135,7 @@ function makeGetter<T>(
         useDataStore.setState({ _inflight: inf });
       });
 
-    useDataStore.setState({ _inflight: { ...useDataStore.getState()._inflight, [key]: promise } });
+    useDataStore.setState({ _inflight: { ...state._inflight, [key]: promise } });
     return promise;
   };
 }
