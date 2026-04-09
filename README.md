@@ -6,12 +6,12 @@
 
 <p align="center">
   <strong>The most complete desktop frontend for <a href="https://github.com/nichochar/open-claw">OpenClaw</a>.</strong><br/>
-  A native AI command center with 30 views, AI-powered search, 60+ slash commands, NVIDIA-accelerated voice, multi-provider LLM support, and a full agent workspace — all in a single desktop app.
+  A native AI command center with 30 views, AI-powered search, 70+ slash commands, NVIDIA-accelerated voice, multi-provider LLM support, token cost analytics, and a full agent workspace — all in a single desktop app.
 </p>
 
 <p align="center">
   <a href="#-features"><img src="https://img.shields.io/badge/30-Views-6366f1?style=flat-square" /></a>
-  <a href="#-ai-chat"><img src="https://img.shields.io/badge/60+-Slash%20Commands-3b82f6?style=flat-square" /></a>
+  <a href="#-ai-chat"><img src="https://img.shields.io/badge/70+-Slash%20Commands-3b82f6?style=flat-square" /></a>
   <a href="#-voice-engine"><img src="https://img.shields.io/badge/6-Voice%20Providers-10b981?style=flat-square" /></a>
   <a href="#-multi-provider-llm"><img src="https://img.shields.io/badge/7-LLM%20Providers-f59e0b?style=flat-square" /></a>
   <a href="#-tech-stack"><img src="https://img.shields.io/badge/Tauri-2.0-24c8db?style=flat-square&logo=tauri" /></a>
@@ -27,6 +27,55 @@
 ---
 
 ## What's New
+
+### April 2026 — v0.7.0 Major Feature Release
+
+#### Agent & View Consolidation
+- **Agents/Office Merge** — `OfficeView` fully merged into `AgentsView`. The Agents view now includes a live monitoring dashboard with agent cards, session counts, token usage, task dispatch form, and "Send to Chat" buttons. The Office nav entry, route, and file have been removed; all references redirect to Agents.
+
+#### Dashboard Enhancements
+- **Vector Store Visualization** — New dashboard card with a segmented ring gauge showing vector chunk count, satellite status dots for Vector DB/FTS/file readiness, and inline status rows (Vector DB, Full-text Search, Provider, Index Pending). Powered by enriched `fetchMemoryStatus` that now fetches `openclaw memory status --json` in parallel.
+- **Memory Chunks Ring Gauge** — Memory section upgraded from a standalone dot matrix to a `RingGauge` + `DotMatrix` combo card with click-through to Memory view.
+- **Floating Performance Graphs** — System Performance ring gauges (CPU/RAM/Storage) and Lifetime Tokens radial burst now render with fully transparent backgrounds — no card outline or shadow — so they appear to float directly on the page.
+- **NVIDIA Logo (Official)** — Replaced the incorrect GPU section logo with the official NVIDIA "eye" SVG from Simple Icons. The `NvidiaLogo` component is now exported from `GpuMonitor.tsx` for reuse.
+- **NVIDIA Logo for Local LLM** — The local model card in the LLM Models section now uses the official `NvidiaLogo` with NVIDIA green (`#76b900`) branding instead of the old Ollama logo, reflecting that local inference runs on NVIDIA GPUs.
+
+#### Calendar Redesign
+- **Agenda Timeline** — The Command Center Calendar tab completely rebuilt from an overcrowded 24×7 grid to a scalable agenda-style view with:
+  - Week navigation (Previous / Today / Next Week)
+  - Clickable 7-day picker row with per-day job counts
+  - 24-hour activity heatmap with color intensity proportional to job density
+  - Stats bar (Total Jobs, Fires Today, Active Hours, Recurring, Daily)
+  - Vertical timeline grouped by hour with expandable job cards
+  - Frequency breakdown summary
+  - "NOW" badge on the current hour
+
+#### Tools & Skills Management
+- **Skill Enable/Disable Toggles** — Each skill card in the Tools → Skills tab now has an inline toggle switch. Skills can be enabled/disabled directly from the UI without CLI or config file edits. Disabled skills are visually dimmed with an "OFF" badge.
+- **ClawHub Tab** — New "Hub" tab in Tools for discovering and installing verified 3rd-party skills from ClawHub. Includes search, install, update individual skills, update all, and sync. Installed skills displayed in a grid with version badges.
+- **OpenShell Sandbox in Tools** — Full sandbox management (install, enable/disable, Docker detection, sandbox listing, logs) duplicated from Settings into the Tools → Sandbox tab for easier access.
+
+#### Token Usage & Cost Estimation
+- **Estimated Costs** — Usage page now calculates estimated dollar costs for all providers: cloud APIs (OpenAI, Anthropic, DeepSeek, xAI, Google) use published per-million-token rates; local GPU (Ollama, NVIDIA STT/TTS) uses electricity-based estimates (~350W, $0.32/kWh, ~60 tok/s for RTX 5090).
+- **Local Compute Savings** — Prominent comparison card showing "If sent to cloud API" vs. "Actual electricity cost" with a savings multiplier badge.
+- **$/M Tok Column** — Input/Output token breakdown table now includes a blended cost-per-million-tokens column and GPU badges for local providers.
+- **Pricing Methodology** — Detailed footer explaining how cloud and local costs are estimated.
+
+#### Navigation Overhaul
+- **Three Collapsible Sections** — Sidebar reorganized into:
+  - **MISSION** (top) — Home, City, Chat, Command Center
+  - **CLAW** (middle) — Agents, Forge, Memory, Models, Channels, Skills, Hooks, Tools
+  - **SYSTEM** (bottom) — Usage, Doctor, Settings
+  - All three sections are independently collapsible with chevron toggles.
+- **Tools Moved to Claw** — Tools tab relocated from the System section to the Claw section for easier access alongside Skills and Memory.
+- **Skills Nav Entry** — New sidebar entry for Skills/Marketplace under the Claw section.
+
+#### AI Search & Command Intelligence
+- **System Prompt Rewrite** — The Crystal AI chatbot (Ctrl+K search and slash commands) now has comprehensive knowledge of all 30+ views, including Dashboard sections (ring gauges, vector store, GPU), Command Center tabs, Agents monitoring, Forge capabilities, Memory tiers and vector DB, Tools tabs (Skills/Hub/Sandbox), Usage analytics, and all extended views.
+- **Navigation Tips** — AI responses now include actionable tips like "To manage cron jobs: Navigate to Command Center → Scheduled tab".
+- **Expanded View Map** — 80+ keyword-to-view mappings (up from ~45), covering aliases like `"forge"`, `"vector store"`, `"clawhub"`, `"sandbox"`, `"api costs"`, `"gpu monitor"`, etc.
+- **Slash Commands Sync** — 30+ navigation slash commands added/updated, stale duplicates removed (`/office`, duplicate `/agents`), new commands: `/city`, `/calendar`, `/heartbeat`, `/forge`, `/usage`, `/hub`, `/sandbox`, `/sessions`, `/tasks`, `/approvals`, `/subagents`, `/webhooks`, `/voice`, `/devices`.
+- **Command Palette Refresh** — Updated icons (LayoutDashboard for Command Center), added City and Usage as top-level entries, accurate descriptions matching current functionality.
 
 ### April 2026 — v0.6.0.1 Dashboard Polish, Audit & Bug Fixes
 
@@ -147,18 +196,19 @@ Full-featured conversation interface with multi-conversation sidebar, Markdown r
 
 Futuristic bird's-eye view of your entire system with Apple-level polish and micro-interactions:
 
-- **System Performance** — Animated SVG ring gauges for CPU, RAM, and Storage with color-coded thresholds and hover scale animations
-- **Lifetime Tokens** — Radial burst visualization aggregating session token usage with hover rotation effect
+- **System Performance** — Floating SVG ring gauges for CPU, RAM, and Storage with color-coded thresholds, transparent backgrounds, and hover scale animations
+- **Lifetime Tokens** — Radial burst visualization aggregating session token usage with hover rotation effect (floating, no card background)
 - **CPU & Memory Trends** — Smooth bezier sparkline charts with gradient fills, glowing endpoints, and live percentage readouts
 - **Cron Jobs** — Mini bar chart (active/disabled/failed) with one-click navigation to the scheduler
 - **Stats Tiles** — Sessions, Agents, Skills, Heartbeat — each with hover lift, glow, and press feedback
-- **Memory Dot Matrix** — Visual grid of stored memory chunks
-- **Dual LLM Display** — Shows both hosted model (OpenAI logo + model name) and local model (Ollama logo + running model) with independent connection status dots
+- **Memory Chunks** — Ring gauge + dot matrix combo showing stored memory chunks with click-through to Memory view
+- **Vector Store** — Segmented ring gauge with satellite status dots for Vector DB, Full-text Search, and file index readiness. Shows provider name and "INDEX PENDING" indicator
+- **Dual LLM Display** — Shows both hosted model (OpenAI logo + model name) and local model (NVIDIA logo + running model name from `ollama ps`) with independent connection status dots
 - **Uptime & Version** — System uptime with OpenClaw version badge
 - **Telegram Topics** — Topic tags with cron delivery counts and hover highlights
 - **Security** — Audit status card with glow progress bar and navigation chevron
 - **PC Optimizer** — 12 one-click system optimizations with per-button hover/press animations and result indicators
-- **GPU Monitor** — NVIDIA-branded card with ring gauge utilization, VRAM glow bar, temperature/power metric chips, and status indicator
+- **GPU Monitor** — Official NVIDIA-branded card with ring gauge utilization, VRAM glow bar, temperature/power metric chips, and status indicator
 - **Status Pills** — Gateway and Telegram connection indicators with pulsing dots when disconnected
 
 ---
@@ -251,14 +301,33 @@ Four-tab marketplace for extending Crystal:
 - **Power Up** — One-click setup: enables every disabled plugin and skill, runs security audit with auto-fix, reindexes memory. Per-step progress with expandable output.
 - **ClawHub** — Search and install skills from the registry. Publish your own skills (slug, name, version, tags, path, changelog). Sync installed skills with dry-run preview.
 
+### Tools
+
+Centralized management hub with four tabs:
+
+- **Skills** — All loaded OpenClaw skills with inline enable/disable toggle switches. Stats bar shows enabled/disabled/eligible counts. Disabled skills are visually dimmed with "OFF" badge. Dependency warnings before enabling.
+- **Hub** — ClawHub integration for discovering and installing verified 3rd-party skills. Search, one-click install, update individual or all skills, sync with registry.
+- **Sandbox** — Full OpenShell sandbox management (install, enable/disable, Docker status, sandbox listing, and live log tailing) — same functionality as Settings but more accessible.
+- **Permissions** — Tool permission management and configuration.
+
+### Usage & Cost Analytics
+
+Comprehensive token usage analytics and cost estimation:
+
+- **Per-Provider Breakdown** — Tracks tokens across Anthropic, OpenAI, Ollama, Eleven Labs, NVIDIA STT/TTS, and other connected APIs.
+- **Estimated Costs** — Cloud APIs priced at published per-million-token rates; local GPU priced at electricity costs (~350W RTX 5090, $0.32/kWh California rate, ~60 tok/s).
+- **Local Compute Savings** — Side-by-side comparison showing hypothetical cloud cost vs. actual electricity cost with savings multiplier badge.
+- **Token Split Table** — Input/Output breakdown per provider with $/M Tok column and GPU badges for local providers.
+- **Pricing Methodology** — Transparent footer explaining how all costs are estimated.
+
 ---
 
 ### Command Center
 
 Unified hub for workflows, scheduling, and automation:
 
-- **Calendar** — Visual schedule overview with delivery target badges (shows which Telegram topic each job posts to)
-- **Workflows** — 12 skill-based templates across 6 categories (Finance, Home, Development, System, Research, Productivity) plus custom workflow builder with `{{INPUT}}` template variables
+- **Calendar** — Agenda-style timeline with week navigation, clickable 7-day picker, 24-hour activity heatmap, per-hour job grouping, expandable job cards, "NOW" badge on current hour, frequency breakdown, and quick stats (Total Jobs, Fires Today, Active Hours, Recurring, Daily)
+- **Workflows** — 12 skill-based templates across 6 categories (Finance, Home, Development, System, Research, Productivity) plus custom workflow builder with `{{INPUT}}` template variables and quick actions
 - **Cron Jobs** — Schedule recurring AI tasks with cron expressions. 6 quick templates, interactive syntax reference, per-job run/enable/disable/remove, delivery target labels
 - **Heartbeat** — Configure autonomous agent behavior
 
@@ -342,8 +411,7 @@ Crystal integrates [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) for s
 
 ### Agent Management
 
-- **Office** — Live agent dashboard showing all real OpenClaw agents with identity, emoji, model, running tasks, recent sessions, token usage, and task dispatch
-- **Agents Hub** — List, create, and delete OpenClaw agents. View model, workspace, and routes per agent
+- **Agents** — Unified agent hub combining agent configuration with live monitoring dashboard. Shows all real OpenClaw agents with identity, emoji, model, running tasks, recent sessions, token usage, task dispatch form, and "Send to Chat" buttons. Includes agent CRUD, sessions tab, and 30-second auto-refresh.
 - **Tasks** — Background task monitoring with filtering by status and kind. Audit and maintenance controls
 - **Approvals** — Exec approval management with allowlist configuration per agent
 - **Sub-Agents & ACP** — Unified view for spawning, steering, and managing sub-agents and ACP sessions (Codex, Claude Code, Gemini CLI)
@@ -606,11 +674,16 @@ Crystal/
 │   │   │   ├── conversation-agent.ts # Voice conversation handler
 │   │   │   └── session-store.ts      # Voice session persistence
 │   │   ├── marketplace.ts            # Skill/plugin catalog
+│   │   ├── telegram.ts               # Telegram topic helpers
+│   │   ├── version.ts                # App version constant
 │   │   └── storage.ts                # Local storage abstraction
+│   ├── styles/
+│   │   └── viewStyles.ts             # Shared style module (glowCard, animations, micro-interactions)
 │   └── stores/
 │       ├── appStore.ts               # App state (view, voice, gateway, thinking level)
 │       ├── themeStore.ts             # 6 themes with CSS variable mapping
 │       ├── dataStore.ts              # Data caching layer (8 cache entries: cron, agents, memory, system, tasks, channels, skills, sessions)
+│       ├── tokenUsageStore.ts        # Per-provider token tracking with cost estimation
 │       └── factoryStore.ts           # Factory project/run state (dynamic agent types)
 ├── src-tauri/                        # Rust backend
 │   ├── src/
@@ -635,7 +708,7 @@ Crystal/
 | | Count |
 |---|---|
 | Views | 30 |
-| Slash commands | 60+ |
+| Slash commands | 70+ |
 | Voice providers | 6 (3 STT + 3 TTS) |
 | LLM providers | 7 |
 | Themes | 6 |
@@ -651,6 +724,9 @@ Crystal/
 | Tauri commands | 13 |
 | OpenClaw skills | 51+ |
 | Data cache entries | 8 |
+| AI search view mappings | 80+ |
+| Nav sections | 3 (Mission / Claw / System) |
+| Token cost providers | 8 |
 
 ---
 

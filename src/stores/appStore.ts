@@ -32,7 +32,8 @@ export type AppView =
   | "voicecall"
   | "tasks"
   | "approvals"
-  | "city";
+  | "city"
+  | "usage";
 
 export type VoiceState =
   | "idle"
@@ -78,7 +79,7 @@ const VALID_VIEWS = new Set<string>([
   "marketplace", "models", "sessions", "templates", "channels", "memory",
   "tools", "activity", "settings", "security", "hooks", "doctor", "nodes",
   "browser", "workspace", "messaging", "directory", "devices", "subagents",
-  "webhooks", "voicecall", "tasks", "approvals", "city",
+  "webhooks", "voicecall", "tasks", "approvals", "city", "usage",
 ]);
 
 function loadPersistedNavigation(): { view: AppView; centerTab: CommandCenterTabId | null } {
@@ -87,6 +88,10 @@ function loadPersistedNavigation(): { view: AppView; centerTab: CommandCenterTab
     if (saved === "cron") {
       localStorage.setItem(PERSISTED_VIEW_KEY, "command-center");
       return { view: "command-center", centerTab: "scheduled" };
+    }
+    if (saved === "office") {
+      localStorage.setItem(PERSISTED_VIEW_KEY, "agents");
+      return { view: "agents", centerTab: null };
     }
     if (saved && VALID_VIEWS.has(saved)) return { view: saved as AppView, centerTab: null };
   } catch { /* ignore */ }
@@ -99,14 +104,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   currentView: initialNav.view,
   pendingCommandCenterTab: initialNav.centerTab,
   setView: (view, opts) => {
+    const resolved = view === "office" ? "agents" : view;
     let pending = get().pendingCommandCenterTab;
-    if (view === "command-center") {
+    if (resolved === "command-center") {
       pending = opts?.centerTab ?? null;
     } else {
       pending = null;
     }
-    try { localStorage.setItem(PERSISTED_VIEW_KEY, view); } catch { /* ignore */ }
-    set({ currentView: view, pendingCommandCenterTab: pending });
+    try { localStorage.setItem(PERSISTED_VIEW_KEY, resolved); } catch { /* ignore */ }
+    set({ currentView: resolved as AppView, pendingCommandCenterTab: pending });
   },
   clearPendingCommandCenterTab: () => set({ pendingCommandCenterTab: null }),
 

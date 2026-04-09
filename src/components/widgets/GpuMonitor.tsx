@@ -42,8 +42,8 @@ function tempColor(t: number): string {
   return "#f87171";
 }
 
-function GpuRingGauge({ value, size = 56, stroke = 5, color }: {
-  value: number; size?: number; stroke?: number; color: string;
+function GpuRingGauge({ value, label, size = 62, stroke = 5, color }: {
+  value: number; label?: string; size?: number; stroke?: number; color: string;
 }) {
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
@@ -71,15 +71,23 @@ function GpuRingGauge({ value, size = 56, stroke = 5, color }: {
           }} />
       </svg>
       <div style={{
-        position: "absolute", inset: 0, display: "flex",
-        alignItems: "center", justifyContent: "center",
+        position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", gap: 1,
       }}>
         <span style={{
-          fontSize: 13, fontWeight: 700, color: "var(--text)",
+          fontSize: 14, fontWeight: 700, color: "var(--text)",
           fontFamily: "'SF Mono', 'JetBrains Mono', monospace", lineHeight: 1,
         }}>
           {value}%
         </span>
+        {label && (
+          <span style={{
+            fontSize: 7, fontWeight: 600, color: "var(--text-muted)",
+            letterSpacing: "0.1em", textTransform: "uppercase", lineHeight: 1,
+          }}>
+            {label}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -145,6 +153,14 @@ function MetricChip({ icon: Icon, label, value, color, sub }: {
         </span>
       </div>
     </div>
+  );
+}
+
+export function NvidiaLogo({ size = 18, color = "currentColor" }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} xmlns="http://www.w3.org/2000/svg" role="img">
+      <path d="M8.948 8.798v-1.43a6.7 6.7 0 0 1 .424-.018c3.922-.124 6.493 3.374 6.493 3.374s-2.774 3.851-5.75 3.851c-.398 0-.787-.062-1.158-.185v-4.346c1.528.185 1.837.857 2.747 2.385l2.04-1.714s-1.492-1.952-4-1.952a6.016 6.016 0 0 0-.796.035m0-4.735v2.138l.424-.027c5.45-.185 9.01 4.47 9.01 4.47s-4.08 4.964-8.33 4.964c-.37 0-.733-.035-1.095-.097v1.325c.3.035.61.062.91.062 3.957 0 6.82-2.023 9.593-4.408.459.371 2.34 1.263 2.73 1.652-2.633 2.208-8.772 3.984-12.253 3.984-.335 0-.653-.018-.971-.053v1.864H24V4.063zm0 10.326v1.131c-3.657-.654-4.673-4.46-4.673-4.46s1.758-1.944 4.673-2.262v1.237H8.94c-1.528-.186-2.73 1.245-2.73 1.245s.68 2.412 2.739 3.11M2.456 10.9s2.164-3.197 6.5-3.533V6.201C4.153 6.59 0 10.653 0 10.653s2.35 6.802 8.948 7.42v-1.237c-4.84-.6-6.492-5.936-6.492-5.936z" />
+    </svg>
   );
 }
 
@@ -233,6 +249,8 @@ export function GpuMonitor() {
     );
   }
 
+  const isNvidia = /nvidia/i.test(stats.name);
+  const brandColor = isNvidia ? "#76b900" : "#3B82F6";
   const vramPct = stats.memTotalMb > 0 ? (stats.memUsedMb / stats.memTotalMb) * 100 : 0;
   const powerPct = stats.powerLimitW > 0 ? (stats.powerW / stats.powerLimitW) * 100 : 0;
   const vramUsedGb = (stats.memUsedMb / 1024).toFixed(1);
@@ -248,32 +266,35 @@ export function GpuMonitor() {
           <div style={{
             width: 32, height: 32, borderRadius: 10, display: "flex",
             alignItems: "center", justifyContent: "center",
-            background: "color-mix(in srgb, #76b900 10%, transparent)",
+            background: `color-mix(in srgb, ${brandColor} 10%, transparent)`,
           }}>
-            <Gpu style={{ width: 15, height: 15, color: "#76b900", filter: "drop-shadow(0 0 4px #76b900)" }} />
+            {isNvidia
+              ? <NvidiaLogo size={18} color={brandColor} />
+              : <Gpu style={{ width: 15, height: 15, color: brandColor, filter: `drop-shadow(0 0 4px ${brandColor})` }} />
+            }
           </div>
           <div>
             <span style={{
               fontSize: 12, color: "var(--text)", fontWeight: 600, letterSpacing: "-0.01em",
             }}>
-              {stats.name.replace("NVIDIA GeForce ", "")}
+              {stats.name.replace(/NVIDIA\s*(GeForce\s*)?/i, "")}
             </span>
             <p style={{
               margin: "2px 0 0", fontSize: 8, color: "var(--text-muted)",
               letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 500,
             }}>
-              NVIDIA GPU
+              {isNvidia ? "NVIDIA GPU" : "GPU"}
             </p>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{
             width: 6, height: 6, borderRadius: "50%",
-            background: error ? "var(--error)" : "#76b900",
-            boxShadow: error ? "0 0 8px var(--error)" : "0 0 8px #76b900",
+            background: error ? "var(--error)" : brandColor,
+            boxShadow: error ? "0 0 8px var(--error)" : `0 0 8px ${brandColor}`,
             animation: error ? "pulse-dot 2s ease-in-out infinite" : "none",
           }} />
-          <span style={{ fontSize: 9, color: error ? "var(--error)" : "#76b900", fontWeight: 500 }}>
+          <span style={{ fontSize: 9, color: error ? "var(--error)" : brandColor, fontWeight: 500 }}>
             {error ? "Error" : "Active"}
           </span>
         </div>
@@ -281,7 +302,7 @@ export function GpuMonitor() {
 
       {/* GPU Util Ring + VRAM Bar */}
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16 }}>
-        <GpuRingGauge value={stats.gpuUtil} color="#76b900" />
+        <GpuRingGauge value={stats.gpuUtil} label="Core" color={brandColor} />
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
@@ -300,7 +321,7 @@ export function GpuMonitor() {
           </div>
           <GlowBar value={vramPct} color={vramColor} height={5} />
           <p style={{ margin: "5px 0 0", fontSize: 8, color: "var(--text-muted)", letterSpacing: "0.03em" }}>
-            {vramPct.toFixed(1)}% utilized
+            {vramPct.toFixed(1)}% VRAM used
           </p>
         </div>
       </div>

@@ -179,22 +179,44 @@ async function fetchAgents(): Promise<Record<string, unknown>[]> {
 }
 
 async function fetchMemoryStatus(): Promise<Record<string, unknown>> {
-  const r = await cachedCommand("openclaw ltm stats", { ttl: 60_000 });
-  const out = (r.stdout ?? "") + (r.stderr ?? "");
-  const match = out.match(/Total memories:\s*(\d+)/i);
-  const chunks = match ? parseInt(match[1], 10) : 0;
-  if (chunks > 0) return { chunks, totalChunks: chunks };
+  const [statsR, statusR] = await Promise.allSettled([
+    cachedCommand("openclaw ltm stats", { ttl: 60_000 }),
+    cachedCommand("openclaw memory status --json", { ttl: 60_000 }),
+  ]);
 
-  const jsonR = await cachedCommand("openclaw ltm list --json", { ttl: 120_000 });
-  if (jsonR.code === 0 && jsonR.stdout.trim()) {
-    try {
-      const parsed = JSON.parse(jsonR.stdout.trim()) as unknown;
-      const arr = Array.isArray(parsed) ? parsed : (parsed as Record<string, unknown>)?.memories;
-      const n = Array.isArray(arr) ? arr.length : 0;
-      return { chunks: n, totalChunks: n };
-    } catch { /* ignore */ }
+  let chunks = 0;
+  if (statsR.status === "fulfilled") {
+    const out = (statsR.value.stdout ?? "") + (statsR.value.stderr ?? "");
+    const match = out.match(/Total memories:\s*(\d+)/i);
+    chunks = match ? parseInt(match[1], 10) : 0;
   }
-  return { chunks: 0, totalChunks: 0 };
+
+  const result: Record<string, unknown> = { chunks, totalChunks: chunks };
+
+  if (statusR.status === "fulfilled" && statusR.value.code === 0 && statusR.value.stdout.trim()) {
+    try {
+      const parsed = JSON.parse(statusR.value.stdout.trim()) as Record<string, unknown>;
+      result.status = parsed;
+      if (!chunks && parsed.chunks) chunks = Number(parsed.chunks) || 0;
+      result.chunks = chunks;
+      result.totalChunks = chunks;
+    } catch { /* non-json output */ }
+  }
+
+  if (!chunks) {
+    const jsonR = await cachedCommand("openclaw ltm list --json", { ttl: 120_000 });
+    if (jsonR.code === 0 && jsonR.stdout.trim()) {
+      try {
+        const parsed = JSON.parse(jsonR.stdout.trim()) as unknown;
+        const arr = Array.isArray(parsed) ? parsed : (parsed as Record<string, unknown>)?.memories;
+        const n = Array.isArray(arr) ? arr.length : 0;
+        result.chunks = n;
+        result.totalChunks = n;
+      } catch { /* ignore */ }
+    }
+  }
+
+  return result;
 }
 
 async function fetchSystemStatus(): Promise<Record<string, unknown>> {

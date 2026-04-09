@@ -11,6 +11,7 @@ import {
   BarChart3,
   X,
 } from "lucide-react";
+import { hoverLift, hoverReset, pressDown, pressUp, innerPanel, sectionLabel, inputStyle as sharedInputStyle } from "@/styles/viewStyles";
 
 /* ── Types ── */
 
@@ -79,28 +80,17 @@ function saveHistory(history: SentMessage[]) {
 /* ── Shared styles ── */
 
 const cardStyle: React.CSSProperties = {
-  background: "var(--bg-elevated)",
-  border: "1px solid var(--border)",
-  borderRadius: 10,
+  ...innerPanel,
   padding: "12px 14px",
 };
 
 const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "8px 10px",
-  borderRadius: 8,
-  background: "var(--bg-input, var(--bg-hover))",
-  border: "1px solid var(--border)",
-  color: "var(--text)",
-  fontSize: 12,
-  outline: "none",
+  ...sharedInputStyle,
   boxSizing: "border-box" as const,
 };
 
 const labelStyle: React.CSSProperties = {
-  fontSize: 10,
-  color: "var(--text-muted)",
-  fontWeight: 500,
+  ...sectionLabel,
   display: "block",
   marginBottom: 4,
 };
@@ -590,6 +580,8 @@ export function MessagingView() {
         {/* Send button */}
         <button
           onClick={pollMode ? handleSendPoll : handleSendMessage}
+          onMouseDown={pressDown}
+          onMouseUp={pressUp}
           disabled={
             sending ||
             !channel ||
@@ -763,7 +755,7 @@ export function MessagingView() {
         {channel && (
           <div>
             <SectionTitle text="Active Channel" />
-            <div style={cardStyle}>
+            <div style={cardStyle} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
               <div
                 style={{
                   display: "flex",
@@ -949,11 +941,7 @@ function SectionTitle({
   return (
     <p
       style={{
-        fontSize: 10,
-        textTransform: "uppercase",
-        color: "var(--text-muted)",
-        letterSpacing: "0.06em",
-        fontWeight: 600,
+        ...sectionLabel,
         marginBottom: 8,
         marginTop: 0,
         ...style,

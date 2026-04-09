@@ -12,6 +12,7 @@ import {
   Archive,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { glowCard, hoverLift, hoverReset, pressDown, pressUp, badge, emptyState, btnPrimary, btnSecondary, MONO } from "@/styles/viewStyles";
 
 type CommandId = "doctor" | "deep" | "fix" | "full-fix" | "status" | "health" | "validate" | "memory-reindex" | "backup-create" | "backup-verify";
 
@@ -115,29 +116,30 @@ export function DoctorView() {
           )}
         </div>
         <div style={{ display: "flex", gap: 6 }}>
-          <button onClick={() => run("doctor")} disabled={running !== null} style={actionBtnStyle("#3B82F6")}>
+          <button onClick={() => run("doctor")} disabled={running !== null} onMouseDown={pressDown} onMouseUp={pressUp} style={actionBtnStyle("#3B82F6")}>
             {running === "doctor" ? <Loader2 style={iconSm} className="animate-spin" /> : <Heart style={iconSm} />}
             Run Doctor
           </button>
-          <button onClick={() => run("deep")} disabled={running !== null} style={actionBtnStyle("#3B82F6")}>
+          <button onClick={() => run("deep")} disabled={running !== null} onMouseDown={pressDown} onMouseUp={pressUp} style={actionBtnStyle("#3B82F6")}>
             {running === "deep" ? <Loader2 style={iconSm} className="animate-spin" /> : <Shield style={iconSm} />}
             Deep Scan
           </button>
-          <button onClick={() => run("fix")} disabled={running !== null} style={actionBtnStyle("#4ade80")}>
+          <button onClick={() => run("fix")} disabled={running !== null} onMouseDown={pressDown} onMouseUp={pressUp} style={actionBtnStyle("#4ade80")}>
             {running === "fix" ? <Loader2 style={iconSm} className="animate-spin" /> : <Wrench style={iconSm} />}
             Auto Fix
           </button>
-          <button onClick={() => run("full-fix")} disabled={running !== null} style={actionBtnStyle("#10b981")}>
+          <button onClick={() => run("full-fix")} disabled={running !== null} onMouseDown={pressDown} onMouseUp={pressUp} style={actionBtnStyle("#10b981")}>
             {running === "full-fix" ? <Loader2 style={iconSm} className="animate-spin" /> : <Wrench style={iconSm} />}
             Deep Fix (Auto)
           </button>
-          <button onClick={() => run("validate")} disabled={running !== null} style={ghostBtnStyle}>
+          <button onClick={() => run("validate")} disabled={running !== null} onMouseDown={pressDown} onMouseUp={pressUp} style={ghostBtnStyle}>
             {running === "validate" ? <Loader2 style={iconSm} className="animate-spin" /> : <CheckCircle style={iconSm} />}
             Validate Config
           </button>
           <button
             onClick={() => { clearOutput(); run("doctor"); }}
             disabled={running !== null}
+            onMouseDown={pressDown} onMouseUp={pressUp}
             style={{ ...ghostBtnStyle, padding: "4px 8px" }}
           >
             <RefreshCw style={{ ...iconSm }} className={running ? "animate-spin" : ""} />
@@ -197,13 +199,13 @@ export function DoctorView() {
               minHeight: 200,
               maxHeight: "calc(100vh - 320px)",
               overflowY: "auto",
-              fontFamily: "'SF Mono', 'Cascadia Code', 'Fira Code', monospace",
+              fontFamily: MONO,
               fontSize: 11,
               lineHeight: 1.7,
             }}
           >
             {outputs.length === 0 && !running ? (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "48px 16px", gap: 8 }}>
+              <div style={emptyState}>
                 <Stethoscope style={{ width: 28, height: 28, color: "rgba(255,255,255,0.12)" }} />
                 <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0 }}>No diagnostics yet</p>
                 <p style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", margin: 0 }}>Run a doctor check to see results</p>
@@ -271,22 +273,22 @@ const iconSm: React.CSSProperties = { width: 12, height: 12 };
 
 function actionBtnStyle(color: string): React.CSSProperties {
   return {
+    ...btnPrimary,
     display: "flex", alignItems: "center", gap: 4, padding: "4px 10px",
-    borderRadius: 6, border: "none",
-    background: `${color}26`, color, fontSize: 11, cursor: "pointer",
+    fontSize: 11, background: `${color}26`, color,
   };
 }
 
 const ghostBtnStyle: React.CSSProperties = {
+  ...btnSecondary,
   display: "flex", alignItems: "center", gap: 4, padding: "4px 10px",
-  borderRadius: 6, border: "1px solid var(--border)",
-  background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.6)",
-  fontSize: 11, cursor: "pointer",
+  fontSize: 11,
 };
 
 function SummaryCard({ icon: Icon, label, count, color }: { icon: React.ElementType; label: string; count: number; color: string }) {
   return (
-    <div style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", textAlign: "center" }}>
+    <div data-glow={color} onMouseEnter={hoverLift} onMouseLeave={hoverReset}
+      style={glowCard(color, { flex: 1, padding: "12px 14px", textAlign: "center" })}>
       <Icon style={{ width: 18, height: 18, color, margin: "0 auto 6px", display: "block" }} />
       <span style={{ fontSize: 20, fontWeight: 700, color, display: "block" }}>{count}</span>
       <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{label}</span>
@@ -296,7 +298,7 @@ function SummaryCard({ icon: Icon, label, count, color }: { icon: React.ElementT
 
 function Badge({ color, count, label }: { color: string; count: number; label: string }) {
   return (
-    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: `${color}15`, color, border: `1px solid ${color}30` }}>
+    <span style={badge(color)}>
       {count} {label}
     </span>
   );
@@ -304,12 +306,12 @@ function Badge({ color, count, label }: { color: string; count: number; label: s
 
 function QuickAction({ label, running, onClick, disabled, icon: Icon = Heart }: { label: string; running: boolean; onClick: () => void; disabled: boolean; icon?: React.ElementType }) {
   return (
-    <button onClick={onClick} disabled={disabled} style={{
-      display: "flex", alignItems: "center", gap: 4, padding: "3px 10px",
-      borderRadius: 6, border: "1px solid var(--border)",
-      background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)",
-      fontSize: 10, cursor: "pointer",
-    }}>
+    <button onClick={onClick} disabled={disabled}
+      onMouseDown={pressDown} onMouseUp={pressUp}
+      style={{
+        ...btnSecondary, display: "flex", alignItems: "center", gap: 4,
+        padding: "3px 10px", fontSize: 10,
+      }}>
       {running ? <Loader2 style={{ width: 10, height: 10 }} className="animate-spin" /> : <Icon style={{ width: 10, height: 10 }} />}
       {label}
     </button>

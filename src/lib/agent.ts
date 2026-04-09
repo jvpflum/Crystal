@@ -115,7 +115,7 @@ class AgentService {
       const response = await this.generateImage(imagePrompt);
       const cleaned = this.extractAndEmitActions(response);
       this.emitStep({ action: { type: "response", content: cleaned }, timestamp: new Date() });
-      useTokenUsageStore.getState().recordTokens(2800);
+      useTokenUsageStore.getState().recordTokens(2800, "openai");
       yield cleaned;
       return;
     }

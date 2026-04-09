@@ -12,6 +12,10 @@ const TRANSITIONS: Record<VoiceState, Partial<Record<VoiceEvent, VoiceState>>> =
     AUDIO_COMPLETE: "transcribing",
     CANCEL: "idle",
   },
+  processing: {
+    TRANSCRIPT_READY: "thinking",
+    CANCEL: "idle",
+  },
   transcribing: {
     TRANSCRIPT_READY: "thinking",
     TRANSCRIPTION_FAILED: "error",

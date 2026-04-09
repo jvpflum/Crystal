@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ListChecks, RefreshCw, Loader2, AlertTriangle, XCircle,
   CheckCircle2, Clock, Play, Ban, Wrench, Filter,
 } from "lucide-react";
+import { EASE, glowCard, hoverLift, hoverReset, pressDown, pressUp, innerPanel, badge, emptyState, MONO } from "@/styles/viewStyles";
 
 interface BackgroundTask {
   id: string;
@@ -79,6 +80,7 @@ export function TasksView() {
         setError(null);
       } else {
         setTasks([]);
+        setError(result.code !== 0 ? (result.stderr || "Command failed") : null);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load tasks");
@@ -158,12 +160,14 @@ export function TasksView() {
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={runAudit} disabled={busy === "audit"}
-              style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-elevated)", color: "var(--text-muted)", fontSize: 10, cursor: "pointer" }}>
+              onMouseDown={pressDown} onMouseUp={pressUp}
+              style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-elevated)", color: "var(--text-muted)", fontSize: 10, cursor: "pointer", transition: `all 0.2s ${EASE}` }}>
               {busy === "audit" ? <Loader2 style={{ width: 11, height: 11, animation: "spin 1s linear infinite" }} /> : <AlertTriangle style={{ width: 11, height: 11 }} />}
               Audit
             </button>
             <button onClick={runMaintenance} disabled={busy === "maintenance"}
-              style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-elevated)", color: "var(--text-muted)", fontSize: 10, cursor: "pointer" }}>
+              onMouseDown={pressDown} onMouseUp={pressUp}
+              style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-elevated)", color: "var(--text-muted)", fontSize: 10, cursor: "pointer", transition: `all 0.2s ${EASE}` }}>
               {busy === "maintenance" ? <Loader2 style={{ width: 11, height: 11, animation: "spin 1s linear infinite" }} /> : <Wrench style={{ width: 11, height: 11 }} />}
               Maintenance
             </button>
@@ -214,14 +218,14 @@ export function TasksView() {
         )}
 
         {(auditResult || maintenanceResult) && (
-          <div style={{ padding: "10px 14px", borderRadius: 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", marginBottom: 12 }}>
+          <div style={{ ...innerPanel, padding: "10px 14px", marginBottom: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
               <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase" }}>
                 {auditResult ? "Audit Result" : "Maintenance Result"}
               </span>
               <button onClick={() => { setAuditResult(null); setMaintenanceResult(null); }} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 12 }}>×</button>
             </div>
-            <pre style={{ margin: 0, fontSize: 10, fontFamily: "monospace", color: "var(--text-secondary)", whiteSpace: "pre-wrap", maxHeight: 120, overflow: "auto" }}>
+            <pre style={{ margin: 0, fontSize: 10, fontFamily: MONO, color: "var(--text-secondary)", whiteSpace: "pre-wrap", maxHeight: 120, overflow: "auto" }}>
               {auditResult || maintenanceResult}
             </pre>
           </div>
@@ -232,8 +236,8 @@ export function TasksView() {
             <Loader2 style={{ width: 20, height: 20, color: "var(--text-muted)", animation: "spin 1s linear infinite" }} />
           </div>
         ) : tasks.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "40px 20px" }}>
-            <ListChecks style={{ width: 32, height: 32, color: "var(--text-muted)", margin: "0 auto 10px" }} />
+          <div style={emptyState}>
+            <ListChecks style={{ width: 32, height: 32, color: "var(--text-muted)" }} />
             <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>No background tasks found</p>
             <p style={{ fontSize: 10, color: "var(--text-muted)", margin: "4px 0 0" }}>
               Tasks are created by cron jobs, sub-agents, and ACP sessions
@@ -246,11 +250,14 @@ export function TasksView() {
               const color = STATUS_COLORS[task.status] ?? "var(--text-muted)";
               const isActive = task.status === "running" || task.status === "queued";
               return (
-                <div key={`${task.id}-${task.runId ?? ""}`} style={{
-                  padding: "10px 14px", borderRadius: 10,
-                  background: isActive ? `color-mix(in srgb, ${color} 4%, var(--bg-elevated))` : "var(--bg-elevated)",
-                  border: `1px solid ${isActive ? `color-mix(in srgb, ${color} 20%, var(--border))` : "var(--border)"}`,
-                }}>
+                <div key={`${task.id}-${task.runId ?? ""}`}
+                  data-glow={color}
+                  onMouseEnter={hoverLift}
+                  onMouseLeave={hoverReset}
+                  style={glowCard(color, {
+                  padding: "10px 14px",
+                  ...(isActive ? { background: `color-mix(in srgb, ${color} 4%, var(--bg-elevated))`, border: `1px solid color-mix(in srgb, ${color} 20%, var(--border))` } : {}),
+                })}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{
                       width: 28, height: 28, borderRadius: 8, flexShrink: 0,
@@ -263,7 +270,7 @@ export function TasksView() {
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
                         <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{task.label || task.id}</span>
                         <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, background: "var(--bg-hover)", color: "var(--text-muted)", border: "1px solid var(--border)" }}>{task.kind}</span>
-                        <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, background: `color-mix(in srgb, ${color} 12%, transparent)`, color, fontWeight: 600 }}>{task.status}</span>
+                        <span style={badge(color)}>{task.status}</span>
                       </div>
                       <div style={{ display: "flex", gap: 12, fontSize: 10, color: "var(--text-muted)" }}>
                         {task.agentId && <span>Agent: {task.agentId}</span>}
@@ -276,7 +283,8 @@ export function TasksView() {
                     </div>
                     {isActive && (
                       <button onClick={() => cancelTask(task.id)} disabled={cancellingId === task.id}
-                        style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(248,113,113,0.2)", background: "rgba(248,113,113,0.08)", color: "#f87171", fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                        onMouseDown={pressDown} onMouseUp={pressUp}
+                        style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(248,113,113,0.2)", background: "rgba(248,113,113,0.08)", color: "#f87171", fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, flexShrink: 0, transition: `all 0.2s ${EASE}` }}>
                         {cancellingId === task.id ? <Loader2 style={{ width: 10, height: 10, animation: "spin 1s linear infinite" }} /> : <Ban style={{ width: 10, height: 10 }} />}
                         Cancel
                       </button>

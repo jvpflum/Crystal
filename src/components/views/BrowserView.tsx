@@ -13,6 +13,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
 import { useAppStore } from "@/stores/appStore";
+import { EASE, hoverLift, hoverReset, pressDown, pressUp, innerPanel, sectionLabel, inputStyle, btnPrimary, btnSecondary, MONO } from "@/styles/viewStyles";
 
 interface BrowserStatus {
   running?: boolean;
@@ -46,8 +47,8 @@ export function BrowserView() {
     if (tokenRef.current) return tokenRef.current;
     try {
       const home = await homeDir();
-      const sep = home.endsWith("\\") || home.endsWith("/") ? "" : "\\";
-      const raw = await invoke<string>("read_file", { path: `${home}${sep}.openclaw\\openclaw.json` });
+      const sep = home.endsWith("\\") || home.endsWith("/") ? "" : "/";
+      const raw = await invoke<string>("read_file", { path: `${home}${sep}.openclaw/openclaw.json` });
       const cfg = JSON.parse(raw);
       const token = cfg?.gateway?.auth?.token;
       if (token && typeof token === "string") {
@@ -220,7 +221,7 @@ export function BrowserView() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       {/* Header */}
-      <div style={{ padding: "14px 20px 10px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ padding: "14px 20px 10px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", transition: `all 0.3s ${EASE}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <h2 style={{ color: "white", fontSize: 15, fontWeight: 600, margin: 0 }}>Browser</h2>
           <span style={{
@@ -238,6 +239,8 @@ export function BrowserView() {
             <button
               onClick={stopBrowser}
               disabled={actionRunning === "stop"}
+              onMouseDown={pressDown}
+              onMouseUp={pressUp}
               style={{
                 display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6,
                 border: "1px solid rgba(248,113,113,0.2)", background: "rgba(248,113,113,0.08)",
@@ -251,6 +254,8 @@ export function BrowserView() {
             <button
               onClick={startBrowser}
               disabled={actionRunning === "start"}
+              onMouseDown={pressDown}
+              onMouseUp={pressUp}
               style={{
                 display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6,
                 border: "none", background: "rgba(59,130,246,0.15)", color: "#60a5fa",
@@ -264,6 +269,8 @@ export function BrowserView() {
           <button
             onClick={takeScreenshot}
             disabled={!isRunning || actionRunning === "screenshot"}
+            onMouseDown={pressDown}
+            onMouseUp={pressUp}
             style={{
               display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6,
               border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)",
@@ -307,13 +314,10 @@ export function BrowserView() {
             {/* Status card */}
             {status && (
               <div style={{ marginBottom: 16 }}>
-                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 500, display: "block", marginBottom: 6, textTransform: "uppercase", letterSpacing: 1 }}>
+                <span style={{ ...sectionLabel, display: "block", marginBottom: 6 }}>
                   Status Details
                 </span>
-                <div style={{
-                  background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
-                  borderRadius: 10, padding: "12px 14px",
-                }}>
+                <div style={{ ...innerPanel, padding: "12px 14px" }} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
                     <StatusField label="State" value={isRunning ? "Running" : "Stopped"} color={isRunning ? "#4ade80" : "#f87171"} />
                     {status.pid && <StatusField label="PID" value={String(status.pid)} />}
@@ -331,7 +335,7 @@ export function BrowserView() {
             {/* URL Bar */}
             {isRunning && (
               <div style={{ marginBottom: 16 }}>
-                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 500, display: "block", marginBottom: 6, textTransform: "uppercase", letterSpacing: 1 }}>
+                <span style={{ ...sectionLabel, display: "block", marginBottom: 6 }}>
                   Navigate
                 </span>
                 <div style={{ display: "flex", gap: 6 }}>
@@ -343,20 +347,21 @@ export function BrowserView() {
                       onKeyDown={e => { if (e.key === "Enter") navigateTo(); }}
                       placeholder="Enter URL (e.g. google.com)"
                       style={{
-                        width: "100%", padding: "8px 10px 8px 30px", borderRadius: 8,
-                        background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
-                        color: "white", fontSize: 12, outline: "none", boxSizing: "border-box",
+                        ...inputStyle, padding: "8px 10px 8px 30px", boxSizing: "border-box",
                       }}
                     />
                   </div>
                   <button
                     onClick={navigateTo}
                     disabled={!navigateUrl.trim() || !!actionRunning}
+                    onMouseDown={pressDown}
+                    onMouseUp={pressUp}
                     style={{
-                      padding: "6px 12px", borderRadius: 8, border: "none",
+                      ...btnPrimary,
+                      padding: "6px 12px",
                       background: navigateUrl.trim() ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.04)",
                       color: navigateUrl.trim() ? "#60a5fa" : "rgba(255,255,255,0.3)",
-                      fontSize: 11, fontWeight: 500, cursor: "pointer", whiteSpace: "nowrap",
+                      whiteSpace: "nowrap",
                     }}
                   >
                     Go
@@ -364,11 +369,13 @@ export function BrowserView() {
                   <button
                     onClick={openTab}
                     disabled={!navigateUrl.trim() || !!actionRunning}
+                    onMouseDown={pressDown}
+                    onMouseUp={pressUp}
                     style={{
-                      padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)",
-                      background: "rgba(255,255,255,0.04)",
+                      ...btnSecondary,
+                      padding: "6px 12px",
                       color: navigateUrl.trim() ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.3)",
-                      fontSize: 11, fontWeight: 500, cursor: "pointer", whiteSpace: "nowrap",
+                      whiteSpace: "nowrap",
                     }}
                   >
                     New Tab
@@ -379,7 +386,7 @@ export function BrowserView() {
 
             {/* Tabs */}
             <div style={{ marginBottom: 16 }}>
-              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 500, display: "block", marginBottom: 6, textTransform: "uppercase", letterSpacing: 1 }}>
+              <span style={{ ...sectionLabel, display: "block", marginBottom: 6 }}>
                 Tabs {tabs.length > 0 && `(${tabs.length})`}
               </span>
 
@@ -391,16 +398,14 @@ export function BrowserView() {
                     onChange={(e) => setTabFilter(e.target.value)}
                     placeholder="Filter tabs..."
                     style={{
-                      width: "100%", padding: "7px 10px 7px 30px", borderRadius: 8,
-                      background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
-                      color: "white", fontSize: 12, outline: "none", boxSizing: "border-box",
+                      ...inputStyle, padding: "7px 10px 7px 30px", boxSizing: "border-box",
                     }}
                   />
                 </div>
               )}
 
               {filteredTabs.length === 0 ? (
-                <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "24px 16px", textAlign: "center" }}>
+                <div style={{ ...innerPanel, padding: "24px 16px", textAlign: "center" }}>
                   <Globe style={{ width: 28, height: 28, color: "rgba(255,255,255,0.12)", margin: "0 auto 8px", display: "block" }} />
                   <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0 }}>
                     {!isRunning ? "Browser is not running" : tabs.length === 0 ? "No open tabs" : "No tabs match your filter"}
@@ -410,7 +415,7 @@ export function BrowserView() {
                   </p>
                 </div>
               ) : (
-                <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden" }}>
+                <div style={{ ...innerPanel, overflow: "hidden" }}>
                   {filteredTabs.map((tab, i) => (
                     <div
                       key={tab.id ?? i}
@@ -425,7 +430,7 @@ export function BrowserView() {
                           {tab.title || "Untitled"}
                         </div>
                         {tab.url && (
-                          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: MONO, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                             {tab.url}
                           </div>
                         )}
@@ -464,18 +469,15 @@ export function BrowserView() {
         {output && (
           <div style={{ marginBottom: 16 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 500, textTransform: "uppercase", letterSpacing: 1 }}>
+              <span style={sectionLabel}>
                 Output
               </span>
               <button onClick={() => setOutput(null)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", fontSize: 11, cursor: "pointer" }}>
                 Dismiss
               </button>
             </div>
-            <div style={{
-              background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: 10, padding: "10px 14px",
-            }}>
-              <pre style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,0.6)", fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            <div style={{ ...innerPanel, padding: "10px 14px" }}>
+              <pre style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,0.6)", fontFamily: MONO, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                 {output}
               </pre>
             </div>

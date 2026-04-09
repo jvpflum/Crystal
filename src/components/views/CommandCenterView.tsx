@@ -13,6 +13,7 @@ import {
   Sun, Mail, HardDrive, Activity, XCircle, X,
   History, Send, Zap, Stethoscope, ShieldAlert, Database,
 } from "lucide-react";
+import { EASE, SPRING, glowCard, hoverLift, hoverReset, pressDown, pressUp, innerPanel, sectionLabel, mutedCaption, inputStyle, btnPrimary, btnSecondary, headerRow, badge, emptyState, tab as tabStyle, tabBar, MONO } from "@/styles/viewStyles";
 
 /* ── Shared Types ── */
 
@@ -204,22 +205,17 @@ export function CommandCenterView() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       {/* Tab Bar */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: 2, padding: "10px 20px 0",
-        borderBottom: "1px solid var(--border)", flexShrink: 0,
-      }}>
+      <div style={{ ...tabBar, padding: "10px 20px 0", borderBottom: "1px solid var(--border)", flexShrink: 0, borderRadius: 0, border: "none", background: "transparent" }}>
         {TABS.map(t => {
           const Icon = t.icon;
           const active = tab === t.id;
           return (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
-              display: "flex", alignItems: "center", gap: 6, padding: "8px 16px",
-              borderRadius: "8px 8px 0 0", border: "none", cursor: "pointer",
-              background: active ? "var(--bg-elevated)" : "transparent",
-              color: active ? "var(--accent)" : "var(--text-muted)",
-              fontSize: 12, fontWeight: active ? 600 : 500,
+              ...tabStyle(active),
+              display: "flex", alignItems: "center", gap: 6,
+              borderRadius: "8px 8px 0 0",
               borderBottom: active ? "2px solid var(--accent)" : "2px solid transparent",
-              transition: "all 0.15s",
+              color: active ? "var(--accent)" : "var(--text-muted)",
             }}>
               <Icon style={{ width: 14, height: 14 }} />
               {t.label}
@@ -250,6 +246,7 @@ export function CommandCenterView() {
    ══════════════════════════════════════════════════════════════ */
 
 function CalendarTab() {
+  const [selectedDay, setSelectedDay] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; });
   const [weekStart, setWeekStart] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - d.getDay()); d.setHours(0, 0, 0, 0); return d;
   });
@@ -259,11 +256,12 @@ function CalendarTab() {
   });
   const [loading, setLoading] = useState(() => !useDataStore.getState().cronJobs?.data);
   const [error, setError] = useState<string | null>(null);
-  const [showAddModal, setShowAddModal] = useState<Date | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
   const [newSchedule, setNewSchedule] = useState("");
   const [newMessage, setNewMessage] = useState("");
   const [newName, setNewName] = useState("");
   const [adding, setAdding] = useState(false);
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const getCronJobs = useDataStore(s => s.getCronJobs);
 
   const loadJobs = useCallback(async (force = false) => {
@@ -287,11 +285,14 @@ function CalendarTab() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const HOURS = Array.from({ length: 24 }, (_, i) => i); // 0-23 (full day)
+  const nowHour = new Date().getHours();
 
-  const prevWeek = () => { const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekStart(d); };
-  const nextWeek = () => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d); };
-  const goToday = () => { const d = new Date(); d.setDate(d.getDate() - d.getDay()); d.setHours(0, 0, 0, 0); setWeekStart(d); };
+  const prevWeek = () => { const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekStart(d); setSelectedDay(d); };
+  const nextWeek = () => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d); setSelectedDay(d); };
+  const goToday = () => {
+    const d = new Date(); d.setHours(0, 0, 0, 0); setSelectedDay(d);
+    const ws = new Date(d); ws.setDate(ws.getDate() - ws.getDay()); setWeekStart(ws);
+  };
 
   const jobMatchesDay = (job: CronJob, day: Date): boolean => {
     if (!job.enabled) return false;
@@ -344,147 +345,308 @@ function CalendarTab() {
         command: `openclaw cron add --cron "${escapedSched}" --message "${escaped}" --agent main${namePart}`,
         cwd: null,
       });
-      setNewSchedule(""); setNewMessage(""); setNewName(""); setShowAddModal(null);
+      setNewSchedule(""); setNewMessage(""); setNewName(""); setShowAddModal(false);
       invalidateCronJobsCliCache();
       await loadJobs(true);
     } catch { /* ignore */ }
     setAdding(false);
   };
 
+  const selectedDayJobs = getJobsForDay(selectedDay);
+  const isToday = selectedDay.getTime() === today.getTime();
+
+  const hourGroups = new Map<number, CronJob[]>();
+  for (const job of selectedDayJobs) {
+    for (const h of getJobHours(job)) {
+      if (!hourGroups.has(h)) hourGroups.set(h, []);
+      const group = hourGroups.get(h)!;
+      if (!group.some(existing => existing.id === job.id)) group.push(job);
+    }
+  }
+
+  const hourCounts = Array.from({ length: 24 }, (_, h) => hourGroups.get(h)?.length ?? 0);
+  const maxHourCount = Math.max(...hourCounts, 1);
+
+  const JOB_COLORS: Record<string, string> = {
+    heartbeat: "#a855f7", security: "#f87171", briefing: "#fbbf24", cleanup: "#3b82f6",
+    health: "#06b6d4", email: "#a855f7", digest: "#ec4899", backup: "#10b981",
+  };
+  const jobColor = (j: CronJob) => {
+    const n = (j.name || j.message).toLowerCase();
+    for (const [key, color] of Object.entries(JOB_COLORS)) { if (n.includes(key)) return color; }
+    return "var(--accent)";
+  };
+
   const weekLabel = `${days[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} — ${days[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+  const fmtHour = (h: number) => `${h > 12 ? h - 12 : h || 12}:00 ${h >= 12 ? "PM" : "AM"}`;
+
+  const activeHours = Array.from(hourGroups.keys()).sort((a, b) => a - b);
+  const enabledCount = jobs.filter(j => j.enabled).length;
+  const disabledCount = jobs.length - enabledCount;
+  const everyJobs = jobs.filter(j => j.scheduleKind === "every").length;
+  const dailyJobs = jobs.filter(j => j.scheduleKind === "cron" && j.schedule.match(/^\d+ \d+ \* \* \*/)).length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-      {/* Calendar Header */}
+      {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button onClick={prevWeek} style={navBtnStyle}><ChevronLeft style={{ width: 14, height: 14 }} /></button>
+          <button aria-label="Previous week" onClick={prevWeek} style={navBtnStyle}><ChevronLeft style={{ width: 14, height: 14 }} /></button>
           <button onClick={goToday} style={{ ...navBtnStyle, padding: "4px 12px", fontSize: 11 }}>Today</button>
-          <button onClick={nextWeek} style={navBtnStyle}><ChevronRight style={{ width: 14, height: 14 }} /></button>
+          <button aria-label="Next week" onClick={nextWeek} style={navBtnStyle}><ChevronRight style={{ width: 14, height: 14 }} /></button>
           <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", marginLeft: 8 }}>{weekLabel}</span>
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{jobs.length} scheduled jobs</span>
-          <button onClick={() => loadJobs()} disabled={loading} style={navBtnStyle}>
+          <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+            {enabledCount} active{disabledCount > 0 ? ` · ${disabledCount} paused` : ""}
+          </span>
+          <button aria-label="Refresh" onClick={() => loadJobs(true)} disabled={loading} style={navBtnStyle}>
             <RefreshCw style={{ width: 12, height: 12, ...(loading ? { animation: "spin 1s linear infinite" } : {}) }} />
+          </button>
+          <button onClick={() => { setNewSchedule("0 8 * * *"); setShowAddModal(true); }}
+            style={{ ...navBtnStyle, background: "var(--accent-bg)", color: "var(--accent)", padding: "4px 10px", gap: 4, display: "flex", alignItems: "center" }}>
+            <Plus style={{ width: 12, height: 12 }} /> Add Job
           </button>
         </div>
       </div>
 
-      {/* Week Grid */}
       <div style={{ flex: 1, overflow: "auto", padding: "0 20px 20px" }}>
         {error && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)", marginBottom: 12 }}>
             <AlertTriangle style={{ width: 14, height: 14, color: "#f87171" }} />
             <span style={{ fontSize: 11, color: "#f87171", flex: 1 }}>{error}</span>
-            <button onClick={() => setError(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: 14, cursor: "pointer" }}>×</button>
+            <button aria-label="Close" onClick={() => setError(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: 14, cursor: "pointer" }}>×</button>
           </div>
         )}
-        <div style={{ display: "grid", gridTemplateColumns: "50px repeat(7, 1fr)", borderRadius: 12, overflow: "hidden", border: "1px solid var(--border)", background: "var(--bg-elevated)", minHeight: HOURS.length * 52 }}>
-          {/* Day Headers */}
-          <div style={cellHeaderStyle} />
+
+        {/* Day Picker Row */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, marginBottom: 16 }}>
           {days.map((day, i) => {
-            const isToday = day.getTime() === today.getTime();
+            const isSel = day.getTime() === selectedDay.getTime();
+            const isTd = day.getTime() === today.getTime();
+            const count = getJobsForDay(day).length;
             return (
-              <div key={i} style={{
-                ...cellHeaderStyle,
-                borderLeft: "1px solid var(--border)",
-                background: isToday ? "var(--accent-bg)" : undefined,
-              }}>
-                <span style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>{DAY_NAMES[i]}</span>
+              <button key={i} onClick={() => setSelectedDay(day)}
+                style={{
+                  padding: "10px 6px", borderRadius: 10, border: isSel ? "1px solid var(--accent)" : "1px solid var(--border)",
+                  background: isSel ? "var(--accent-bg)" : "var(--bg-elevated)", cursor: "pointer",
+                  display: "flex", flexDirection: "column" as const, alignItems: "center", gap: 4,
+                  transition: `all 0.18s ${EASE}`, position: "relative" as const,
+                }}
+                onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = "var(--bg-elevated)"; e.currentTarget.style.transform = "none"; }}>
+                <span style={{ fontSize: 9, color: isSel ? "var(--accent)" : "var(--text-muted)", textTransform: "uppercase" as const, letterSpacing: 0.5, fontWeight: 600 }}>{DAY_NAMES[i]}</span>
                 <span style={{
-                  fontSize: 14, fontWeight: 600,
-                  color: isToday ? "var(--accent)" : "var(--text)",
-                  ...(isToday ? { width: 26, height: 26, borderRadius: "50%", background: "var(--accent)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" } : {}),
+                  fontSize: 18, fontWeight: 700, lineHeight: 1,
+                  color: isSel ? "var(--accent)" : isTd ? "var(--text)" : "var(--text-secondary)",
+                  ...(isTd && !isSel ? { width: 28, height: 28, borderRadius: "50%", border: "2px solid var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 } : {}),
                 }}>
                   {day.getDate()}
                 </span>
-              </div>
+                {count > 0 && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 600, color: isSel ? "var(--accent)" : "var(--text-muted)",
+                    fontFamily: MONO,
+                  }}>
+                    {count} job{count !== 1 ? "s" : ""}
+                  </span>
+                )}
+                {count === 0 && <span style={{ fontSize: 9, color: "var(--text-muted)", opacity: 0.4 }}>—</span>}
+              </button>
             );
           })}
+        </div>
 
-          {/* Hour Rows */}
-          {HOURS.map(hour => (
-            <>
-              <div key={`h-${hour}`} style={{ padding: "4px 6px", fontSize: 9, color: "var(--text-muted)", textAlign: "right", borderTop: "1px solid var(--border)", height: 52, display: "flex", alignItems: "flex-start", justifyContent: "flex-end" }}>
-                {hour > 12 ? hour - 12 : hour || 12}{hour >= 12 ? "p" : "a"}
-              </div>
-              {days.map((day, di) => {
-                const dayJobs = getJobsForDay(day).filter(j => getJobHours(j).includes(hour));
-                const isToday = day.getTime() === today.getTime();
-                return (
-                  <div key={`c-${hour}-${di}`} onClick={() => {
-                    const d = new Date(day);
-                    d.setHours(hour, 0, 0, 0);
-                    setNewSchedule(`0 ${hour} * * ${day.getDay()}`);
-                    setShowAddModal(d);
-                  }} style={{
-                    borderTop: "1px solid var(--border)", borderLeft: "1px solid var(--border)",
-                    height: 52, padding: 2, cursor: "pointer",
-                    background: isToday ? "rgba(59,130,246,0.03)" : "transparent",
-                    transition: "background 0.1s",
-                  }}
-                    onMouseEnter={e => { e.currentTarget.style.background = "var(--bg-hover)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = isToday ? "rgba(59,130,246,0.03)" : "transparent"; }}
-                  >
-                    {dayJobs.map(j => {
-                      const isHeartbeat = j.name?.toLowerCase().includes("heartbeat") ?? false;
+        {/* 24-Hour Activity Heatmap */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={sectionLabel}>24-Hour Activity</span>
+            <span style={{ fontSize: 9, color: "var(--text-muted)" }}>
+              {selectedDayJobs.length} job{selectedDayJobs.length !== 1 ? "s" : ""} on {selectedDay.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+            </span>
+          </div>
+          <div style={{
+            display: "grid", gridTemplateColumns: "repeat(24, 1fr)", gap: 2, borderRadius: 8,
+            overflow: "hidden", background: "var(--bg-elevated)", border: "1px solid var(--border)", padding: 3,
+          }}>
+            {hourCounts.map((count, h) => {
+              const intensity = maxHourCount > 0 ? count / maxHourCount : 0;
+              const isNow = isToday && h === nowHour;
+              return (
+                <div key={h} title={`${fmtHour(h)}: ${count} job${count !== 1 ? "s" : ""}`}
+                  style={{
+                    height: 32, borderRadius: 4, position: "relative" as const, cursor: "default",
+                    background: count === 0
+                      ? "var(--bg-surface)"
+                      : `rgba(59, 130, 246, ${0.12 + intensity * 0.55})`,
+                    border: isNow ? "2px solid var(--accent)" : "1px solid transparent",
+                    boxShadow: isNow ? "0 0 8px rgba(59,130,246,0.4)" : count > 0 ? `0 0 ${intensity * 6}px rgba(59,130,246,${intensity * 0.3})` : "none",
+                    transition: `all 0.2s ${EASE}`,
+                    display: "flex", flexDirection: "column" as const, alignItems: "center", justifyContent: "center",
+                  }}>
+                  <span style={{ fontSize: 7, color: count > 0 ? "#fff" : "var(--text-muted)", fontWeight: 600, opacity: count > 0 ? 1 : 0.5 }}>
+                    {h > 12 ? h - 12 : h || 12}{h >= 12 ? "p" : "a"}
+                  </span>
+                  {count > 0 && (
+                    <span style={{ fontSize: 8, fontWeight: 700, color: "#fff", lineHeight: 1 }}>{count}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Stats bar */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+          {[
+            { label: "Total Jobs", value: jobs.length, color: "var(--accent)" },
+            { label: "Fires Today", value: selectedDayJobs.length, color: "#4ade80" },
+            { label: "Active Hours", value: activeHours.length, color: "#fbbf24" },
+            { label: "Recurring", value: everyJobs, color: "#a855f7" },
+            { label: "Daily", value: dailyJobs, color: "#06b6d4" },
+          ].map(s => (
+            <div key={s.label} style={{
+              flex: "1 1 80px", padding: "8px 12px", borderRadius: 8,
+              background: "var(--bg-elevated)", border: "1px solid var(--border)",
+              display: "flex", alignItems: "center", gap: 8, minWidth: 80,
+            }}>
+              <span style={{ fontSize: 18, fontWeight: 700, color: s.color, fontFamily: MONO }}>{s.value}</span>
+              <span style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase" as const, letterSpacing: 0.3 }}>{s.label}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Agenda: jobs grouped by hour */}
+        <div style={{ ...sectionLabel, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+          <span>Agenda</span>
+          {isToday && <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "var(--accent-bg)", color: "var(--accent)", fontWeight: 600 }}>TODAY</span>}
+        </div>
+
+        {activeHours.length === 0 ? (
+          <div style={{ ...innerPanel, textAlign: "center" as const, padding: "30px 20px", borderRadius: 12 }}>
+            <CalendarIcon style={{ width: 28, height: 28, color: "var(--text-muted)", opacity: 0.3, margin: "0 auto 8px" }} />
+            <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>No jobs scheduled for this day</p>
+            <p style={{ fontSize: 10, color: "var(--text-muted)", margin: "4px 0 0", opacity: 0.6 }}>Select a different day or add a new job</p>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {activeHours.map(hour => {
+              const jobsAtHour = hourGroups.get(hour) || [];
+              const isPast = isToday && hour < nowHour;
+              const isCurrent = isToday && hour === nowHour;
+              return (
+                <div key={hour} style={{ display: "flex", gap: 0, position: "relative" as const }}>
+                  {/* Time gutter */}
+                  <div style={{
+                    width: 64, flexShrink: 0, padding: "10px 8px 10px 0", textAlign: "right" as const,
+                    display: "flex", flexDirection: "column" as const, alignItems: "flex-end", gap: 2,
+                  }}>
+                    <span style={{
+                      fontSize: 12, fontWeight: 600, fontFamily: MONO,
+                      color: isCurrent ? "var(--accent)" : isPast ? "var(--text-muted)" : "var(--text-secondary)",
+                    }}>
+                      {fmtHour(hour)}
+                    </span>
+                    {isCurrent && (
+                      <span style={{ fontSize: 8, padding: "1px 5px", borderRadius: 4, background: "var(--accent)", color: "#fff", fontWeight: 600 }}>NOW</span>
+                    )}
+                  </div>
+
+                  {/* Timeline connector */}
+                  <div style={{
+                    width: 20, flexShrink: 0, display: "flex", flexDirection: "column" as const, alignItems: "center",
+                    position: "relative" as const,
+                  }}>
+                    <div style={{
+                      width: 10, height: 10, borderRadius: "50%", flexShrink: 0, marginTop: 12,
+                      background: isCurrent ? "var(--accent)" : isPast ? "var(--text-muted)" : "var(--border)",
+                      boxShadow: isCurrent ? "0 0 8px var(--accent)" : "none",
+                      border: `2px solid ${isCurrent ? "var(--accent)" : "var(--bg)"}`,
+                      zIndex: 1,
+                    }} />
+                    <div style={{
+                      width: 2, flex: 1, background: "var(--border)",
+                      opacity: isPast ? 0.3 : 0.6,
+                    }} />
+                  </div>
+
+                  {/* Job cards */}
+                  <div style={{ flex: 1, padding: "6px 0 6px 8px", display: "flex", flexDirection: "column" as const, gap: 4 }}>
+                    {jobsAtHour.map(job => {
+                      const color = jobColor(job);
+                      const isHb = job.name?.toLowerCase().includes("heartbeat") ?? false;
+                      const isExpanded = expandedJobId === job.id;
                       return (
-                        <div key={j.id} style={{
-                          fontSize: 9, padding: "2px 4px", borderRadius: 4,
-                          background: isHeartbeat ? "rgba(168,85,247,0.12)" : "var(--accent-bg)",
-                          color: isHeartbeat ? "#a855f7" : "var(--accent)",
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                          marginBottom: 1,
-                          border: isHeartbeat ? "1px solid rgba(168,85,247,0.25)" : "1px solid rgba(59,130,246,0.2)",
-                          fontWeight: 500,
-                          display: "flex", alignItems: "center", gap: 3,
-                        }} title={`${j.name || j.message}${j.deliveryTarget ? ` → ${deliveryLabel(j.deliveryTarget)}` : ""}`}>
-                          {isHeartbeat && <span style={{ fontSize: 7 }}>💜</span>}
-                          {j.name || j.message.slice(0, 30)}
-                          {j.deliveryTarget && <span style={{ fontSize: 7, opacity: 0.7 }}>→{deliveryLabel(j.deliveryTarget).split(" ")[0]}</span>}
+                        <div key={job.id}
+                          onClick={() => setExpandedJobId(isExpanded ? null : job.id)}
+                          style={{
+                            padding: "8px 12px", borderRadius: 8, cursor: "pointer",
+                            background: `color-mix(in srgb, ${color} 8%, transparent)`,
+                            border: `1px solid color-mix(in srgb, ${color} 20%, transparent)`,
+                            opacity: isPast ? 0.6 : 1,
+                            transition: `all 0.18s ${EASE}`,
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.transform = "translateX(4px)"; e.currentTarget.style.borderColor = `color-mix(in srgb, ${color} 40%, transparent)`; }}
+                          onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = `color-mix(in srgb, ${color} 20%, transparent)`; }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <div style={{
+                              width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                              background: color,
+                              boxShadow: `0 0 6px ${color}`,
+                            }} />
+                            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                              {isHb ? "💜 " : ""}{job.name || "Unnamed Job"}
+                            </span>
+                            <span style={{ ...badge(color), fontFamily: MONO, fontSize: 9 }}>{job.schedule}</span>
+                            <span style={{ fontSize: 9, color: "var(--text-muted)" }}>{cronToReadable(job.schedule)}</span>
+                            {isExpanded
+                              ? <ChevronUp style={{ width: 12, height: 12, color: "var(--text-muted)", flexShrink: 0 }} />
+                              : <ChevronDown style={{ width: 12, height: 12, color: "var(--text-muted)", flexShrink: 0 }} />
+                            }
+                          </div>
+                          {isExpanded && (
+                            <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid color-mix(in srgb, ${color} 15%, transparent)` }}>
+                              <p style={{ margin: "0 0 6px", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.5 }}>{job.message}</p>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" as const, fontSize: 9 }}>
+                                <span style={{ color: "var(--text-muted)" }}>Agent: <strong style={{ color: "var(--text)" }}>{job.agent}</strong></span>
+                                {job.nextRun && <span style={{ color: "var(--text-muted)" }}>Next: <strong style={{ color: "var(--text)" }}>{job.nextRun}</strong></span>}
+                                {job.deliveryChannel && (
+                                  <span style={{ ...badge("var(--accent)"), fontSize: 9 }}>
+                                    → {job.deliveryChannel}{job.deliveryTarget ? ` · ${deliveryLabel(job.deliveryTarget)}` : ""}
+                                  </span>
+                                )}
+                                {!job.enabled && <span style={{ ...badge("#f87171"), fontSize: 9 }}>PAUSED</span>}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
                   </div>
-                );
-              })}
-            </>
-          ))}
-        </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
-        {/* Recurring Jobs Summary */}
+        {/* Frequency breakdown */}
         {jobs.length > 0 && (
-          <div style={{ marginTop: 16 }}>
-            <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 8 }}>All Scheduled Jobs</span>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 8 }}>
-              {jobs.map(j => (
-                <div key={j.id} style={{
-                  padding: "10px 14px", borderRadius: 10, background: "var(--bg-elevated)",
-                  border: "1px solid var(--border)", opacity: j.enabled ? 1 : 0.5,
+          <div style={{ marginTop: 20 }}>
+            <span style={{ ...sectionLabel, display: "block", marginBottom: 8 }}>By Frequency</span>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}>
+              {Object.entries(
+                jobs.reduce<Record<string, number>>((acc, j) => {
+                  const label = cronToReadable(j.schedule);
+                  acc[label] = (acc[label] || 0) + 1;
+                  return acc;
+                }, {})
+              ).sort((a, b) => b[1] - a[1]).map(([freq, count]) => (
+                <div key={freq} style={{
+                  padding: "6px 10px", borderRadius: 6, background: "var(--bg-elevated)",
+                  border: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 6,
                 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <Clock style={{ width: 12, height: 12, color: "var(--accent)", flexShrink: 0 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", display: "block" }}>{j.name || "Unnamed Job"}</span>
-                      <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{cronToReadable(j.schedule)}</span>
-                    </div>
-                    <span style={{
-                      fontSize: 9, padding: "2px 6px", borderRadius: 6, fontFamily: "monospace",
-                      background: "var(--bg-hover)", color: "var(--text-muted)",
-                    }}>{j.schedule}</span>
-                  </div>
-                  <p style={{ margin: "6px 0 0", fontSize: 10, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {j.message}
-                  </p>
-                  <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
-                    {j.nextRun && <span style={{ fontSize: 9, color: "var(--text-muted)" }}>Next: {j.nextRun}</span>}
-                    {j.deliveryChannel && (
-                      <span style={{ fontSize: 9, padding: "0 4px", borderRadius: 4, background: "rgba(59,130,246,0.1)", color: "var(--accent)" }}>
-                        → {j.deliveryChannel}{j.deliveryTarget ? ` · ${deliveryLabel(j.deliveryTarget)}` : ""}
-                      </span>
-                    )}
-                  </div>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "var(--accent)", fontFamily: MONO }}>{count}</span>
+                  <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>{freq}</span>
                 </div>
               ))}
             </div>
@@ -497,14 +659,13 @@ function CalendarTab() {
         <div style={{
           position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
-        }} onClick={() => setShowAddModal(null)}>
+        }} onClick={() => setShowAddModal(false)}>
           <div style={{
-            background: "var(--bg-elevated)", borderRadius: 16, padding: 24, width: 420,
-            border: "1px solid var(--border)", boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
+            ...glowCard("var(--accent)", { padding: 24, width: 420, boxShadow: "0 20px 60px rgba(0,0,0,0.4)" }),
           }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+            <div style={{ ...headerRow, marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 15, color: "var(--text)", fontWeight: 600 }}>Schedule Job</h3>
-              <button onClick={() => setShowAddModal(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)" }}>
+              <button aria-label="Close" onClick={() => setShowAddModal(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", transition: `color 0.2s ${EASE}` }}>
                 <X style={{ width: 16, height: 16 }} />
               </button>
             </div>
@@ -516,8 +677,8 @@ function CalendarTab() {
             <div style={{ marginBottom: 12 }}>
               <label style={labelStyle}>Cron Schedule</label>
               <input value={newSchedule} onChange={e => setNewSchedule(e.target.value)} placeholder="0 8 * * *"
-                style={{ ...inputStyle, fontFamily: "monospace" }} />
-              <span style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                style={{ ...inputStyle, fontFamily: MONO }} />
+              <span style={{ ...mutedCaption, marginTop: 4, display: "block" }}>
                 {cronToReadable(newSchedule)}
               </span>
             </div>
@@ -527,9 +688,9 @@ function CalendarTab() {
                 rows={3} style={{ ...inputStyle, resize: "vertical", minHeight: 60, fontFamily: "inherit" }} />
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setShowAddModal(null)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", fontSize: 12, cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => setShowAddModal(false)} style={btnSecondary}>Cancel</button>
               <button onClick={addJobFromCalendar} disabled={adding || !newSchedule.trim() || !newMessage.trim()}
-                style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", opacity: adding || !newSchedule.trim() || !newMessage.trim() ? 0.5 : 1, display: "flex", alignItems: "center", gap: 6 }}>
+                style={{ ...btnPrimary, opacity: adding || !newSchedule.trim() || !newMessage.trim() ? 0.5 : 1, display: "flex", alignItems: "center", gap: 6 }}>
                 {adding && <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />}
                 <CalendarIcon style={{ width: 12, height: 12 }} /> Schedule
               </button>
@@ -746,13 +907,13 @@ function WorkflowsTab() {
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
             {BUILTIN_WORKFLOWS.length + customWorkflows.length} workflows
           </span>
-          <button onClick={() => setShowCreate(!showCreate)} style={{ background: "var(--accent-bg)", border: "none", borderRadius: 6, padding: "4px 6px", cursor: "pointer", color: "var(--accent)", display: "flex", alignItems: "center" }}>
+          <button aria-label="New workflow" onClick={() => setShowCreate(!showCreate)} style={{ background: "var(--accent-bg)", border: "none", borderRadius: 6, padding: "4px 6px", cursor: "pointer", color: "var(--accent)", display: "flex", alignItems: "center" }}>
             <Plus style={{ width: 12, height: 12 }} />
           </button>
         </div>
 
         {showCreate && (
-          <div style={{ margin: "0 8px 8px", padding: 10, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10 }}>
+          <div style={{ ...innerPanel, margin: "0 8px 8px", padding: 10 }}>
             <input placeholder="Workflow name" value={newName} onChange={e => setNewName(e.target.value)} style={{ ...inputStyle, marginBottom: 6 }} />
             <input placeholder="Description" value={newDesc} onChange={e => setNewDesc(e.target.value)} style={{ ...inputStyle, marginBottom: 6 }} />
             <select value={newCategory} onChange={e => setNewCategory(e.target.value as WorkflowDef["category"])} style={{ ...inputStyle, marginBottom: 6 }}>
@@ -769,12 +930,12 @@ function WorkflowsTab() {
               <div key={i} style={{ display: "flex", gap: 4, marginBottom: 4, alignItems: "center" }}>
                 <span style={{ width: 16, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "var(--text-muted)" }}>{i + 1}</span>
                 <input placeholder={`Step ${i + 1}...`} value={s.message} onChange={e => { const u = [...newSteps]; u[i] = { ...u[i], message: e.target.value }; setNewSteps(u); }} style={{ ...inputStyle, flex: 1, fontSize: 10, padding: "4px 6px" }} />
-                <button onClick={() => { const u = [...newSteps]; u[i] = { ...u[i], parallel: !u[i].parallel }; setNewSteps(u); }}
+                <button aria-label="Toggle parallel step" onClick={() => { const u = [...newSteps]; u[i] = { ...u[i], parallel: !u[i].parallel }; setNewSteps(u); }}
                   title={s.parallel ? "Parallel (runs with other parallel steps)" : "Sequential (waits for previous steps)"}
                   style={{ ...iconBtnStyle, background: s.parallel ? "rgba(139,92,246,0.15)" : undefined, color: s.parallel ? "#8b5cf6" : undefined }}>
                   <Layers style={{ width: 9, height: 9 }} />
                 </button>
-                {newSteps.length > 1 && <button onClick={() => setNewSteps(newSteps.filter((_, j) => j !== i))} style={iconBtnStyle}><Trash2 style={{ width: 9, height: 9 }} /></button>}
+                {newSteps.length > 1 && <button aria-label="Remove step" onClick={() => setNewSteps(newSteps.filter((_, j) => j !== i))} style={iconBtnStyle}><Trash2 style={{ width: 9, height: 9 }} /></button>}
               </div>
             ))}
             <button onClick={() => setNewSteps([...newSteps, { message: "", parallel: false }])} style={{ width: "100%", padding: "3px 0", borderRadius: 6, border: "1px dashed var(--border)", background: "transparent", color: "var(--text-muted)", fontSize: 9, cursor: "pointer", marginBottom: 8 }}>+ Add Step</button>
@@ -797,7 +958,7 @@ function WorkflowsTab() {
                     width: "100%", textAlign: "left", padding: "6px 10px", borderRadius: 6, border: "none", cursor: "pointer", marginBottom: 1,
                     display: "flex", alignItems: "center", gap: 8,
                     background: selectedId === wf.id ? "var(--accent-bg)" : "transparent",
-                    transition: "background 0.15s",
+                    transition: `all 0.2s ${EASE}`,
                   }}>
                   <span style={{ fontSize: 14 }}>{wf.icon}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -827,10 +988,10 @@ function WorkflowsTab() {
               </div>
               <div style={{ display: "flex", gap: 6 }}>
                 <button onClick={() => { setScheduleCron("0 8 * * *"); setShowScheduleModal(selected); }}
-                  style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-elevated)", color: "var(--text-secondary)", fontSize: 11, cursor: "pointer" }}>
+                  style={{ ...btnSecondary, display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", fontSize: 11 }}>
                   <Clock style={{ width: 12, height: 12 }} /> Schedule
                 </button>
-                {!selected.isBuiltIn && <button onClick={() => deleteWorkflow(selected.id)} style={{ padding: "6px 10px", borderRadius: 8, border: "none", background: "rgba(248,113,113,0.15)", color: "#f87171", cursor: "pointer", display: "flex", alignItems: "center" }}><Trash2 style={{ width: 12, height: 12 }} /></button>}
+                {!selected.isBuiltIn && <button aria-label="Delete workflow" onClick={() => deleteWorkflow(selected.id)} style={{ padding: "6px 10px", borderRadius: 8, border: "none", background: "rgba(248,113,113,0.15)", color: "#f87171", cursor: "pointer", display: "flex", alignItems: "center" }}><Trash2 style={{ width: 12, height: 12 }} /></button>}
               </div>
             </div>
 
@@ -845,7 +1006,7 @@ function WorkflowsTab() {
             )}
 
             <button onClick={() => runWorkflow(selected)} disabled={runningId !== null || (selected.needsInput && !userInput.trim())}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 20px", borderRadius: 8, border: "none", fontSize: 12, fontWeight: 600, cursor: runningId ? "not-allowed" : "pointer", background: runningId ? "var(--bg-hover)" : "var(--accent)", color: "#fff", opacity: runningId || (selected.needsInput && !userInput.trim()) ? 0.5 : 1, marginBottom: 14 }}>
+              style={{ ...btnPrimary, display: "flex", alignItems: "center", gap: 6, cursor: runningId ? "not-allowed" : "pointer", background: runningId ? "var(--bg-hover)" : "var(--accent)", opacity: runningId || (selected.needsInput && !userInput.trim()) ? 0.5 : 1, marginBottom: 14 }}>
               {runningId === selected.id ? <Loader2 style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} /> : <Play style={{ width: 14, height: 14 }} />}
               {runningId === selected.id ? "Running..." : "Run Workflow"}
             </button>
@@ -911,7 +1072,7 @@ function WorkflowsTab() {
                     <p style={{ margin: "2px 0 0", fontSize: 10, color: "var(--text-muted)" }}>{stepResults.filter(r => r.success).length}/{stepResults.length} steps succeeded</p>
                   </div>
                   <button onClick={() => { const t = stepResults.map((r, i) => `--- ${selected.steps[i]?.message ?? `Step ${i + 1}`} ---\n${r.output}`).join("\n\n"); navigator.clipboard.writeText(t); }}
-                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-elevated)", color: "var(--text-secondary)", fontSize: 10, cursor: "pointer" }}>
+                    style={{ ...btnSecondary, display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", fontSize: 10 }}>
                     <Copy style={{ width: 10, height: 10 }} /> Copy All
                   </button>
                 </div>
@@ -929,13 +1090,14 @@ function WorkflowsTab() {
                   const busy = qaRunning === a.id;
                   return (
                     <button key={a.id} onClick={a.action} disabled={busy}
+                      data-glow={a.color}
                       style={{
-                        padding: "14px 12px", borderRadius: 10, border: "1px solid var(--border)", cursor: busy ? "wait" : "pointer",
-                        background: "var(--bg-elevated)", display: "flex", alignItems: "center", gap: 10,
-                        opacity: busy ? 0.6 : 1, textAlign: "left" as const, transition: "background 0.15s, border-color 0.15s",
+                        ...glowCard(a.color, { padding: "14px 12px", cursor: busy ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 10, opacity: busy ? 0.6 : 1, textAlign: "left" as const }),
                       }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = a.color; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--border)"; }}
+                      onMouseEnter={hoverLift}
+                      onMouseLeave={hoverReset}
+                      onMouseDown={pressDown}
+                      onMouseUp={pressUp}
                     >
                       <div style={{
                         width: 32, height: 32, borderRadius: 8, flexShrink: 0, display: "flex",
@@ -957,11 +1119,10 @@ function WorkflowsTab() {
 
               {qaResult && (
                 <div style={{
-                  marginTop: 12, padding: "10px 14px", borderRadius: 10,
-                  background: "var(--bg-elevated)", border: "1px solid var(--border)",
+                  ...innerPanel, marginTop: 12, padding: "10px 14px",
                 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Result</span>
+                    <span style={sectionLabel}>Result</span>
                     <button onClick={() => setQaResult(null)}
                       style={{ fontSize: 10, color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer" }}>
                       Dismiss
@@ -977,7 +1138,7 @@ function WorkflowsTab() {
               )}
             </div>
 
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            <div style={{ ...emptyState, flex: 1 }}>
               <Layers style={{ width: 28, height: 28, color: "var(--text-muted)", opacity: 0.5 }} />
               <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0, textAlign: "center", maxWidth: 240, lineHeight: 1.5 }}>Select a workflow from the sidebar to run multi-step agent automations.</p>
             </div>
@@ -988,22 +1149,22 @@ function WorkflowsTab() {
       {/* Schedule Workflow Modal */}
       {showScheduleModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => setShowScheduleModal(null)}>
-          <div style={{ background: "var(--bg-elevated)", borderRadius: 16, padding: 24, width: 400, border: "1px solid var(--border)", boxShadow: "0 20px 60px rgba(0,0,0,0.4)" }} onClick={e => e.stopPropagation()}>
+          <div style={glowCard("var(--accent)", { padding: 24, width: 400, boxShadow: "0 20px 60px rgba(0,0,0,0.4)" })} onClick={e => e.stopPropagation()}>
             <h3 style={{ margin: "0 0 16px", fontSize: 15, color: "var(--text)", fontWeight: 600 }}>Schedule "{showScheduleModal.name}"</h3>
             <div style={{ marginBottom: 12 }}>
               <label style={labelStyle}>Cron Schedule</label>
-              <input value={scheduleCron} onChange={e => setScheduleCron(e.target.value)} style={{ ...inputStyle, fontFamily: "monospace" }} />
-              <span style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 4, display: "block" }}>{cronToReadable(scheduleCron)}</span>
+              <input value={scheduleCron} onChange={e => setScheduleCron(e.target.value)} style={{ ...inputStyle, fontFamily: MONO }} />
+              <span style={{ ...mutedCaption, marginTop: 4, display: "block" }}>{cronToReadable(scheduleCron)}</span>
             </div>
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 16 }}>
               {["0 8 * * *", "0 8 * * 1-5", "0 18 * * *", "0 0 * * 0", "*/30 * * * *"].map(c => (
-                <button key={c} onClick={() => setScheduleCron(c)} style={{ padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: scheduleCron === c ? "var(--accent-bg)" : "var(--bg-surface)", color: scheduleCron === c ? "var(--accent)" : "var(--text-muted)", fontSize: 9, fontFamily: "monospace", cursor: "pointer" }}>{c}</button>
+                <button key={c} onClick={() => setScheduleCron(c)} style={{ padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: scheduleCron === c ? "var(--accent-bg)" : "var(--bg-surface)", color: scheduleCron === c ? "var(--accent)" : "var(--text-muted)", fontSize: 9, fontFamily: MONO, cursor: "pointer", transition: `all 0.2s ${EASE}` }}>{c}</button>
               ))}
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setShowScheduleModal(null)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", fontSize: 12, cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => setShowScheduleModal(null)} style={btnSecondary}>Cancel</button>
               <button onClick={() => scheduleWorkflow(showScheduleModal)} disabled={scheduling}
-                style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, opacity: scheduling ? 0.5 : 1 }}>
+                style={{ ...btnPrimary, opacity: scheduling ? 0.5 : 1, display: "flex", alignItems: "center", gap: 6 }}>
                 {scheduling && <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />}
                 <Clock style={{ width: 12, height: 12 }} /> Schedule
               </button>
@@ -1174,7 +1335,7 @@ function ScheduledTab() {
       <div style={{ padding: "12px 20px 8px", flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>Scheduled Jobs ({jobs.length})</span>
         <div style={{ display: "flex", gap: 6 }}>
-          <button onClick={() => { setLoading(true); loadJobs(); }} disabled={loading} style={navBtnStyle}>
+          <button aria-label="Refresh" onClick={() => { setLoading(true); loadJobs(); }} disabled={loading} style={navBtnStyle}>
             <RefreshCw style={{ width: 12, height: 12, ...(loading ? { animation: "spin 1s linear infinite" } : {}) }} />
           </button>
           <button onClick={() => setShowAdd(!showAdd)} style={{ ...navBtnStyle, background: "var(--accent-bg)", color: "var(--accent)", padding: "4px 10px", gap: 4, display: "flex", alignItems: "center" }}>
@@ -1188,12 +1349,12 @@ function ScheduledTab() {
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)", marginBottom: 12 }}>
             <AlertTriangle style={{ width: 14, height: 14, color: "#f87171" }} />
             <span style={{ fontSize: 11, color: "#f87171", flex: 1 }}>{error}</span>
-            <button onClick={() => setError(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: 14, cursor: "pointer" }}>×</button>
+            <button aria-label="Close" onClick={() => setError(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: 14, cursor: "pointer" }}>×</button>
           </div>
         )}
 
         {showAdd && (
-          <div style={{ marginBottom: 16, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
+          <div style={{ ...innerPanel, marginBottom: 16, padding: 14 }}>
             <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
               <div style={{ flex: 1 }}>
                 <label style={labelStyle}>Name (optional)</label>
@@ -1201,7 +1362,7 @@ function ScheduledTab() {
               </div>
               <div style={{ width: 140 }}>
                 <label style={labelStyle}>Schedule</label>
-                <input value={newSchedule} onChange={e => setNewSchedule(e.target.value)} placeholder="0 8 * * *" style={{ ...inputStyle, fontFamily: "monospace" }} />
+                <input value={newSchedule} onChange={e => setNewSchedule(e.target.value)} placeholder="0 8 * * *" style={{ ...inputStyle, fontFamily: MONO }} />
               </div>
             </div>
             <div style={{ marginBottom: 8 }}>
@@ -1209,8 +1370,8 @@ function ScheduledTab() {
               <input value={newMessage} onChange={e => setNewMessage(e.target.value)} placeholder="What should the agent do?" style={inputStyle} />
             </div>
             <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-              <button onClick={() => setShowAdd(false)} style={{ padding: "5px 12px", borderRadius: 6, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", fontSize: 11, cursor: "pointer" }}>Cancel</button>
-              <button onClick={() => addJob()} disabled={adding || !newSchedule.trim() || !newMessage.trim()} style={{ padding: "5px 14px", borderRadius: 6, border: "none", background: "var(--accent)", color: "#fff", fontSize: 11, cursor: "pointer", opacity: adding ? 0.5 : 1, display: "flex", alignItems: "center", gap: 4 }}>
+              <button onClick={() => setShowAdd(false)} style={{ ...btnSecondary, padding: "5px 12px", fontSize: 11 }}>Cancel</button>
+              <button onClick={() => addJob()} disabled={adding || !newSchedule.trim() || !newMessage.trim()} style={{ ...btnPrimary, padding: "5px 14px", fontSize: 11, opacity: adding ? 0.5 : 1, display: "flex", alignItems: "center", gap: 4 }}>
                 {adding && <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />} Add Job
               </button>
             </div>
@@ -1222,8 +1383,8 @@ function ScheduledTab() {
             <Loader2 style={{ width: 20, height: 20, color: "var(--text-muted)", animation: "spin 1s linear infinite" }} />
           </div>
         ) : jobs.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "40px 20px" }}>
-            <Clock style={{ width: 32, height: 32, color: "var(--text-muted)", margin: "0 auto 10px" }} />
+          <div style={emptyState}>
+            <Clock style={{ width: 32, height: 32, color: "var(--text-muted)" }} />
             <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>No scheduled jobs</p>
             <p style={{ fontSize: 10, color: "var(--text-muted)", margin: "4px 0 16px" }}>Add a job or use a quick template below</p>
           </div>
@@ -1232,12 +1393,17 @@ function ScheduledTab() {
             {jobs.map((job, ji) => {
               const isHb = job.name?.toLowerCase().includes("heartbeat") ?? false;
               return (
-                <div key={job.id ? `${job.id}:${ji}` : `sched-${ji}`} style={{
-                  padding: "10px 14px", borderRadius: 10,
-                  background: isHb ? "rgba(168,85,247,0.06)" : "var(--bg-elevated)",
-                  border: isHb ? "1px solid rgba(168,85,247,0.2)" : "1px solid var(--border)",
-                  opacity: job.enabled ? 1 : 0.5,
-                }}>
+                <div key={job.id ? `${job.id}:${ji}` : `sched-${ji}`}
+                  data-glow={isHb ? "#a855f7" : "var(--accent)"}
+                  onMouseEnter={hoverLift} onMouseLeave={hoverReset} onMouseDown={pressDown} onMouseUp={pressUp}
+                  style={{
+                    ...glowCard(isHb ? "#a855f7" : "var(--accent)", {
+                      padding: "10px 14px",
+                      background: isHb ? "rgba(168,85,247,0.06)" : undefined,
+                      border: isHb ? "1px solid rgba(168,85,247,0.2)" : undefined,
+                      opacity: job.enabled ? 1 : 0.5,
+                    }),
+                  }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     {isHb && <Heart style={{ width: 14, height: 14, color: "#a855f7", flexShrink: 0 }} />}
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -1245,8 +1411,7 @@ function ScheduledTab() {
                         {job.name && <span style={{ fontSize: 12, fontWeight: 600, color: isHb ? "#a855f7" : "var(--text)" }}>{job.name}</span>}
                         {job.duplicateGroupSize != null && job.duplicateGroupSize > 1 && job.duplicateIndex != null && (
                           <span style={{
-                            fontSize: 8, fontWeight: 600, textTransform: "uppercase", padding: "2px 6px", borderRadius: 6,
-                            background: "rgba(251,191,36,0.12)", color: "#fbbf24", border: "1px solid rgba(251,191,36,0.25)",
+                            ...badge("#fbbf24"), fontSize: 8, textTransform: "uppercase" as const, border: "1px solid rgba(251,191,36,0.25)",
                           }} title="Separate gateway jobs with the same name/schedule — safe to delete extras">
                             Duplicate {job.duplicateIndex}/{job.duplicateGroupSize}
                           </span>
@@ -1256,8 +1421,8 @@ function ScheduledTab() {
                             id {job.id.slice(0, 8)}…
                           </span>
                         )}
-                        <span style={{ fontSize: 10, fontFamily: "monospace", color: isHb ? "#a855f7" : "var(--accent)", padding: "1px 6px", borderRadius: 4, background: isHb ? "rgba(168,85,247,0.1)" : "var(--accent-bg)" }}>{job.schedule}</span>
-                        <span style={{ fontSize: 9, color: "var(--text-muted)" }}>{cronToReadable(job.schedule)}</span>
+                        <span style={{ ...badge(isHb ? "#a855f7" : "var(--accent)"), fontFamily: MONO, fontSize: 10 }}>{job.schedule}</span>
+                        <span style={mutedCaption}>{cronToReadable(job.schedule)}</span>
                       </div>
                       <p style={{ margin: 0, fontSize: 11, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.message}</p>
                       <div style={{ display: "flex", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
@@ -1274,13 +1439,13 @@ function ScheduledTab() {
                         <span style={{ fontSize: 9, color: "#a855f7", fontWeight: 500, padding: "4px 10px", borderRadius: 6, background: "rgba(168,85,247,0.1)" }}>Managed in Heartbeat tab</span>
                       ) : (
                         <>
-                          <button onClick={() => fetchHistory(job.id)} title="History" style={{ ...smallBtnStyle, color: historyOpen === job.id ? "var(--accent)" : "var(--text-muted)", background: historyOpen === job.id ? "var(--accent-bg)" : "var(--bg-elevated)" }}>
+                          <button aria-label="Run history" onClick={() => fetchHistory(job.id)} title="History" style={{ ...smallBtnStyle, color: historyOpen === job.id ? "var(--accent)" : "var(--text-muted)", background: historyOpen === job.id ? "var(--accent-bg)" : "var(--bg-elevated)" }}>
                             {historyLoading === job.id ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <History style={{ width: 12, height: 12 }} />}
                           </button>
-                          <button onClick={() => runNow(job.id)} disabled={runningId === job.id} title="Run now" style={smallBtnStyle}>
+                          <button aria-label="Run now" onClick={() => runNow(job.id)} disabled={runningId === job.id} title="Run now" style={smallBtnStyle}>
                             {runningId === job.id ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <Play style={{ width: 12, height: 12 }} />}
                           </button>
-                          <button onClick={() => removeJob(job.id)} disabled={removingId === job.id} title="Remove" style={{ ...smallBtnStyle, color: "#f87171", borderColor: "rgba(248,113,113,0.15)" }}>
+                          <button aria-label="Remove job" onClick={() => removeJob(job.id)} disabled={removingId === job.id} title="Remove" style={{ ...smallBtnStyle, color: "#f87171", borderColor: "rgba(248,113,113,0.15)" }}>
                             {removingId === job.id ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <Trash2 style={{ width: 12, height: 12 }} />}
                           </button>
                           <ToggleSwitch enabled={job.enabled} onToggle={() => toggleJob(job)} />
@@ -1294,8 +1459,8 @@ function ScheduledTab() {
                     </div>
                   )}
                   {historyOpen === job.id && (
-                    <div style={{ marginTop: 6, padding: "8px 10px", borderRadius: 8, background: "var(--bg-base)", border: "1px solid var(--border)" }}>
-                      <span style={{ fontSize: 9, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5, display: "block", marginBottom: 6 }}>Last Runs</span>
+                    <div style={{ ...innerPanel, marginTop: 6, padding: "8px 10px" }}>
+                      <span style={{ ...sectionLabel, display: "block", marginBottom: 6 }}>Last Runs</span>
                       {historyLoading === job.id ? (
                         <div style={{ display: "flex", alignItems: "center", gap: 6, padding: 4 }}>
                           <Loader2 style={{ width: 10, height: 10, color: "var(--text-muted)", animation: "spin 1s linear infinite" }} />
@@ -1323,7 +1488,7 @@ function ScheduledTab() {
         )}
 
         {/* Send System Event */}
-        <div style={{ marginBottom: 16, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
+        <div style={{ ...innerPanel, marginBottom: 16, padding: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
             <Send style={{ width: 12, height: 12, color: "var(--accent)" }} />
             <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>Send System Event</span>
@@ -1337,7 +1502,7 @@ function ScheduledTab() {
               style={inputStyle}
             />
             <button onClick={sendSystemEvent} disabled={sendingEvent || !eventText.trim()}
-              style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "var(--accent)", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, opacity: sendingEvent || !eventText.trim() ? 0.5 : 1, flexShrink: 0 }}>
+              style={{ ...btnPrimary, padding: "6px 14px", fontSize: 11, opacity: sendingEvent || !eventText.trim() ? 0.5 : 1, flexShrink: 0, display: "flex", alignItems: "center", gap: 4 }}>
               {sendingEvent ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <Send style={{ width: 12, height: 12 }} />}
               Send
             </button>
@@ -1350,15 +1515,18 @@ function ScheduledTab() {
         </div>
 
         {/* Quick Templates */}
-        <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 8 }}>Quick Templates</span>
+        <span style={{ ...sectionLabel, display: "block", marginBottom: 8 }}>Quick Templates</span>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {QUICK_TEMPLATES.map(t => {
             const Icon = t.icon;
             return (
               <button key={t.name} onClick={() => addJob(t.schedule, t.message, t.name)} disabled={adding}
-                style={{ textAlign: "left", padding: "10px 12px", borderRadius: 10, background: "var(--bg-elevated)", border: "1px solid var(--border)", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, transition: "border-color 0.15s" }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = t.color; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; }}>
+                data-glow={t.color}
+                style={{ ...glowCard(t.color, { textAlign: "left" as const, padding: "10px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }) }}
+                onMouseEnter={hoverLift}
+                onMouseLeave={hoverReset}
+                onMouseDown={pressDown}
+                onMouseUp={pressUp}>
                 <div style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, background: `color-mix(in srgb, ${t.color} 12%, transparent)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <Icon style={{ width: 14, height: 14, color: t.color }} />
                 </div>
@@ -1563,10 +1731,12 @@ function HeartbeatTab() {
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24 }}>
         <div style={{
-          width: 48, height: 48, borderRadius: 14,
-          background: isEnabled ? "rgba(168,85,247,0.12)" : "var(--bg-hover)",
-          border: isEnabled ? "1px solid rgba(168,85,247,0.25)" : "1px solid var(--border)",
-          display: "flex", alignItems: "center", justifyContent: "center",
+          ...glowCard(isEnabled ? "#a855f7" : "var(--text-muted)", {
+            width: 48, height: 48, borderRadius: 14,
+            background: isEnabled ? "rgba(168,85,247,0.12)" : "var(--bg-hover)",
+            border: isEnabled ? "1px solid rgba(168,85,247,0.25)" : "1px solid var(--border)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }),
         }}>
           <Heart style={{
             width: 24, height: 24,
@@ -1591,10 +1761,8 @@ function HeartbeatTab() {
         </div>
         <button onClick={triggerNow} disabled={busy === "trigger"}
           style={{
-            display: "flex", alignItems: "center", gap: 6,
-            padding: "8px 14px", borderRadius: 8,
-            border: "1px solid var(--border)", background: "var(--bg-elevated)",
-            color: "var(--text-secondary)", fontSize: 11, cursor: "pointer",
+            ...btnSecondary, display: "flex", alignItems: "center", gap: 6,
+            padding: "8px 14px", fontSize: 11,
           }}>
           {busy === "trigger"
             ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />
@@ -1603,10 +1771,10 @@ function HeartbeatTab() {
         </button>
         <button onClick={toggleHeartbeat} disabled={busy === "toggle"}
           style={{
-            padding: "8px 18px", borderRadius: 8, border: "none",
+            ...btnPrimary,
+            padding: "8px 18px",
             background: isEnabled ? "rgba(248,113,113,0.15)" : "#a855f7",
             color: isEnabled ? "#f87171" : "#fff",
-            fontSize: 12, fontWeight: 600, cursor: "pointer",
             display: "flex", alignItems: "center", gap: 6,
             opacity: busy === "toggle" ? 0.7 : 1,
           }}>
@@ -1629,7 +1797,7 @@ function HeartbeatTab() {
                     border: active ? "1px solid #a855f7" : "1px solid var(--border)",
                     background: active ? "rgba(168,85,247,0.15)" : "var(--bg-elevated)",
                     color: active ? "#c084fc" : "var(--text-secondary)",
-                    fontWeight: active ? 600 : 400, transition: "all 0.12s ease",
+                    fontWeight: active ? 600 : 400, transition: `all 0.2s ${EASE}`,
                   }}>
                   {label}
                 </button>
@@ -1681,7 +1849,7 @@ function HeartbeatTab() {
           <div>
             <label style={{ ...labelStyle, marginBottom: 0 }}>Heartbeat Instructions</label>
             <p style={{ margin: "2px 0 0", fontSize: 10, color: "var(--text-muted)" }}>
-              Saved to <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "var(--accent)" }}>~/.openclaw/workspace/HEARTBEAT.md</span> — the agent reads this file each heartbeat cycle
+              Saved to <span style={{ fontFamily: MONO, fontSize: 9, color: "var(--accent)" }}>~/.openclaw/workspace/HEARTBEAT.md</span> — the agent reads this file each heartbeat cycle
             </p>
           </div>
           {instructionsDirty && <span style={{ fontSize: 9, color: "#fbbf24", fontWeight: 500 }}>unsaved changes</span>}
@@ -1692,7 +1860,7 @@ function HeartbeatTab() {
           rows={10}
           style={{
             ...inputStyle, resize: "vertical", minHeight: 180, maxHeight: 400,
-            fontFamily: "'Cascadia Code', 'Fira Code', monospace", fontSize: 11, lineHeight: 1.6,
+            fontFamily: MONO, fontSize: 11, lineHeight: 1.6,
           }} />
       </div>
 
@@ -1705,11 +1873,12 @@ function HeartbeatTab() {
             const itemCount = preset.split("\n").filter(l => l.startsWith("- ")).length;
             return (
               <button key={i} onClick={() => { setInstructions(preset); setInstructionsDirty(true); }}
+                data-glow="#a855f7"
+                onMouseEnter={hoverLift} onMouseLeave={hoverReset} onMouseDown={pressDown} onMouseUp={pressUp}
                 style={{
-                  textAlign: "left", padding: "8px 14px", borderRadius: 8,
-                  border: "1px solid var(--border)", background: "var(--bg-elevated)",
+                  ...innerPanel, textAlign: "left" as const, padding: "8px 14px",
                   color: "var(--text-secondary)", fontSize: 10, cursor: "pointer",
-                  transition: "all 0.15s", flex: "1 1 200px", minWidth: 180,
+                  flex: "1 1 200px", minWidth: 180,
                 }}>
                 <span style={{ fontWeight: 500 }}>{title}</span>
                 <span style={{ display: "block", fontSize: 9, color: "var(--text-muted)", marginTop: 2 }}>
@@ -1724,10 +1893,10 @@ function HeartbeatTab() {
       {/* Save all */}
       <button onClick={saveAll} disabled={busy === "save"}
         style={{
-          padding: "10px 24px", borderRadius: 8, border: "none",
+          ...btnPrimary,
+          padding: "10px 24px",
           background: saved === "all" ? "rgba(74,222,128,0.15)" : "#a855f7",
           color: saved === "all" ? "#4ade80" : "#fff",
-          fontSize: 12, fontWeight: 600, cursor: "pointer",
           display: "flex", alignItems: "center", gap: 6,
           opacity: busy === "save" ? 0.6 : 1,
         }}>
@@ -1739,8 +1908,7 @@ function HeartbeatTab() {
 
       {status.lastRun && (
         <div style={{
-          marginTop: 20, padding: "12px 16px", borderRadius: 10,
-          background: "var(--bg-elevated)", border: "1px solid var(--border)",
+          ...innerPanel, marginTop: 20, padding: "12px 16px",
           display: "flex", alignItems: "center", gap: 12,
         }}>
           <Clock style={{ width: 14, height: 14, color: "var(--text-muted)", flexShrink: 0 }} />
@@ -1764,17 +1932,15 @@ function HeartbeatTab() {
 
 function ToggleSwitch({ enabled, onToggle }: { enabled: boolean; onToggle: () => void }) {
   return (
-    <button onClick={onToggle} style={{ width: 36, height: 20, borderRadius: 10, border: "none", cursor: "pointer", position: "relative", background: enabled ? "var(--accent)" : "var(--bg-hover)", transition: "background 0.2s", flexShrink: 0 }}>
-      <span style={{ position: "absolute", top: 2, left: enabled ? 18 : 2, width: 16, height: 16, borderRadius: "50%", background: "white", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }} />
+    <button onClick={onToggle} style={{ width: 36, height: 20, borderRadius: 10, border: "none", cursor: "pointer", position: "relative", background: enabled ? "var(--accent)" : "var(--bg-hover)", transition: `background 0.25s ${SPRING}`, flexShrink: 0 }}>
+      <span style={{ position: "absolute", top: 2, left: enabled ? 18 : 2, width: 16, height: 16, borderRadius: "50%", background: "white", transition: `left 0.25s ${SPRING}`, boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }} />
     </button>
   );
 }
 
 /* ── Style constants ── */
 
-const navBtnStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-elevated)", color: "var(--text-muted)", fontSize: 11, cursor: "pointer" };
-const inputStyle: React.CSSProperties = { width: "100%", padding: "8px 10px", borderRadius: 8, background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 12, outline: "none", boxSizing: "border-box" as const };
-const labelStyle: React.CSSProperties = { fontSize: 10, color: "var(--text-muted)", fontWeight: 500, display: "block", marginBottom: 4 };
-const smallBtnStyle: React.CSSProperties = { width: 28, height: 28, borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-elevated)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--text-muted)" };
-const iconBtnStyle: React.CSSProperties = { background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2, display: "flex", alignItems: "center" };
-const cellHeaderStyle: React.CSSProperties = { padding: "8px 4px", display: "flex", flexDirection: "column" as const, alignItems: "center", gap: 2, borderBottom: "1px solid var(--border)" };
+const navBtnStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-elevated)", color: "var(--text-muted)", fontSize: 11, cursor: "pointer", transition: `all 0.2s ${EASE}` };
+const labelStyle: React.CSSProperties = { ...sectionLabel, fontSize: 10, fontWeight: 500, display: "block", marginBottom: 4, textTransform: "none" as const, letterSpacing: "normal" };
+const smallBtnStyle: React.CSSProperties = { width: 28, height: 28, borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-elevated)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--text-muted)", transition: `all 0.2s ${EASE}` };
+const iconBtnStyle: React.CSSProperties = { background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2, display: "flex", alignItems: "center", transition: `all 0.2s ${EASE}` };

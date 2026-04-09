@@ -5,7 +5,6 @@ import {
   LayoutDashboard,
   Bot,
   Factory,
-  Building2,
   Radio,
   Brain,
   Cpu,
@@ -16,6 +15,8 @@ import {
   Map,
   ChevronDown,
   Anchor,
+  BarChart3,
+  Store,
 } from "lucide-react";
 import { useAppStore, AppView } from "@/stores/appStore";
 
@@ -25,25 +26,26 @@ interface NavItem {
   label: string;
 }
 
-const PRIMARY: NavItem[] = [
+const MISSION_CONTROL: NavItem[] = [
   { id: "home",           icon: Home,            label: "Home" },
   { id: "city",           icon: Map,             label: "City" },
   { id: "conversation",   icon: MessageSquare,   label: "Chat" },
-  { id: "command-center", icon: LayoutDashboard,  label: "Center" },
+  { id: "command-center", icon: LayoutDashboard, label: "Center" },
 ];
 
 const OPENCLAW: NavItem[] = [
-  { id: "agents",   icon: Bot,       label: "Agents" },
-  { id: "factory",  icon: Factory,   label: "Forge" },
-  { id: "office",   icon: Building2, label: "Office" },
-  { id: "channels", icon: Radio,     label: "Channels" },
-  { id: "memory",   icon: Brain,     label: "Memory" },
-  { id: "models",   icon: Cpu,       label: "Models" },
-  { id: "hooks",    icon: Anchor,    label: "Hooks" },
+  { id: "agents",      icon: Bot,     label: "Agents" },
+  { id: "factory",     icon: Factory, label: "Forge" },
+  { id: "memory",      icon: Brain,   label: "Memory" },
+  { id: "models",      icon: Cpu,     label: "Models" },
+  { id: "channels",    icon: Radio,   label: "Channels" },
+  { id: "marketplace", icon: Store,   label: "Skills" },
+  { id: "hooks",       icon: Anchor,  label: "Hooks" },
+  { id: "tools",       icon: Wrench,  label: "Tools" },
 ];
 
 const SYSTEM: NavItem[] = [
-  { id: "tools",    icon: Wrench,      label: "Tools" },
+  { id: "usage",    icon: BarChart3,   label: "Usage" },
   { id: "doctor",   icon: Stethoscope, label: "Doctor" },
   { id: "settings", icon: Settings,    label: "Settings" },
 ];
@@ -52,7 +54,9 @@ export function Navigation() {
   const currentView = useAppStore(s => s.currentView);
   const setView = useAppStore(s => s.setView);
   const gatewayConnected = useAppStore(s => s.gatewayConnected);
+  const [mcCollapsed, setMcCollapsed] = useState(false);
   const [ocCollapsed, setOcCollapsed] = useState(false);
+  const [sysCollapsed, setSysCollapsed] = useState(false);
 
   return (
     <nav className="glass-nav" style={{
@@ -73,31 +77,20 @@ export function Navigation() {
         <span style={{ fontSize: 7, color: "var(--text-muted)", letterSpacing: 0.8, fontWeight: 600 }}>OC</span>
       </div>
 
-      {/* Primary nav – always visible */}
-      {PRIMARY.map(item => (
-        <NavButton key={item.id} item={item} active={currentView === item.id} onClick={() => setView(item.id)} />
-      ))}
+      {/* Mission Control – collapsible */}
+      <SectionToggle label="MISSION" collapsed={mcCollapsed} onToggle={() => setMcCollapsed(!mcCollapsed)} />
+      {!mcCollapsed && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+          {MISSION_CONTROL.map(item => (
+            <NavButton key={item.id} item={item} active={currentView === item.id} onClick={() => setView(item.id)} />
+          ))}
+        </div>
+      )}
 
       <Divider />
 
       {/* OpenClaw section – collapsible */}
-      <button
-        onClick={() => setOcCollapsed(!ocCollapsed)}
-        title={ocCollapsed ? "Expand OpenClaw" : "Collapse OpenClaw"}
-        style={{
-          width: 42, height: 16, display: "flex", alignItems: "center", justifyContent: "center",
-          gap: 2, border: "none", cursor: "pointer", background: "transparent",
-          color: "var(--text-muted)", fontSize: 7, fontWeight: 600,
-          letterSpacing: 0.6, marginBottom: 2,
-        }}
-      >
-        <ChevronDown style={{
-          width: 8, height: 8, transition: "transform 0.2s",
-          transform: ocCollapsed ? "rotate(-90deg)" : "rotate(0deg)",
-        }} />
-        CLAW
-      </button>
-
+      <SectionToggle label="CLAW" collapsed={ocCollapsed} onToggle={() => setOcCollapsed(!ocCollapsed)} />
       {!ocCollapsed && (
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
           {OPENCLAW.map(item => (
@@ -110,10 +103,15 @@ export function Navigation() {
 
       <Divider />
 
-      {/* System – pinned to bottom */}
-      {SYSTEM.map(item => (
-        <NavButton key={item.id} item={item} active={currentView === item.id} onClick={() => setView(item.id)} />
-      ))}
+      {/* System – collapsible, pinned to bottom */}
+      <SectionToggle label="SYSTEM" collapsed={sysCollapsed} onToggle={() => setSysCollapsed(!sysCollapsed)} />
+      {!sysCollapsed && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+          {SYSTEM.map(item => (
+            <NavButton key={item.id} item={item} active={currentView === item.id} onClick={() => setView(item.id)} />
+          ))}
+        </div>
+      )}
 
       {/* Ctrl+K launcher */}
       <div className="glass-cmd-chip" style={{
@@ -129,6 +127,27 @@ export function Navigation() {
         <Command style={{ width: 9, height: 9, color: "var(--text-muted)" }} />
       </div>
     </nav>
+  );
+}
+
+function SectionToggle({ label, collapsed, onToggle }: { label: string; collapsed: boolean; onToggle: () => void }) {
+  return (
+    <button
+      onClick={onToggle}
+      title={collapsed ? `Expand ${label}` : `Collapse ${label}`}
+      style={{
+        width: 42, height: 16, display: "flex", alignItems: "center", justifyContent: "center",
+        gap: 2, border: "none", cursor: "pointer", background: "transparent",
+        color: "var(--text-muted)", fontSize: 7, fontWeight: 600,
+        letterSpacing: 0.6, marginBottom: 2,
+      }}
+    >
+      <ChevronDown style={{
+        width: 8, height: 8, transition: "transform 0.2s",
+        transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)",
+      }} />
+      {label}
+    </button>
   );
 }
 

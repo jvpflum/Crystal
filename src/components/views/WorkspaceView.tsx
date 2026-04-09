@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
+import { EASE, pressDown, pressUp, sectionLabel, MONO } from "@/styles/viewStyles";
 
 /* ── Types ── */
 
@@ -264,12 +265,12 @@ const KEYFRAMES = `
 
 /* ── Shared style tokens ── */
 
-const MONO: CSSProperties = { fontFamily: "'JetBrains Mono', 'Fira Code', monospace" };
+const MONO_STYLE: CSSProperties = { fontFamily: MONO };
 
 const BTN_BASE: CSSProperties = {
   padding: "5px 12px", borderRadius: 6, fontSize: 11, fontWeight: 500,
   border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center",
-  gap: 5, transition: "opacity .15s, background .15s",
+  gap: 5, transition: `opacity .15s ${EASE}, background .15s ${EASE}`,
 };
 
 const ICON_SM: CSSProperties = { width: 13, height: 13 };
@@ -593,7 +594,7 @@ export function WorkspaceView() {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <FolderOpen style={{ width: 16, height: 16, color: "var(--accent)" }} />
           <h2 style={{ color: "var(--text)", fontSize: 15, fontWeight: 600, margin: 0 }}>Workspace</h2>
-          <span style={{ fontSize: 11, color: "var(--text-muted)", ...MONO }}>~/.openclaw/workspace/</span>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", ...MONO_STYLE }}>~/.openclaw/workspace/</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {feedback && (
@@ -685,6 +686,8 @@ export function WorkspaceView() {
               <button
                 onClick={handleSave}
                 disabled={saving || (!isDirty && currentFile.status === "saved")}
+                onMouseDown={pressDown}
+                onMouseUp={pressUp}
                 style={{
                   ...actionBtn(isDirty ? "var(--accent)" : "var(--text-muted)"),
                   opacity: (saving || (!isDirty && currentFile.status === "saved")) ? 0.5 : 1,
@@ -823,7 +826,7 @@ export function WorkspaceView() {
                   border: "none", outline: "none",
                   padding: "16px 20px",
                   fontSize: 13, lineHeight: 1.7,
-                  ...MONO,
+                  ...MONO_STYLE,
                   caretColor: "var(--accent)",
                 }}
                 placeholder={`Start writing ${activeTab}...`}
@@ -924,7 +927,7 @@ export function WorkspaceView() {
               borderBottom: "1px solid var(--border)",
               display: "flex", alignItems: "center", justifyContent: "space-between",
             }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              <span style={{ ...sectionLabel, fontSize: 11, letterSpacing: "0.05em" }}>
                 Templates
               </span>
               <button onClick={() => setSidebarOpen(false)} style={{ ...BTN_BASE, padding: 4, background: "transparent", color: "var(--text-muted)" }}>
@@ -957,7 +960,7 @@ export function WorkspaceView() {
                 <pre style={{
                   margin: 0, fontSize: 10, lineHeight: 1.6,
                   color: "var(--text-muted)", whiteSpace: "pre-wrap", wordBreak: "break-word",
-                  ...MONO,
+                  ...MONO_STYLE,
                 }}>
                   {PRESETS[activeTab] || "No preset available"}
                 </pre>
@@ -966,8 +969,7 @@ export function WorkspaceView() {
               {/* Quick apply other presets */}
               <div style={{ marginTop: 20 }}>
                 <p style={{
-                  fontSize: 10, fontWeight: 600, textTransform: "uppercase",
-                  letterSpacing: 1, color: "var(--text-muted)", margin: "0 0 8px",
+                  ...sectionLabel, margin: "0 0 8px",
                 }}>
                   Other Files
                 </p>
@@ -1021,7 +1023,7 @@ function OrderField({ label, value, onChange, placeholder }: {
           background: "var(--bg-base)", color: "var(--text)",
           border: "1px solid var(--border)", borderRadius: 5,
           fontSize: 11, outline: "none",
-          fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+          fontFamily: MONO,
           boxSizing: "border-box",
         }}
       />

@@ -3,6 +3,7 @@ import { Activity, Trash2, Terminal, MessageSquare, AlertTriangle, Heart, Zap, R
 import { invoke } from "@tauri-apps/api/core";
 import { openclawClient, ActivityEntry } from "@/lib/openclaw";
 import { useAppStore } from "@/stores/appStore";
+import { EASE, MONO, innerPanel, emptyState } from "@/styles/viewStyles";
 
 const TYPE_META: Record<string, { icon: React.ElementType; color: string; label: string }> = {
   chat: { icon: MessageSquare, color: "#3B82F6", label: "Chat" },
@@ -47,7 +48,7 @@ export function ActivityView() {
                 background: isActive ? "rgba(59,130,246,0.15)" : "transparent",
                 color: isActive ? "#60a5fa" : "rgba(255,255,255,0.45)",
                 borderBottom: isActive ? "2px solid #3B82F6" : "2px solid transparent",
-                transition: "all 0.15s",
+                transition: `all 0.15s ${EASE}`,
               }}
               onMouseEnter={e => {
                 if (!isActive) e.currentTarget.style.background = "rgba(255,255,255,0.04)";
@@ -157,9 +158,9 @@ function ActivityFeedTab() {
       </div>
 
       {/* Log entries */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 12px", fontFamily: "monospace" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 12px", fontFamily: MONO }}>
         {filtered.length === 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 40, gap: 8 }}>
+          <div style={emptyState}>
             <Activity style={{ width: 32, height: 32, color: "rgba(255,255,255,0.15)" }} />
             <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", fontFamily: "inherit" }}>
               {gatewayConnected ? "Waiting for activity..." : "Connect gateway to see live activity"}
@@ -346,7 +347,7 @@ function GatewayLogsTab() {
                 border: "none", fontSize: 10, cursor: "pointer",
                 background: following ? "rgba(74,222,128,0.15)" : "rgba(255,255,255,0.06)",
                 color: following ? "#4ade80" : "rgba(255,255,255,0.5)",
-                transition: "all 0.15s",
+                transition: `all 0.15s ${EASE}`,
               }}
             >
               {following
@@ -363,7 +364,7 @@ function GatewayLogsTab() {
                 background: "rgba(59,130,246,0.12)",
                 color: "#60a5fa",
                 opacity: loading ? 0.5 : 1,
-                transition: "all 0.15s",
+                transition: `all 0.15s ${EASE}`,
               }}
             >
               <RefreshCw style={{ width: 10, height: 10 }} />
@@ -376,7 +377,7 @@ function GatewayLogsTab() {
                 border: "none", fontSize: 10, cursor: "pointer",
                 background: "rgba(255,255,255,0.06)",
                 color: copied ? "#4ade80" : "rgba(255,255,255,0.5)",
-                transition: "all 0.15s",
+                transition: `all 0.15s ${EASE}`,
               }}
             >
               {copied
@@ -416,7 +417,7 @@ function GatewayLogsTab() {
             style={{
               flex: 1, background: "transparent", border: "none",
               color: "white", fontSize: 11, outline: "none",
-              fontFamily: "'JetBrains Mono', monospace",
+              fontFamily: MONO,
             }}
           />
           {searchQuery && (
@@ -431,20 +432,16 @@ function GatewayLogsTab() {
       <div
         ref={containerRef}
         style={{
+          ...innerPanel,
           flex: 1, overflowY: "auto", margin: "0 20px 12px",
           background: "rgba(0,0,0,0.3)",
-          border: "1px solid rgba(255,255,255,0.06)",
-          borderRadius: 8,
-          fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+          fontFamily: MONO,
           fontSize: 11,
           lineHeight: 1.6,
         }}
       >
         {error ? (
-          <div style={{
-            display: "flex", flexDirection: "column", alignItems: "center",
-            padding: 40, gap: 8,
-          }}>
+          <div style={emptyState}>
             <AlertTriangle style={{ width: 24, height: 24, color: "#f87171" }} />
             <p style={{ fontSize: 12, color: "#f87171", textAlign: "center", margin: 0 }}>
               Failed to fetch logs
@@ -465,10 +462,7 @@ function GatewayLogsTab() {
             </button>
           </div>
         ) : filteredEntries.length === 0 ? (
-          <div style={{
-            display: "flex", flexDirection: "column", alignItems: "center",
-            padding: 40, gap: 8,
-          }}>
+          <div style={emptyState}>
             <Terminal style={{ width: 24, height: 24, color: "rgba(255,255,255,0.15)" }} />
             <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0 }}>
               {loading ? "Fetching logs..." : searchQuery ? "No matching log entries" : "No log entries found"}

@@ -37,7 +37,7 @@ const HooksView = lazy(() => import("@/components/views/HooksView").then(m => ({
 const DoctorView = lazy(() => import("@/components/views/DoctorView").then(m => ({ default: m.DoctorView })));
 const NodesView = lazy(() => import("@/components/views/NodesView").then(m => ({ default: m.NodesView })));
 const BrowserView = lazy(() => import("@/components/views/BrowserView").then(m => ({ default: m.BrowserView })));
-const OfficeView = lazy(() => import("@/components/views/OfficeView").then(m => ({ default: m.OfficeView })));
+
 const FactoryView = lazy(() => import("@/components/views/FactoryView").then(m => ({ default: m.FactoryView })));
 const WorkspaceView = lazy(() => import("@/components/views/WorkspaceView").then(m => ({ default: m.WorkspaceView })));
 const MessagingView = lazy(() => import("@/components/views/MessagingView").then(m => ({ default: m.MessagingView })));
@@ -49,17 +49,16 @@ const VoiceCallView = lazy(() => import("@/components/views/VoiceCallView").then
 const TasksView = lazy(() => import("@/components/views/TasksView").then(m => ({ default: m.TasksView })));
 const ApprovalsView = lazy(() => import("@/components/views/ApprovalsView").then(m => ({ default: m.ApprovalsView })));
 const CityView = lazy(() => import("@/components/views/CityView").then(m => ({ default: m.CityView })));
+const UsageView = lazy(() => import("@/components/views/UsageView").then(m => ({ default: m.UsageView })));
 
 const KEEP_ALIVE_MS = 30_000;
 
 function ViewSlot({ id, active, children }: { id: string; active: boolean; children: React.ReactNode }) {
   const mountedRef = useRef(false);
-  const lastActiveRef = useRef(0);
   const [alive, setAlive] = useState(false);
 
   if (active) {
     mountedRef.current = true;
-    lastActiveRef.current = Date.now();
   }
 
   useEffect(() => {
@@ -221,7 +220,7 @@ function App() {
                   <ViewSlot id="doctor" active={currentView === "doctor"}><DoctorView /></ViewSlot>
                   <ViewSlot id="nodes" active={currentView === "nodes"}><NodesView /></ViewSlot>
                   <ViewSlot id="browser" active={currentView === "browser"}><BrowserView /></ViewSlot>
-                  <ViewSlot id="office" active={currentView === "office"}><OfficeView /></ViewSlot>
+
                   <ViewSlot id="factory" active={currentView === "factory"}><FactoryView /></ViewSlot>
                   <ViewSlot id="workspace" active={currentView === "workspace"}><WorkspaceView /></ViewSlot>
                   <ViewSlot id="messaging" active={currentView === "messaging"}><MessagingView /></ViewSlot>
@@ -233,6 +232,7 @@ function App() {
                   <ViewSlot id="tasks" active={currentView === "tasks"}><TasksView /></ViewSlot>
                   <ViewSlot id="approvals" active={currentView === "approvals"}><ApprovalsView /></ViewSlot>
                   <ViewSlot id="city" active={currentView === "city"}><CityView /></ViewSlot>
+                  <ViewSlot id="usage" active={currentView === "usage"}><UsageView /></ViewSlot>
                 </Suspense>
               </ErrorBoundary>
             </main>

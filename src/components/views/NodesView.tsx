@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { escapeShellArg } from "@/lib/tools";
+import { EASE, glowCard, hoverLift, hoverReset, pressDown, pressUp, innerPanel, sectionLabel, inputStyle, emptyState, btnPrimary, MONO } from "@/styles/viewStyles";
 
 interface NodeItem {
   id: string;
@@ -186,17 +187,14 @@ export function NodesView() {
               onKeyDown={(e) => e.key === "Enter" && notifyAll()}
               placeholder="Notification message..."
               autoFocus
-              style={{
-                flex: 1, padding: "7px 10px", borderRadius: 8, background: "rgba(255,255,255,0.04)",
-                border: "1px solid var(--border)", color: "var(--text)", fontSize: 12, outline: "none",
-              }}
+              style={{ ...inputStyle, flex: 1 }}
             />
             <button
               onClick={notifyAll}
               disabled={runningAction === "notify" || !notifyMessage.trim()}
+              onMouseDown={pressDown} onMouseUp={pressUp}
               style={{
-                display: "flex", alignItems: "center", gap: 4, padding: "7px 14px", borderRadius: 8,
-                border: "none", background: "var(--accent)", color: "var(--text)", fontSize: 11, cursor: "pointer",
+                ...btnPrimary, display: "flex", alignItems: "center", gap: 4,
                 opacity: runningAction === "notify" || !notifyMessage.trim() ? 0.5 : 1, flexShrink: 0,
               }}
             >
@@ -265,7 +263,7 @@ export function NodesView() {
 
         {/* Node list */}
         <div style={{ marginBottom: 16 }}>
-          <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 500, display: "block", marginBottom: 6, textTransform: "uppercase", letterSpacing: 1 }}>
+          <span style={sectionLabel}>
             Nodes
           </span>
 
@@ -274,8 +272,8 @@ export function NodesView() {
               <Loader2 style={{ width: 20, height: 20, color: "rgba(255,255,255,0.3)" }} className="animate-spin" />
             </div>
           ) : filtered.length === 0 ? (
-            <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "24px 16px", textAlign: "center" }}>
-              <Network style={{ width: 28, height: 28, color: "rgba(255,255,255,0.12)", margin: "0 auto 8px", display: "block" }} />
+            <div style={emptyState}>
+              <Network style={{ width: 28, height: 28, color: "rgba(255,255,255,0.12)" }} />
               <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0 }}>
                 {nodes.length === 0 ? "No nodes found" : "No nodes match your filter"}
               </p>
@@ -291,10 +289,12 @@ export function NodesView() {
                 return (
                   <div
                     key={node.id}
-                    style={{
-                      background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
-                      borderRadius: 10, padding: "10px 14px",
-                    }}
+                    data-glow="var(--accent)"
+                    onMouseEnter={hoverLift}
+                    onMouseLeave={hoverReset}
+                    style={glowCard("var(--accent)", {
+                      padding: "10px 14px",
+                    })}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <Network style={{ width: 14, height: 14, color: "var(--accent)", flexShrink: 0 }} />
@@ -320,7 +320,7 @@ export function NodesView() {
                             </span>
                           )}
                         </div>
-                        <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "monospace" }}>{node.id}</span>
+                        <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: MONO }}>{node.id}</span>
                       </div>
 
                       <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
@@ -328,10 +328,11 @@ export function NodesView() {
                           onClick={() => { setPromptTarget({ nodeId: node.id, action: "run" }); setPromptInput(""); }}
                           disabled={runningAction === actionKey}
                           title="Run"
+                          onMouseDown={pressDown} onMouseUp={pressUp}
                           style={{
                             display: "flex", alignItems: "center", gap: 3, padding: "4px 8px", borderRadius: 6,
                             border: "none", background: "rgba(59,130,246,0.15)", color: "var(--accent)",
-                            fontSize: 10, cursor: "pointer",
+                            fontSize: 10, cursor: "pointer", transition: `all 0.2s ${EASE}`,
                           }}
                         >
                           {runningAction === actionKey
@@ -343,10 +344,11 @@ export function NodesView() {
                           onClick={() => { setPromptTarget({ nodeId: node.id, action: "invoke" }); setPromptInput(""); }}
                           disabled={runningAction === invokeKey}
                           title="Invoke"
+                          onMouseDown={pressDown} onMouseUp={pressUp}
                           style={{
                             display: "flex", alignItems: "center", gap: 3, padding: "4px 8px", borderRadius: 6,
                             border: "none", background: "rgba(168,85,247,0.15)", color: "#c084fc",
-                            fontSize: 10, cursor: "pointer",
+                            fontSize: 10, cursor: "pointer", transition: `all 0.2s ${EASE}`,
                           }}
                         >
                           {runningAction === invokeKey
@@ -374,11 +376,8 @@ export function NodesView() {
                 Dismiss
               </button>
             </div>
-            <div style={{
-              background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: 10, padding: "10px 14px",
-            }}>
-              <pre style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,0.6)", fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            <div style={{ ...innerPanel, padding: "10px 14px" }}>
+              <pre style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,0.6)", fontFamily: MONO, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                 {output}
               </pre>
             </div>

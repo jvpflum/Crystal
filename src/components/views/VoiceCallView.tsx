@@ -10,6 +10,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { EASE, hoverLift, hoverReset, pressDown, pressUp, innerPanel, sectionLabel, inputStyle, btnPrimary, emptyState, MONO } from "@/styles/viewStyles";
 
 interface CallRecord {
   id: string;
@@ -225,7 +226,7 @@ export function VoiceCallView() {
         {/* Call Form */}
         <div style={{ marginBottom: 16 }}>
           <SectionLabel text="MAKE A CALL" />
-          <div style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px" }}>
+          <div style={{ ...innerPanel, padding: "14px" }} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
             {/* To */}
             <div style={{ marginBottom: 10 }}>
               <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 4 }}>
@@ -236,9 +237,7 @@ export function VoiceCallView() {
                 onChange={(e) => setCallTo(e.target.value)}
                 placeholder="+1 (555) 123-4567"
                 style={{
-                  width: "100%", fontSize: 12, padding: "7px 10px", borderRadius: 6,
-                  border: "1px solid var(--border)", background: "var(--bg-hover)",
-                  color: "var(--text)", fontFamily: "monospace", outline: "none", boxSizing: "border-box",
+                  ...inputStyle, fontFamily: MONO, boxSizing: "border-box",
                 }}
               />
             </div>
@@ -254,9 +253,7 @@ export function VoiceCallView() {
                 placeholder="What should the agent say?"
                 rows={3}
                 style={{
-                  width: "100%", fontSize: 12, padding: "7px 10px", borderRadius: 6,
-                  border: "1px solid var(--border)", background: "var(--bg-hover)",
-                  color: "var(--text)", outline: "none", resize: "vertical",
+                  ...inputStyle, resize: "vertical",
                   fontFamily: "inherit", boxSizing: "border-box",
                 }}
               />
@@ -292,9 +289,11 @@ export function VoiceCallView() {
             <button
               onClick={makeCall}
               disabled={calling || !callTo.trim() || !callMessage.trim()}
+              onMouseDown={pressDown}
+              onMouseUp={pressUp}
               style={{
-                width: "100%", padding: "9px 14px", borderRadius: 8, border: "none",
-                background: "var(--accent)", color: "#fff",
+                ...btnPrimary,
+                width: "100%", padding: "9px 14px",
                 fontSize: 12, fontWeight: 600, cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                 opacity: calling || !callTo.trim() || !callMessage.trim() ? 0.5 : 1,
@@ -311,9 +310,9 @@ export function VoiceCallView() {
           <div style={{ marginBottom: 16 }}>
             <SectionLabel text="ACTIVE CALL" />
             <div style={{
-              background: "var(--bg-elevated)", border: "1px solid rgba(74,222,128,0.2)",
-              borderRadius: 10, padding: "14px",
-            }}>
+              ...innerPanel, border: "1px solid rgba(74,222,128,0.2)",
+              padding: "14px",
+            }} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
               {/* Call info */}
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
                 <div style={{
@@ -325,7 +324,7 @@ export function VoiceCallView() {
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", fontFamily: "monospace" }}>{activeCall.to}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", fontFamily: MONO }}>{activeCall.to}</span>
                     <span style={{
                       fontSize: 9, padding: "2px 7px", borderRadius: 8,
                       background: `color-mix(in srgb, ${statusColor(activeCall.status)} 12%, transparent)`,
@@ -341,7 +340,7 @@ export function VoiceCallView() {
                       {activeCall.mode}
                     </span>
                   </div>
-                  <code style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace" }}>ID: {activeCall.id}</code>
+                  <code style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO }}>ID: {activeCall.id}</code>
                 </div>
               </div>
 
@@ -414,7 +413,7 @@ export function VoiceCallView() {
         {/* Expose Webhooks */}
         <div style={{ marginBottom: 16 }}>
           <SectionLabel text="EXPOSE WEBHOOKS" />
-          <div style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px" }}>
+          <div style={{ ...innerPanel, padding: "14px" }} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
             <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
               {(["serve", "funnel", "off"] as const).map((m) => (
                 <button
@@ -435,6 +434,8 @@ export function VoiceCallView() {
             <button
               onClick={handleExpose}
               disabled={exposing}
+              onMouseDown={pressDown}
+              onMouseUp={pressUp}
               style={{
                 width: "100%", padding: "8px 14px", borderRadius: 8, border: "none",
                 background: "rgba(168,85,247,0.12)", color: "#c084fc",
@@ -449,9 +450,9 @@ export function VoiceCallView() {
 
             {exposeResult && (
               <div style={{
-                marginTop: 10, padding: "8px 10px", borderRadius: 6, fontSize: 10, fontFamily: "monospace",
+                marginTop: 10, padding: "8px 10px", borderRadius: 6, fontSize: 10, fontFamily: MONO,
                 background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.2)",
-                color: "var(--success)", whiteSpace: "pre-wrap", wordBreak: "break-word",
+                color: "var(--success)", whiteSpace: "pre-wrap", wordBreak: "break-word", transition: `all 0.2s ${EASE}`,
               }}>
                 {exposeResult}
               </div>
@@ -464,13 +465,13 @@ export function VoiceCallView() {
           <SectionLabel text={`CALL HISTORY (${callHistory.length})`} />
 
           {callHistory.length === 0 ? (
-            <div style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: "24px 16px", textAlign: "center" }}>
-              <Phone style={{ width: 28, height: 28, color: "var(--text-muted)", margin: "0 auto 8px", display: "block", opacity: 0.4 }} />
+            <div style={{ ...emptyState, ...innerPanel }}>
+              <Phone style={{ width: 28, height: 28, color: "var(--text-muted)", opacity: 0.4 }} />
               <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>No calls made yet</p>
               <p style={{ fontSize: 10, color: "var(--text-muted)", margin: "4px 0 0", opacity: 0.7 }}>Calls placed during this session will appear here</p>
             </div>
           ) : (
-            <div style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+            <div style={{ ...innerPanel, overflow: "hidden" }}>
               {callHistory.map((call, i) => (
                 <div
                   key={`${call.id}-${i}`}
@@ -482,7 +483,7 @@ export function VoiceCallView() {
                   <Phone style={{ width: 12, height: 12, color: "var(--text-muted)", flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text)", fontFamily: "monospace" }}>{call.to}</span>
+                      <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text)", fontFamily: MONO }}>{call.to}</span>
                       <span style={{
                         fontSize: 9, padding: "1px 6px", borderRadius: 8,
                         background: `color-mix(in srgb, ${statusColor(call.status)} 12%, transparent)`,
@@ -495,7 +496,7 @@ export function VoiceCallView() {
                       </span>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
-                      <code style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: "monospace" }}>{call.id}</code>
+                      <code style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: MONO }}>{call.id}</code>
                       <span style={{ fontSize: 9, color: "var(--text-muted)" }}>{call.timestamp}</span>
                     </div>
                   </div>
@@ -513,10 +514,7 @@ export function VoiceCallView() {
 
 function SectionLabel({ text }: { text: string }) {
   return (
-    <span style={{
-      fontSize: 10, textTransform: "uppercase", color: "var(--text-muted)",
-      letterSpacing: "0.06em", fontWeight: 600, display: "block", marginBottom: 8,
-    }}>
+    <span style={{ ...sectionLabel, display: "block", marginBottom: 8 }}>
       {text}
     </span>
   );

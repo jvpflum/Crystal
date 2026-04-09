@@ -10,6 +10,7 @@ import {
   pickSubagentListJson,
   pickAcpSessionsJson,
 } from "@/lib/openclaw";
+import { EASE, MONO, innerPanel, inputStyle, btnPrimary, btnSecondary, sectionLabel, emptyState, row as rowStyle, hoverLift, hoverReset, pressDown, pressUp, scrollArea } from "@/styles/viewStyles";
 
 interface SubAgent {
   id: string;
@@ -36,40 +37,33 @@ type Runtime = typeof RUNTIMES[number];
 type SpawnMode = "subagent" | "acp";
 
 const CARD: React.CSSProperties = {
-  background: "var(--bg-elevated)", border: "1px solid var(--border)",
-  borderRadius: 10, overflow: "hidden",
+  ...innerPanel, overflow: "hidden",
 };
 const ROW: React.CSSProperties = {
-  display: "flex", alignItems: "center", justifyContent: "space-between",
+  ...rowStyle, justifyContent: "space-between",
   padding: "10px 14px", borderBottom: "1px solid var(--border)",
 };
 const SECT: React.CSSProperties = {
-  fontSize: 10, fontWeight: 600, textTransform: "uppercase",
-  letterSpacing: 0.5, color: "var(--text-muted)", marginBottom: 8,
+  ...sectionLabel,
 };
 const BTN_P: React.CSSProperties = {
-  display: "flex", alignItems: "center", gap: 5, padding: "6px 12px",
-  borderRadius: 6, border: "none", background: "var(--accent-bg)",
-  color: "var(--accent)", fontSize: 11, fontWeight: 500, cursor: "pointer",
+  ...btnPrimary, display: "flex", alignItems: "center", gap: 5, padding: "6px 12px",
+  borderRadius: 6, fontSize: 11,
 };
 const BTN_G: React.CSSProperties = {
-  display: "flex", alignItems: "center", gap: 4, padding: "5px 10px",
-  borderRadius: 6, border: "1px solid var(--border)", background: "transparent",
-  color: "var(--text-muted)", fontSize: 11, cursor: "pointer",
+  ...btnSecondary, display: "flex", alignItems: "center", gap: 4, padding: "5px 10px",
+  borderRadius: 6, background: "transparent",
 };
 const BTN_DANGER: React.CSSProperties = {
   display: "flex", alignItems: "center", gap: 4, padding: "5px 10px",
   borderRadius: 6, border: "1px solid rgba(248,113,113,0.3)",
   background: "rgba(248,113,113,0.08)", color: "#f87171",
-  fontSize: 11, cursor: "pointer",
+  fontSize: 11, cursor: "pointer", transition: `all 0.15s ${EASE}`,
 };
 const INPUT: React.CSSProperties = {
-  background: "var(--bg-input)", border: "1px solid var(--border)",
-  borderRadius: 6, padding: "6px 10px", color: "var(--text)", fontSize: 12,
-  outline: "none", fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+  ...inputStyle, fontFamily: MONO, padding: "6px 10px",
   boxSizing: "border-box" as const,
 };
-const MONO: React.CSSProperties = { fontFamily: "'JetBrains Mono', 'Fira Code', monospace" };
 
 export function SubagentsView() {
   const [subagents, setSubagents] = useState<SubAgent[]>([]);
@@ -300,12 +294,13 @@ export function SubagentsView() {
             <button
               onClick={() => subagentAction("Kill All", "/subagents kill all")}
               disabled={isLoading("Kill All") || subagents.filter(s => s.source === "subagent").length === 0}
+              onMouseDown={pressDown} onMouseUp={pressUp}
               style={{ ...BTN_DANGER, opacity: subagents.filter(s => s.source === "subagent").length === 0 ? 0.4 : 1 }}
             >
               {isLoading("Kill All") ? <Loader2 style={{ width: 10, height: 10, animation: "spin 1s linear infinite" }} /> : <Square style={{ width: 10, height: 10 }} />}
               Kill All
             </button>
-            <button onClick={loadSubagents} disabled={loading} style={BTN_P}>
+            <button onClick={loadSubagents} disabled={loading} onMouseDown={pressDown} onMouseUp={pressUp} style={BTN_P}>
               <RefreshCw style={{ width: 12, height: 12, ...(loading ? { animation: "spin 1s linear infinite" } : {}) }} /> Refresh
             </button>
           </div>
@@ -336,7 +331,7 @@ export function SubagentsView() {
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 20px" }}>
+      <div style={{ ...scrollArea, padding: "0 20px 20px" }}>
         {/* Spawn Form */}
         <div style={{ marginBottom: 20 }}>
           <button
@@ -500,6 +495,7 @@ export function SubagentsView() {
 
                 <div style={{ display: "flex", justifyContent: "flex-end" }}>
                   <button onClick={spawnSubagent} disabled={spawning || !spawnTask.trim()}
+                    onMouseDown={pressDown} onMouseUp={pressUp}
                     style={{
                       ...BTN_P, padding: "8px 20px",
                       background: spawnTask.trim() ? "var(--accent)" : "var(--bg-hover)",
@@ -525,15 +521,19 @@ export function SubagentsView() {
               <Loader2 style={{ width: 24, height: 24, color: "var(--accent)", animation: "spin 1s linear infinite" }} />
             </div>
           ) : subagents.length === 0 ? (
-            <div style={{ ...CARD, padding: "24px 14px", textAlign: "center" }}>
-              <Bot style={{ width: 28, height: 28, color: "var(--text-muted)", opacity: 0.3, margin: "0 auto 8px" }} />
+            <div style={{ ...CARD, ...emptyState }}>
+              <Bot style={{ width: 28, height: 28, color: "var(--text-muted)", opacity: 0.3 }} />
               <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0 }}>No active agents</p>
               <p style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4, opacity: 0.6 }}>Use the Spawn form above to create a sub-agent or ACP session</p>
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {subagents.map(sa => (
-                <div key={`${sa.source}-${sa.id}`} style={CARD}>
+                <div key={`${sa.source}-${sa.id}`} style={CARD}
+                  data-glow={statusColor(sa.status)}
+                  onMouseEnter={hoverLift}
+                  onMouseLeave={hoverReset}
+                >
                   <div style={ROW}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
                       <div style={{
@@ -548,7 +548,7 @@ export function SubagentsView() {
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", ...MONO }}>{sa.id}</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", fontFamily: MONO }}>{sa.id}</span>
                           {sa.label && <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{sa.label}</span>}
                           <span style={{
                             fontSize: 8, padding: "2px 6px", borderRadius: 4, fontWeight: 600,
@@ -578,9 +578,9 @@ export function SubagentsView() {
                           </p>
                         )}
                         <div style={{ display: "flex", gap: 8, marginTop: 3 }}>
-                          {sa.model && <span style={{ fontSize: 9, color: "var(--text-muted)", ...MONO }}>{sa.model}</span>}
+                          {sa.model && <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: MONO }}>{sa.model}</span>}
                           {sa.thinking && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: "var(--bg-hover)", color: "var(--text-muted)" }}>thinking: {sa.thinking}</span>}
-                          {sa.cwd && <span style={{ fontSize: 9, color: "var(--text-muted)", ...MONO }}>cwd: {sa.cwd}</span>}
+                          {sa.cwd && <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: MONO }}>cwd: {sa.cwd}</span>}
                         </div>
                       </div>
                     </div>
@@ -723,7 +723,7 @@ export function SubagentsView() {
             <pre style={{
               margin: 0, padding: "10px 14px", borderRadius: 10,
               background: "var(--bg-elevated)", border: "1px solid var(--border)",
-              fontSize: 11, ...MONO, color: "var(--text-secondary)",
+              fontSize: 11, fontFamily: MONO, color: "var(--text-secondary)",
               whiteSpace: "pre-wrap", wordBreak: "break-word",
               maxHeight: 300, overflowY: "auto",
             }}>

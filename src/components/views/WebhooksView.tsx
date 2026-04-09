@@ -12,6 +12,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { EASE, hoverLift, hoverReset, pressDown, pressUp, innerPanel, sectionLabel, MONO } from "@/styles/viewStyles";
 
 interface HookConfig {
   enabled: boolean;
@@ -255,7 +256,7 @@ export function WebhooksView() {
             {/* Configuration Card */}
             <div style={{ marginBottom: 16 }}>
               <SectionLabel text="CONFIGURATION" />
-              <div style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px" }}>
+              <div style={{ ...innerPanel, padding: "14px" }} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
                 {/* Enable/Disable toggle */}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
                   <div>
@@ -268,7 +269,7 @@ export function WebhooksView() {
                     style={{
                       width: 40, height: 22, borderRadius: 11, border: "none", cursor: "pointer",
                       background: enabled ? "rgba(74,222,128,0.3)" : "var(--border)",
-                      position: "relative", flexShrink: 0, transition: "background 0.2s",
+                      position: "relative", flexShrink: 0, transition: `background 0.2s ${EASE}`,
                       opacity: saving === "enabled" ? 0.5 : 1,
                     }}
                   >
@@ -277,7 +278,7 @@ export function WebhooksView() {
                       background: enabled ? "var(--success)" : "rgba(255,255,255,0.4)",
                       position: "absolute", top: 3,
                       left: enabled ? 21 : 3,
-                      transition: "left 0.2s, background 0.2s",
+                      transition: `left 0.2s ${EASE}, background 0.2s ${EASE}`,
                     }} />
                   </button>
                 </div>
@@ -285,7 +286,7 @@ export function WebhooksView() {
                 {/* Token */}
                 <div style={{ marginBottom: 12 }}>
                   <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 4 }}>
-                    Token {config?.token && <span style={{ fontFamily: "monospace", color: "var(--text-secondary)" }}>({maskToken(config.token)})</span>}
+                    Token {config?.token && <span style={{ fontFamily: MONO, color: "var(--text-secondary)" }}>({maskToken(config.token)})</span>}
                   </label>
                   <div style={{ display: "flex", gap: 6 }}>
                     <input
@@ -327,7 +328,7 @@ export function WebhooksView() {
                       style={{
                         flex: 1, fontSize: 12, padding: "7px 10px", borderRadius: 6,
                         border: "1px solid var(--border)", background: "var(--bg-hover)",
-                        color: "var(--text)", fontFamily: "monospace", outline: "none",
+                        color: "var(--text)", fontFamily: MONO, outline: "none",
                       }}
                     />
                     <button
@@ -354,7 +355,7 @@ export function WebhooksView() {
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                       {config.allowedAgentIds.map((id) => (
                         <span key={id} style={{
-                          fontSize: 10, fontFamily: "monospace", padding: "2px 8px", borderRadius: 6,
+                          fontSize: 10, fontFamily: MONO, padding: "2px 8px", borderRadius: 6,
                           background: "var(--accent-bg)", color: "var(--accent)", border: "1px solid rgba(59,130,246,0.15)",
                         }}>
                           {id}
@@ -367,9 +368,10 @@ export function WebhooksView() {
             </div>
 
             {/* Webhook URLs */}
+
             <div style={{ marginBottom: 16 }}>
               <SectionLabel text="WEBHOOK URLS" />
-              <div style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+              <div style={{ ...innerPanel, overflow: "hidden" }}>
                 <UrlRow label="Wake" url={wakeUrl} copied={copied} onCopy={copyToClipboard} />
                 <UrlRow label="Agent" url={agentUrl} copied={copied} onCopy={copyToClipboard} last />
               </div>
@@ -378,11 +380,13 @@ export function WebhooksView() {
             {/* Test Card */}
             <div style={{ marginBottom: 16 }}>
               <SectionLabel text="TEST WEBHOOKS" />
-              <div style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px" }}>
+              <div style={{ ...innerPanel, padding: "14px" }} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
                 <div style={{ display: "flex", gap: 8, marginBottom: testResult ? 10 : 0 }}>
                   <button
                     onClick={() => testWebhook("wake")}
                     disabled={testing !== null}
+                    onMouseDown={pressDown}
+                    onMouseUp={pressUp}
                     style={{
                       flex: 1, padding: "8px 14px", borderRadius: 8, border: "none",
                       background: "rgba(74,222,128,0.1)", color: "var(--success)",
@@ -397,6 +401,8 @@ export function WebhooksView() {
                   <button
                     onClick={() => testWebhook("agent")}
                     disabled={testing !== null}
+                    onMouseDown={pressDown}
+                    onMouseUp={pressUp}
                     style={{
                       flex: 1, padding: "8px 14px", borderRadius: 8, border: "none",
                       background: "var(--accent-bg)", color: "var(--accent)",
@@ -412,7 +418,7 @@ export function WebhooksView() {
 
                 {testResult && (
                   <div style={{
-                    padding: "8px 10px", borderRadius: 6, fontSize: 10, fontFamily: "monospace",
+                    padding: "8px 10px", borderRadius: 6, fontSize: 10, fontFamily: MONO,
                     background: testResult.ok ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
                     border: `1px solid ${testResult.ok ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)"}`,
                     color: testResult.ok ? "var(--success)" : "var(--error)",
@@ -429,7 +435,7 @@ export function WebhooksView() {
             {/* Gmail Integration Card */}
             <div style={{ marginBottom: 16 }}>
               <SectionLabel text="GMAIL INTEGRATION" />
-              <div style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px" }}>
+              <div style={{ ...innerPanel, padding: "14px" }} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
                 <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
                   <input
                     value={gmailEmail}
@@ -474,7 +480,7 @@ export function WebhooksView() {
 
                 {gmailStatus && (
                   <div style={{
-                    marginTop: 10, padding: "8px 10px", borderRadius: 6, fontSize: 10, fontFamily: "monospace",
+                    marginTop: 10, padding: "8px 10px", borderRadius: 6, fontSize: 10, fontFamily: MONO,
                     background: gmailStatus.startsWith("Error") ? "rgba(248,113,113,0.08)" : "rgba(74,222,128,0.08)",
                     border: `1px solid ${gmailStatus.startsWith("Error") ? "rgba(248,113,113,0.2)" : "rgba(74,222,128,0.2)"}`,
                     color: gmailStatus.startsWith("Error") ? "var(--error)" : "var(--success)",
@@ -489,7 +495,7 @@ export function WebhooksView() {
             {/* Docs */}
             <div>
               <SectionLabel text="DOCUMENTATION" />
-              <div style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px" }}>
+              <div style={{ ...innerPanel, padding: "12px 14px" }}>
                 <a
                   href="https://docs.openclaw.ai/webhooks"
                   target="_blank"
@@ -512,10 +518,7 @@ export function WebhooksView() {
 
 function SectionLabel({ text }: { text: string }) {
   return (
-    <span style={{
-      fontSize: 10, textTransform: "uppercase", color: "var(--text-muted)",
-      letterSpacing: "0.06em", fontWeight: 600, display: "block", marginBottom: 8,
-    }}>
+    <span style={{ ...sectionLabel, display: "block", marginBottom: 8 }}>
       {text}
     </span>
   );
@@ -534,7 +537,7 @@ function UrlRow({ label, url, copied, onCopy, last }: {
       borderBottom: last ? "none" : "1px solid var(--border)",
     }}>
       <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", width: 44, textTransform: "uppercase" }}>{label}</span>
-      <code style={{ flex: 1, fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <code style={{ flex: 1, fontSize: 11, color: "var(--text-secondary)", fontFamily: MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {url}
       </code>
       <button

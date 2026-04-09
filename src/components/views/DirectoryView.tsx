@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
+import { EASE, glowCard, hoverLift, hoverReset, pressDown, pressUp, sectionLabel, inputStyle, btnPrimary, MONO } from "@/styles/viewStyles";
 
 /* ── Types ── */
 
@@ -76,34 +77,6 @@ function esc(s: string): string {
 
 const PREFILL_KEY = "crystal-messaging-prefill";
 
-/* ── Shared styles ── */
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "8px 10px",
-  borderRadius: 8,
-  background: "var(--bg-input, var(--bg-hover))",
-  border: "1px solid var(--border)",
-  color: "var(--text)",
-  fontSize: 12,
-  outline: "none",
-  boxSizing: "border-box" as const,
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: 10,
-  color: "var(--text-muted)",
-  fontWeight: 500,
-  display: "block",
-  marginBottom: 4,
-};
-
-const cardStyle: React.CSSProperties = {
-  background: "var(--bg-elevated)",
-  border: "1px solid var(--border)",
-  borderRadius: 10,
-  padding: "12px 14px",
-};
 
 /* ══════════════════════════════════════════════════════════════
    DIRECTORY VIEW
@@ -211,7 +184,7 @@ export function DirectoryView() {
 
         {/* Channel selector bar */}
         <div style={{ marginBottom: 10 }}>
-          <label style={labelStyle}>Channel</label>
+          <label style={sectionLabel}>Channel</label>
           {channelsLoading ? (
             <div
               style={{
@@ -287,7 +260,7 @@ export function DirectoryView() {
                   borderBottom: active
                     ? "2px solid var(--accent)"
                     : "2px solid transparent",
-                  transition: "all 0.15s",
+                  transition: `all 0.15s ${EASE}`,
                 }}
               >
                 <Icon style={{ width: 14, height: 14 }} />
@@ -356,10 +329,13 @@ function SelfTab({ channel }: { channel: string }) {
   return (
     <div style={{ padding: "16px 20px", overflow: "auto", height: "100%" }}>
       <div
-        style={{
-          ...cardStyle,
+        data-glow="var(--accent)"
+        onMouseEnter={hoverLift}
+        onMouseLeave={hoverReset}
+        style={glowCard("var(--accent)", {
+          padding: "12px 14px",
           maxWidth: 500,
-        }}
+        })}
       >
         <div
           style={{
@@ -425,7 +401,7 @@ function SelfTab({ channel }: { channel: string }) {
                 style={{
                   fontSize: 11,
                   color: "var(--text)",
-                  fontFamily: "monospace",
+                  fontFamily: MONO,
                   maxWidth: 250,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
@@ -581,15 +557,15 @@ function PeersTab({ channel }: { channel: string }) {
             {peers.map((peer) => (
               <div
                 key={peer.id}
-                style={{
+                data-glow="var(--accent)"
+                onMouseEnter={hoverLift}
+                onMouseLeave={hoverReset}
+                style={glowCard("var(--accent)", {
                   display: "flex",
                   alignItems: "center",
                   gap: 10,
                   padding: "8px 12px",
-                  borderRadius: 8,
-                  background: "var(--bg-elevated)",
-                  border: "1px solid var(--border)",
-                }}
+                })}
               >
                 <div
                   style={{
@@ -637,7 +613,7 @@ function PeersTab({ channel }: { channel: string }) {
                       style={{
                         fontSize: 10,
                         color: "var(--text-muted)",
-                        fontFamily: "monospace",
+                        fontFamily: MONO,
                       }}
                     >
                       {peer.id}
@@ -669,18 +645,15 @@ function PeersTab({ channel }: { channel: string }) {
                   <button
                     onClick={() => navigateToMessaging(peer.id)}
                     title="Message this peer"
+                    onMouseDown={pressDown}
+                    onMouseUp={pressUp}
                     style={{
+                      ...btnPrimary,
                       display: "flex",
                       alignItems: "center",
                       gap: 4,
                       padding: "4px 10px",
-                      borderRadius: 6,
-                      border: "none",
-                      background: "var(--accent-bg)",
-                      color: "var(--accent)",
                       fontSize: 10,
-                      fontWeight: 500,
-                      cursor: "pointer",
                     }}
                   >
                     <Mail style={{ width: 10, height: 10 }} />
@@ -868,15 +841,12 @@ function GroupsTab({ channel }: { channel: string }) {
               return (
                 <div
                   key={group.id}
-                  style={{
-                    borderRadius: 10,
-                    background: "var(--bg-elevated)",
-                    border: isExpanded
-                      ? "1px solid var(--accent)"
-                      : "1px solid var(--border)",
-                    overflow: "hidden",
-                    transition: "border-color 0.15s",
-                  }}
+                  data-glow="var(--accent)"
+                  onMouseEnter={hoverLift}
+                  onMouseLeave={hoverReset}
+                  style={glowCard("var(--accent)", {
+                    ...(isExpanded ? { border: "1px solid var(--accent)" } : {}),
+                  })}
                 >
                   {/* Group header */}
                   <button
@@ -962,7 +932,7 @@ function GroupsTab({ channel }: { channel: string }) {
                           style={{
                             fontSize: 10,
                             color: "var(--text-muted)",
-                            fontFamily: "monospace",
+                            fontFamily: MONO,
                           }}
                         >
                           {group.id}
@@ -1009,18 +979,15 @@ function GroupsTab({ channel }: { channel: string }) {
                       <button
                         onClick={() => navigateToMessaging(group.id)}
                         title="Message this group"
+                        onMouseDown={pressDown}
+                        onMouseUp={pressUp}
                         style={{
+                          ...btnPrimary,
                           display: "flex",
                           alignItems: "center",
                           gap: 4,
                           padding: "4px 10px",
-                          borderRadius: 6,
-                          border: "none",
-                          background: "var(--accent-bg)",
-                          color: "var(--accent)",
                           fontSize: 10,
-                          fontWeight: 500,
-                          cursor: "pointer",
                         }}
                       >
                         <Mail style={{ width: 10, height: 10 }} />
@@ -1189,7 +1156,7 @@ function CopyButton({ text }: { text: string }) {
         color: copied ? "#4ade80" : "var(--text-muted)",
         cursor: "pointer",
         flexShrink: 0,
-        transition: "all 0.15s",
+        transition: `all 0.15s ${EASE}`,
       }}
     >
       <Copy style={{ width: 10, height: 10 }} />

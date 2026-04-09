@@ -16,6 +16,7 @@ import {
   Database,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { EASE, MONO, innerPanel, sectionLabel, emptyState, badge as sharedBadge, glowCard, hoverLift, hoverReset, pressDown, pressUp, scrollArea } from "@/styles/viewStyles";
 
 interface AuditItem {
   id?: string;
@@ -247,13 +248,13 @@ export function SecurityView() {
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           {hasFixable && (
-            <button onClick={handleFix} disabled={fixing} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: "none", background: "rgba(74,222,128,0.15)", color: "var(--success)", fontSize: 11, cursor: "pointer" }}>
+            <button onClick={handleFix} disabled={fixing} onMouseDown={pressDown} onMouseUp={pressUp} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: "none", background: "rgba(74,222,128,0.15)", color: "var(--success)", fontSize: 11, cursor: "pointer", transition: `all 0.15s ${EASE}` }}>
               {fixing ? <Loader2 style={{ width: 12, height: 12 }} className="animate-spin" /> : <Wrench style={{ width: 12, height: 12 }} />}
               Auto Fix
             </button>
           )}
           {!deepScan && (
-            <button onClick={handleDeepScan} disabled={loading} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.6)", fontSize: 11, cursor: "pointer" }}>
+            <button onClick={handleDeepScan} disabled={loading} onMouseDown={pressDown} onMouseUp={pressUp} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.6)", fontSize: 11, cursor: "pointer", transition: `all 0.15s ${EASE}` }}>
               <Eye style={{ width: 12, height: 12 }} /> Deep Scan
             </button>
           )}
@@ -263,7 +264,7 @@ export function SecurityView() {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "0 20px 20px" }}>
+      <div style={{ ...scrollArea, padding: "0 20px 20px" }}>
         {error && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)", marginBottom: 12 }}>
             <AlertTriangle style={{ width: 14, height: 14, color: "var(--error)", flexShrink: 0 }} />
@@ -275,7 +276,7 @@ export function SecurityView() {
         {/* Score card */}
         {audit?.summary && !loading && (
           <div style={{ marginBottom: 16 }}>
-            <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500, display: "block", marginBottom: 6 }}>Overview</span>
+            <span style={{ ...sectionLabel, display: "block" }}>Overview</span>
             <div style={{ display: "flex", gap: 8 }}>
               <ScoreCard icon={ShieldCheck} label="Passed" count={audit.summary.pass} color="var(--success)" />
               <ScoreCard icon={AlertTriangle} label="Warnings" count={audit.summary.warn} color="var(--warning)" />
@@ -286,7 +287,7 @@ export function SecurityView() {
 
         {/* Audit items */}
         <div style={{ marginBottom: 16 }}>
-          <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500, display: "block", marginBottom: 6 }}>
+          <span style={{ ...sectionLabel, display: "block" }}>
             Audit Results {deepScan && <span style={{ color: "rgba(255,255,255,0.25)" }}>(deep)</span>}
           </span>
 
@@ -295,8 +296,8 @@ export function SecurityView() {
               <Loader2 style={{ width: 20, height: 20, color: "rgba(255,255,255,0.3)" }} className="animate-spin" />
             </div>
           ) : !audit || audit.items.length === 0 ? (
-            <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", borderRadius: 10, padding: "24px 16px", textAlign: "center" }}>
-              <Shield style={{ width: 28, height: 28, color: "rgba(255,255,255,0.12)", margin: "0 auto 8px" }} />
+            <div style={{ ...innerPanel, ...emptyState }}>
+              <Shield style={{ width: 28, height: 28, color: "rgba(255,255,255,0.12)" }} />
               <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0 }}>No audit results available</p>
               <p style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", margin: "4px 0 0" }}>Run an audit to check your security posture</p>
             </div>
@@ -336,12 +337,12 @@ export function SecurityView() {
         {/* Tool permissions */}
         {configLoaded && (
           <div style={{ marginBottom: 16 }}>
-            <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500, display: "block", marginBottom: 6 }}>Tool Permissions</span>
+            <span style={{ ...sectionLabel, display: "block" }}>Tool Permissions</span>
             <div style={{ background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px" }}>
               {toolsAllow.length > 0 ? (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {toolsAllow.map((tool) => (
-                    <span key={tool} style={{ fontSize: 11, fontFamily: "monospace", padding: "3px 10px", borderRadius: 6, background: "rgba(59,130,246,0.12)", color: "var(--accent)", border: "1px solid rgba(59,130,246,0.25)" }}>
+                    <span key={tool} style={{ fontSize: 11, fontFamily: MONO, padding: "3px 10px", borderRadius: 6, background: "rgba(59,130,246,0.12)", color: "var(--accent)", border: "1px solid rgba(59,130,246,0.25)" }}>
                       {tool}
                     </span>
                   ))}
@@ -361,7 +362,7 @@ export function SecurityView() {
         {/* Gateway auth */}
         {configLoaded && (
           <div style={{ marginBottom: 16 }}>
-            <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500, display: "block", marginBottom: 6 }}>Gateway Authentication</span>
+            <span style={{ ...sectionLabel, display: "block" }}>Gateway Authentication</span>
             <div style={{ background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Lock style={{ width: 14, height: 14, color: gatewayAuth === "enabled" ? "var(--success)" : "rgba(255,255,255,0.3)" }} />
@@ -386,10 +387,10 @@ export function SecurityView() {
 
         {/* Secrets Management */}
         <div style={{ marginBottom: 16 }}>
-          <span style={{ fontSize: 10, textTransform: "uppercase", color: "rgba(255,255,255,0.35)", letterSpacing: 1, fontWeight: 600, display: "block", marginBottom: 6 }}>
+          <span style={{ ...sectionLabel, display: "block" }}>
             SECRETS MANAGEMENT
           </span>
-          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "12px 14px" }}>
+          <div style={{ ...innerPanel, padding: "12px 14px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <KeyRound style={{ width: 16, height: 16, color: "var(--warning)", flexShrink: 0 }} />
               <div style={{ flex: 1 }}>
@@ -436,10 +437,10 @@ export function SecurityView() {
 
         {/* Approvals Management */}
         <div style={{ marginBottom: 16 }}>
-          <span style={{ fontSize: 10, textTransform: "uppercase", color: "rgba(255,255,255,0.35)", letterSpacing: 1, fontWeight: 600, display: "block", marginBottom: 6 }}>
+          <span style={{ ...sectionLabel, display: "block" }}>
             APPROVALS MANAGEMENT
           </span>
-          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden" }}>
+          <div style={{ ...innerPanel, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
               <ClipboardCheck style={{ width: 16, height: 16, color: "var(--accent)", flexShrink: 0 }} />
               <div style={{ flex: 1 }}>
@@ -482,7 +483,7 @@ export function SecurityView() {
                       borderBottom: i < approvals.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none",
                     }}
                   >
-                    <span style={{ fontSize: 12, color: "var(--text)", fontFamily: "monospace", flex: 1 }}>{name}</span>
+                    <span style={{ fontSize: 12, color: "var(--text)", fontFamily: MONO, flex: 1 }}>{name}</span>
                     <span style={{
                       fontSize: 9, padding: "2px 8px", borderRadius: 8,
                       background: mode === "auto" ? "rgba(74,222,128,0.1)" : "rgba(251,191,36,0.1)",
@@ -501,10 +502,10 @@ export function SecurityView() {
 
         {/* Memory Reindex */}
         <div style={{ marginBottom: 16 }}>
-          <span style={{ fontSize: 10, textTransform: "uppercase", color: "rgba(255,255,255,0.35)", letterSpacing: 1, fontWeight: 600, display: "block", marginBottom: 6 }}>
+          <span style={{ ...sectionLabel, display: "block" }}>
             MEMORY REINDEX
           </span>
-          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "12px 14px" }}>
+          <div style={{ ...innerPanel, padding: "12px 14px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: memoryStats ? 12 : 0 }}>
               <Database style={{ width: 16, height: 16, color: "#c084fc", flexShrink: 0 }} />
               <div style={{ flex: 1 }}>
@@ -585,7 +586,12 @@ export function SecurityView() {
 
 function ScoreCard({ icon: Icon, label, count, color }: { icon: React.ElementType; label: string; count: number; color: string }) {
   return (
-    <div style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", textAlign: "center" }}>
+    <div
+      style={{ ...glowCard(color, { flex: 1, padding: "12px 14px", textAlign: "center" as const }) }}
+      data-glow={color}
+      onMouseEnter={hoverLift}
+      onMouseLeave={hoverReset}
+    >
       <Icon style={{ width: 18, height: 18, color, margin: "0 auto 6px", display: "block" }} />
       <span style={{ fontSize: 20, fontWeight: 700, color, display: "block" }}>{count}</span>
       <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{label}</span>
@@ -595,7 +601,7 @@ function ScoreCard({ icon: Icon, label, count, color }: { icon: React.ElementTyp
 
 function Badge({ color, count, label }: { color: string; count: number; label: string }) {
   return (
-    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: `${color}15`, color, border: `1px solid ${color}30` }}>
+    <span style={sharedBadge(color)}>
       {count} {label}
     </span>
   );

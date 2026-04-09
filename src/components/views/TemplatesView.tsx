@@ -23,6 +23,7 @@ import {
   Bot,
 } from "lucide-react";
 import { useAppStore } from "@/stores/appStore";
+import { EASE, innerPanel, emptyState, sectionLabel, pressDown, pressUp, glowCard, hoverLift, hoverReset } from "@/styles/viewStyles";
 
 type Workflow = WorkflowDefinition;
 
@@ -210,10 +211,9 @@ export function TemplatesView() {
 
         {showCreateForm && (
           <div style={{
-            margin: "0 8px 8px", padding: 12,
-            background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10,
+            ...innerPanel, margin: "0 8px 8px", padding: 12,
           }}>
-            <p style={{ fontSize: 10, textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: 1, margin: "0 0 8px", fontWeight: 600 }}>
+            <p style={{ ...sectionLabel, margin: "0 0 8px" }}>
               Create Workflow
             </p>
             <input type="text" placeholder="Workflow name" value={newName} onChange={(e) => setNewName(e.target.value)}
@@ -243,7 +243,7 @@ export function TemplatesView() {
               />
             )}
 
-            <p style={{ fontSize: 10, textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: 1, margin: "0 0 6px", fontWeight: 600 }}>Steps</p>
+            <p style={{ ...sectionLabel, margin: "0 0 6px" }}>Steps</p>
             {newSteps.map((step, i) => (
               <div key={i} style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 6 }}>
                 <div style={{ display: "flex", gap: 4 }}>
@@ -301,7 +301,7 @@ export function TemplatesView() {
             ([cat, workflows]) =>
               workflows.length > 0 && (
                 <div key={cat}>
-                  <p style={{ fontSize: 10, textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: 1, padding: "10px 12px 4px", fontWeight: 600, margin: 0, display: "flex", alignItems: "center", gap: 4 }}>
+                  <p style={{ ...sectionLabel, padding: "10px 12px 4px", margin: 0, display: "flex", alignItems: "center", gap: 4 }}>
                     <span style={{ color: CATEGORY_COLORS[cat] }}>{CATEGORY_ICONS[cat]}</span>
                     {cat}
                   </p>
@@ -323,11 +323,12 @@ export function TemplatesView() {
             {/* Header */}
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
               <div style={{
-                width: 48, height: 48, borderRadius: 12,
-                background: `${CATEGORY_COLORS[selected.category]}15`,
-                border: `1px solid ${CATEGORY_COLORS[selected.category]}25`,
-                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24,
-              }}>
+                ...glowCard(CATEGORY_COLORS[selected.category], { width: 48, height: 48, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }),
+              }}
+                data-glow={CATEGORY_COLORS[selected.category]}
+                onMouseEnter={hoverLift}
+                onMouseLeave={hoverReset}
+              >
                 {selected.icon}
               </div>
               <div style={{ flex: 1 }}>
@@ -390,6 +391,8 @@ export function TemplatesView() {
               <button
                 onClick={() => runWorkflow(selected)}
                 disabled={runningId !== null || (selected.needsInput && !userInput.trim())}
+                onMouseDown={pressDown}
+                onMouseUp={pressUp}
                 style={{
                   display: "flex", alignItems: "center", gap: 6,
                   padding: "8px 20px", borderRadius: 8, border: "none",
@@ -398,6 +401,7 @@ export function TemplatesView() {
                   background: runningId ? "var(--bg-hover)" : "var(--accent)",
                   color: "white",
                   opacity: runningId || (selected.needsInput && !userInput.trim()) ? 0.5 : 1,
+                  transition: `all 0.15s ${EASE}`,
                 }}
               >
                 {runningId === selected.id ? (
@@ -423,7 +427,7 @@ export function TemplatesView() {
                 <div style={{ height: 4, borderRadius: 2, background: "var(--bg-hover)", overflow: "hidden" }}>
                   <div style={{
                     height: "100%", width: `${(currentStep / selected.steps.length) * 100}%`,
-                    background: "var(--accent)", borderRadius: 2, transition: "width 0.3s ease",
+                    background: "var(--accent)", borderRadius: 2, transition: `width 0.3s ${EASE}`,
                   }} />
                 </div>
               </div>
@@ -431,7 +435,7 @@ export function TemplatesView() {
 
             {/* Steps + Results */}
             <div style={{ marginBottom: 16 }}>
-              <p style={{ fontSize: 10, textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: 1, fontWeight: 600, marginBottom: 8 }}>
+              <p style={{ ...sectionLabel, marginBottom: 8 }}>
                 Steps & Results
               </p>
               {selected.steps.map((step, i) => {
@@ -451,7 +455,7 @@ export function TemplatesView() {
                         background: isRunning ? "var(--accent-bg)" : isDone ? "var(--bg-elevated)" : "var(--bg-surface)",
                         border: isRunning ? "1px solid var(--accent)" : "1px solid var(--border)",
                         cursor: isDone ? "pointer" : "default",
-                        transition: "all 0.15s",
+                        transition: `all 0.15s ${EASE}`,
                       }}
                     >
                       <div style={{
@@ -559,12 +563,14 @@ export function TemplatesView() {
                         }));
                       }, 300);
                     }}
+                    onMouseDown={pressDown}
+                    onMouseUp={pressUp}
                     style={{
                       display: "flex", alignItems: "center", gap: 6,
                       padding: "7px 14px", borderRadius: 8, border: "none",
                       background: "var(--accent)", color: "#fff",
                       fontSize: 11, fontWeight: 600, cursor: "pointer",
-                      transition: "all 0.15s",
+                      transition: `all 0.15s ${EASE}`,
                     }}
                   >
                     <ArrowRight style={{ width: 12, height: 12 }} />
@@ -584,13 +590,15 @@ export function TemplatesView() {
                         }));
                       }, 300);
                     }}
+                    onMouseDown={pressDown}
+                    onMouseUp={pressUp}
                     style={{
                       display: "flex", alignItems: "center", gap: 6,
                       padding: "7px 14px", borderRadius: 8,
                       border: "1px solid var(--border)",
                       background: "var(--bg-elevated)", color: "var(--text-secondary)",
                       fontSize: 11, fontWeight: 500, cursor: "pointer",
-                      transition: "all 0.15s",
+                      transition: `all 0.15s ${EASE}`,
                     }}
                   >
                     <MessageSquare style={{ width: 12, height: 12 }} />
@@ -601,7 +609,7 @@ export function TemplatesView() {
             )}
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12 }}>
+          <div style={{ ...emptyState, height: "100%", justifyContent: "center" }}>
             <Layers style={{ width: 40, height: 40, color: "var(--text-muted)" }} />
             <p style={{ fontSize: 13, color: "var(--text-muted)", margin: 0 }}>Select a workflow to run</p>
             <p style={{ fontSize: 11, color: "var(--text-muted)", maxWidth: 260, textAlign: "center", margin: 0, lineHeight: 1.5 }}>
@@ -631,7 +639,7 @@ function WorkflowRow({ workflow, selected, running, onClick }: {
         border: "none", cursor: "pointer", marginBottom: 2,
         display: "flex", alignItems: "center", gap: 8,
         background: selected ? "var(--accent-bg)" : hovered ? "var(--bg-hover)" : "transparent",
-        transition: "background 0.15s",
+        transition: `background 0.15s ${EASE}`,
       }}
     >
       <span style={{ fontSize: 15 }}>{workflow.icon}</span>

@@ -4,6 +4,7 @@ import {
   ShieldCheck, RefreshCw, Loader2, AlertTriangle, Plus, Trash2,
   CheckCircle2, XCircle, Shield,
 } from "lucide-react";
+import { EASE, glowCard, hoverLift, hoverReset, pressDown, pressUp, innerPanel, emptyState, inputStyle, btnPrimary, MONO } from "@/styles/viewStyles";
 
 interface ApprovalEntry {
   command: string;
@@ -164,8 +165,8 @@ export function ApprovalsView() {
           </div>
         ) : tab === "pending" ? (
           approvals.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "40px 20px" }}>
-              <CheckCircle2 style={{ width: 32, height: 32, color: "#4ade80", margin: "0 auto 10px" }} />
+            <div style={emptyState}>
+              <CheckCircle2 style={{ width: 32, height: 32, color: "#4ade80" }} />
               <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>No pending approvals</p>
               <p style={{ fontSize: 10, color: "var(--text-muted)", margin: "4px 0 0" }}>
                 Exec approvals appear when agents request to run commands that need authorization
@@ -174,11 +175,11 @@ export function ApprovalsView() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {approvals.map((a, i) => (
-                <div key={i} style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg-elevated)", border: "1px solid var(--border)" }}>
+                <div key={i} data-glow="#fbbf24" onMouseEnter={hoverLift} onMouseLeave={hoverReset} style={glowCard("#fbbf24", { padding: "10px 14px" })}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <Shield style={{ width: 14, height: 14, color: "#fbbf24", flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <code style={{ fontSize: 11, color: "var(--text)", fontFamily: "monospace", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <code style={{ fontSize: 11, color: "var(--text)", fontFamily: MONO, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {a.command}
                       </code>
                       <div style={{ display: "flex", gap: 8, fontSize: 9, color: "var(--text-muted)", marginTop: 2 }}>
@@ -194,7 +195,7 @@ export function ApprovalsView() {
           )
         ) : (
           <>
-            <div style={{ marginBottom: 16, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
+            <div style={{ marginBottom: 16, ...innerPanel, padding: 14 }}>
               <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, display: "block", marginBottom: 6 }}>Add Allowlist Pattern</span>
               <p style={{ fontSize: 10, color: "var(--text-muted)", margin: "0 0 8px", lineHeight: 1.45 }}>
                 Use the resolved executable path or a glob (e.g. <code style={{ fontSize: 9 }}>**/openhue.exe</code>).
@@ -203,7 +204,7 @@ export function ApprovalsView() {
               <div style={{ display: "flex", gap: 8 }}>
                 <input value={newPattern} onChange={e => setNewPattern(e.target.value)}
                   placeholder="e.g. C:\...\openhue.exe or **/openhue.exe" onKeyDown={e => { if (e.key === "Enter") addToAllowlist(); }}
-                  style={{ flex: 1, padding: "6px 10px", borderRadius: 6, background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 12, fontFamily: "monospace", outline: "none" }} />
+                  style={{ ...inputStyle, flex: 1, fontFamily: MONO }} />
                 <select value={newAgent} onChange={e => setNewAgent(e.target.value)}
                   style={{ padding: "6px 8px", borderRadius: 6, background: "var(--bg-input)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 11, outline: "none" }}>
                   <option value="main">main</option>
@@ -213,7 +214,8 @@ export function ApprovalsView() {
                   <option value="*">all agents</option>
                 </select>
                 <button onClick={addToAllowlist} disabled={adding || !newPattern.trim()}
-                  style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "var(--accent)", color: "#fff", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, opacity: adding || !newPattern.trim() ? 0.5 : 1 }}>
+                  onMouseDown={pressDown} onMouseUp={pressUp}
+                  style={{ ...btnPrimary, display: "flex", alignItems: "center", gap: 4, opacity: adding || !newPattern.trim() ? 0.5 : 1 }}>
                   {adding ? <Loader2 style={{ width: 11, height: 11, animation: "spin 1s linear infinite" }} /> : <Plus style={{ width: 11, height: 11 }} />}
                   Add
                 </button>
@@ -221,21 +223,22 @@ export function ApprovalsView() {
             </div>
 
             {allowlist.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "30px 20px" }}>
-                <XCircle style={{ width: 28, height: 28, color: "var(--text-muted)", margin: "0 auto 8px" }} />
+              <div style={emptyState}>
+                <XCircle style={{ width: 28, height: 28, color: "var(--text-muted)" }} />
                 <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>No allowlist patterns</p>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {allowlist.map((a, i) => (
-                  <div key={i} style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg-elevated)", border: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
+                  <div key={i} data-glow="#4ade80" onMouseEnter={hoverLift} onMouseLeave={hoverReset} style={glowCard("#4ade80", { padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 })}>
                     <CheckCircle2 style={{ width: 14, height: 14, color: "#4ade80", flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <code style={{ fontSize: 11, color: "var(--text)", fontFamily: "monospace" }}>{a.pattern}</code>
+                      <code style={{ fontSize: 11, color: "var(--text)", fontFamily: MONO }}>{a.pattern}</code>
                       <span style={{ fontSize: 9, color: "var(--text-muted)", marginLeft: 8 }}>agent: {a.agent}</span>
                     </div>
                     <button onClick={() => removeFromAllowlist(a.pattern, a.agent)}
-                      style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(248,113,113,0.15)", background: "rgba(248,113,113,0.06)", color: "#f87171", cursor: "pointer", display: "flex", alignItems: "center" }}>
+                      onMouseDown={pressDown} onMouseUp={pressUp}
+                      style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(248,113,113,0.15)", background: "rgba(248,113,113,0.06)", color: "#f87171", cursor: "pointer", display: "flex", alignItems: "center", transition: `all 0.2s ${EASE}` }}>
                       <Trash2 style={{ width: 11, height: 11 }} />
                     </button>
                   </div>

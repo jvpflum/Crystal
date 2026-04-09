@@ -34,16 +34,24 @@ function releaseSlot() {
   }
 }
 
+const COMMAND_TIMEOUT = 15_000;
+
 async function throttledInvoke(
   command: string,
   cwd: string | null,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   await acquireSlot();
   try {
-    return await invoke<{ stdout: string; stderr: string; code: number }>(
-      "execute_command",
-      { command, cwd },
-    );
+    const result = await Promise.race([
+      invoke<{ stdout: string; stderr: string; code: number }>(
+        "execute_command",
+        { command, cwd },
+      ),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Command timed out after ${COMMAND_TIMEOUT / 1000}s: ${command.slice(0, 60)}`)), COMMAND_TIMEOUT),
+      ),
+    ]);
+    return result;
   } finally {
     releaseSlot();
   }

@@ -3,6 +3,7 @@ import type { VoiceState } from "@/lib/voice/types";
 const STATE_CONFIG: Record<VoiceState, { label: string; color: string; icon: string }> = {
   idle: { label: "Ready", color: "var(--text-muted)", icon: "○" },
   listening: { label: "Listening...", color: "#3b82f6", icon: "◉" },
+  processing: { label: "Processing...", color: "#a855f7", icon: "◎" },
   transcribing: { label: "Transcribing...", color: "#8b5cf6", icon: "◎" },
   thinking: { label: "Thinking...", color: "#f59e0b", icon: "◈" },
   awaiting_confirmation: { label: "Awaiting Confirmation", color: "#ef4444", icon: "◆" },

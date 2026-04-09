@@ -9,6 +9,7 @@ import { Message, ChatAttachment, Surface, openclawClient } from "@/lib/openclaw
 import { useAppStore, type AppView } from "@/stores/appStore";
 import { voiceService } from "@/lib/voice";
 import { useTokenUsageStore, roughTokenPairEstimate } from "@/stores/tokenUsageStore";
+import { EASE, innerPanel, MONO } from "@/styles/viewStyles";
 
 /* ── Conversation types ── */
 
@@ -212,27 +213,44 @@ export function ConversationView() {
   }, []);
 
   const slashCommands: SlashCommand[] = [
+    // Navigation — primary
     { cmd: "/home", label: "Home", description: "Go to dashboard", action: () => setView("home") },
-    { cmd: "/skills", label: "Skills", description: "Browse 51 OpenClaw skills", action: () => setView("marketplace") },
-    { cmd: "/plugins", label: "Plugins", description: "Manage plugins", action: () => setView("marketplace") },
-    { cmd: "/models", label: "Models", description: "Manage OpenClaw models", action: () => setView("models") },
-    { cmd: "/settings", label: "Settings", description: "App & gateway settings", action: () => setView("settings") },
-    { cmd: "/security", label: "Security", description: "Run security audit", action: () => setView("security") },
-    { cmd: "/doctor", label: "Doctor", description: "System diagnostics", action: () => setView("doctor") },
-    { cmd: "/agents", label: "Agents", description: "Manage AI agents", action: () => setView("agents") },
-    { cmd: "/memory", label: "Memory", description: "Search agent memory", action: () => setView("memory") },
-    { cmd: "/channels", label: "Channels", description: "Connect messaging apps", action: () => setView("channels") },
+    { cmd: "/city", label: "City", description: "Crystal City interactive map", action: () => setView("city") },
+    { cmd: "/center", label: "Command Center", description: "Calendar, workflows, cron & heartbeat", action: () => setView("command-center") },
     { cmd: "/cron", label: "Cron", description: "Scheduled jobs (Command Center)", action: () => setView("command-center", { centerTab: "scheduled" }) },
+    { cmd: "/calendar", label: "Calendar", description: "Cron job agenda & heatmap", action: () => setView("command-center", { centerTab: "calendar" }) },
+    { cmd: "/heartbeat", label: "Heartbeat", description: "System heartbeat monitor", action: () => setView("command-center", { centerTab: "heartbeat" }) },
+    // Navigation — OpenClaw
+    { cmd: "/agents", label: "Agents", description: "Agent hub, monitor & task dispatch", action: () => setView("agents") },
+    { cmd: "/forge", label: "Forge", description: "Software factory & builds", action: () => setView("factory") },
+    { cmd: "/factory", label: "Forge", description: "Software factory & builds", action: () => setView("factory") },
+    { cmd: "/memory", label: "Memory", description: "Knowledge store & vector DB", action: () => setView("memory") },
+    { cmd: "/models", label: "Models", description: "LLM model management", action: () => setView("models") },
+    { cmd: "/channels", label: "Channels", description: "Telegram channel configuration", action: () => setView("channels") },
+    { cmd: "/skills", label: "Skills", description: "Browse & manage OpenClaw skills", action: () => setView("marketplace") },
     { cmd: "/hooks", label: "Hooks", description: "Agent lifecycle hooks", action: () => setView("hooks") },
+    // Navigation — system
+    { cmd: "/usage", label: "Usage", description: "Token usage, costs & analytics", action: () => setView("usage") },
+    { cmd: "/tools", label: "Tools", description: "Skills, ClawHub, sandbox & permissions", action: () => setView("tools") },
+    { cmd: "/hub", label: "ClawHub", description: "Install 3rd-party skills from Hub", action: () => setView("tools") },
+    { cmd: "/sandbox", label: "Sandbox", description: "OpenShell sandbox management", action: () => setView("tools") },
+    { cmd: "/doctor", label: "Doctor", description: "System diagnostics & health", action: () => setView("doctor") },
+    { cmd: "/settings", label: "Settings", description: "App preferences & API keys", action: () => setView("settings") },
+    // Navigation — extended
+    { cmd: "/sessions", label: "Sessions", description: "Agent session history", action: () => setView("sessions") },
+    { cmd: "/templates", label: "Templates", description: "Workflow templates", action: () => setView("templates") },
+    { cmd: "/workflows", label: "Workflows", description: "Run multi-step workflows", action: () => setView("templates") },
+    { cmd: "/activity", label: "Activity", description: "Gateway event log", action: () => setView("activity") },
+    { cmd: "/security", label: "Security", description: "Security audit dashboard", action: () => setView("security") },
     { cmd: "/nodes", label: "Nodes", description: "Multi-node management", action: () => setView("nodes") },
     { cmd: "/browser", label: "Browser", description: "Browser automation", action: () => setView("browser") },
-    { cmd: "/tools", label: "Tools", description: "Sandbox & tool permissions", action: () => setView("tools") },
-    { cmd: "/activity", label: "Activity", description: "Gateway event log", action: () => setView("activity") },
-    { cmd: "/templates", label: "Templates", description: "Workflow builder", action: () => setView("templates") },
-    { cmd: "/workflows", label: "Workflows", description: "Run multi-step workflows", action: () => setView("templates") },
-    { cmd: "/office", label: "Office", description: "Watch agents work visually", action: () => setView("office") },
-    { cmd: "/powerup", label: "Power Up", description: "Enable everything", action: () => setView("marketplace") },
-    { cmd: "/agents", label: "Agents", description: "Agent hub & task dispatch", action: () => setView("agents") },
+    { cmd: "/tasks", label: "Tasks", description: "Background task queue", action: () => setView("tasks") },
+    { cmd: "/approvals", label: "Approvals", description: "Exec approval queue", action: () => setView("approvals") },
+    { cmd: "/subagents", label: "Sub-Agents", description: "Sub-agents & ACP sessions", action: () => setView("subagents") },
+    { cmd: "/webhooks", label: "Webhooks", description: "Webhook endpoints", action: () => setView("webhooks") },
+    { cmd: "/voice", label: "Voice", description: "Voice call interface", action: () => setView("voicecall") },
+    { cmd: "/devices", label: "Devices", description: "Connected devices", action: () => setView("devices") },
+    // Chat actions
     { cmd: "/new", label: "New Chat", description: "Start a fresh conversation", action: () => handleNewChat() },
     { cmd: "/clear", label: "Clear", description: "Clear current chat", action: () => clearConversation() },
     { cmd: "/search", label: "Search", description: "Open command palette (Ctrl+K)", action: () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true })) },
@@ -640,7 +658,19 @@ export function ConversationView() {
         updatedAt: Date.now(),
       }));
 
-      useTokenUsageStore.getState().recordTokens(roughTokenPairEstimate(messageToSend, finalContent));
+      const _est = roughTokenPairEstimate(messageToSend, finalContent);
+      const _mk = (openclawClient.getModel() || "").toLowerCase();
+      const _pid = _mk.includes("ollama") || _mk.includes("llama") || _mk.includes("qwen") || _mk.includes("mistral") || _mk.includes("gemma") || _mk.includes("phi")
+        ? "ollama" as const
+        : _mk.includes("claude") || _mk.includes("anthropic") ? "anthropic" as const
+        : _mk.includes("deepseek") ? "deepseek" as const
+        : _mk.includes("grok") || _mk.includes("xai") ? "xai" as const
+        : _mk.includes("gemini") || _mk.includes("google") ? "google" as const
+        : "openai" as const;
+      useTokenUsageStore.getState().recordTokens(_est, _pid, {
+        input: Math.ceil(messageToSend.length / 4),
+        output: Math.ceil(finalContent.length / 4),
+      });
 
       if (voiceTriggeredRef.current && finalContent) {
         voiceTriggeredRef.current = false;
@@ -798,7 +828,7 @@ export function ConversationView() {
         width: sidebarOpen ? 220 : 0,
         minWidth: sidebarOpen ? 220 : 0,
         overflow: "hidden",
-        transition: "width 0.25s cubic-bezier(0.4,0,0.2,1), min-width 0.25s cubic-bezier(0.4,0,0.2,1)",
+        transition: `width 0.25s ${EASE}, min-width 0.25s ${EASE}`,
         borderRight: sidebarOpen ? "1px solid var(--border)" : "none",
         background: "var(--bg-surface)",
         display: "flex",
@@ -815,17 +845,19 @@ export function ConversationView() {
               padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)",
               background: "var(--bg-elevated)", color: "var(--text-secondary)",
               fontSize: 12, fontWeight: 500, cursor: "pointer",
-              transition: "all 0.15s",
+              transition: `all 0.2s ${EASE}`,
             }}
             onMouseEnter={e => {
               e.currentTarget.style.background = "var(--accent-bg)";
               e.currentTarget.style.borderColor = "rgba(59,130,246,0.25)";
               e.currentTarget.style.color = "var(--accent-hover)";
+              e.currentTarget.style.transform = "translateY(-1px)";
             }}
             onMouseLeave={e => {
               e.currentTarget.style.background = "var(--bg-elevated)";
               e.currentTarget.style.borderColor = "var(--border)";
               e.currentTarget.style.color = "var(--text-secondary)";
+              e.currentTarget.style.transform = "";
             }}
           >
             <Plus style={{ width: 14, height: 14 }} />
@@ -852,7 +884,7 @@ export function ConversationView() {
                   cursor: "pointer",
                   marginBottom: 2,
                   position: "relative",
-                  transition: "background 0.15s",
+                  transition: `background 0.2s ${EASE}`,
                   background: isActive
                     ? "var(--accent-bg)"
                     : isHovered
@@ -911,7 +943,7 @@ export function ConversationView() {
                         style={{
                           background: "none", border: "none", cursor: "pointer", padding: 2,
                           borderRadius: 4, display: "flex", alignItems: "center",
-                          transition: "background 0.1s",
+                          transition: `background 0.15s ${EASE}`,
                         }}
                         onMouseEnter={e => e.currentTarget.style.background = "rgba(248,113,113,0.15)"}
                         onMouseLeave={e => e.currentTarget.style.background = "none"}
@@ -942,7 +974,7 @@ export function ConversationView() {
               style={{
                 background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 4,
                 display: "flex", alignItems: "center",
-                transition: "background 0.15s",
+                transition: `background 0.2s ${EASE}`,
               }}
               onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
               onMouseLeave={e => e.currentTarget.style.background = "none"}
@@ -964,20 +996,20 @@ export function ConversationView() {
                 style={{
                   fontSize: 9, padding: "2px 7px", borderRadius: 6,
                   background: "rgba(139,92,246,0.08)", color: "rgba(139,92,246,0.6)",
-                  fontFamily: "'JetBrains Mono', monospace", cursor: "default",
+                  fontFamily: MONO, cursor: "default",
                   letterSpacing: 0.3,
                 }}
               >
                 {activeConversation.sessionId.slice(0, 8)}
               </span>
             )}
-            <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>{model}</span>
+            <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO }}>{model}</span>
             {liveTps > 0 && (
               <span style={{
                 fontSize: 9, padding: "2px 7px", borderRadius: 6,
                 background: liveTps > 40 ? "rgba(74,222,128,0.1)" : liveTps > 15 ? "rgba(59,130,246,0.1)" : "rgba(251,191,36,0.1)",
                 color: liveTps > 40 ? "var(--success)" : liveTps > 15 ? "var(--accent)" : "var(--warning)",
-                fontFamily: "'JetBrains Mono', monospace", fontWeight: 600,
+                fontFamily: MONO, fontWeight: 600,
                 fontVariantNumeric: "tabular-nums",
               }}>
                 {liveTps} tok/s
@@ -986,6 +1018,7 @@ export function ConversationView() {
             <button onClick={clearConversation} title="Clear chat" style={{
               background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 4,
               display: "flex", alignItems: "center",
+              transition: `background 0.2s ${EASE}`,
             }}
               onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
               onMouseLeave={e => e.currentTarget.style.background = "none"}
@@ -1055,18 +1088,20 @@ export function ConversationView() {
                         border: "1px solid var(--border)",
                         color: "var(--text-secondary)",
                         fontSize: 11, cursor: "pointer",
-                        transition: "all 0.15s",
+                        transition: `all 0.2s ${EASE}`,
                         display: "flex", alignItems: "center", gap: 5,
                       }}
                       onMouseEnter={e => {
                         e.currentTarget.style.background = "var(--accent-bg)";
                         e.currentTarget.style.borderColor = "rgba(59,130,246,0.2)";
                         e.currentTarget.style.color = "var(--accent-hover)";
+                        e.currentTarget.style.transform = "translateY(-1px)";
                       }}
                       onMouseLeave={e => {
                         e.currentTarget.style.background = "var(--bg-elevated)";
                         e.currentTarget.style.borderColor = "var(--border)";
                         e.currentTarget.style.color = "var(--text-secondary)";
+                        e.currentTarget.style.transform = "";
                       }}
                     >
                       <span>{s.emoji}</span> {s.label}
@@ -1091,15 +1126,17 @@ export function ConversationView() {
                       background: "var(--accent-bg)",
                       border: "1px solid rgba(59,130,246,0.2)",
                       color: "var(--accent-hover)", fontSize: 12, fontWeight: 500,
-                      cursor: "pointer", transition: "all 0.15s",
+                      cursor: "pointer", transition: `all 0.2s ${EASE}`,
                     }}
                     onMouseEnter={e => {
                       e.currentTarget.style.background = "rgba(59,130,246,0.2)";
                       e.currentTarget.style.borderColor = "rgba(59,130,246,0.4)";
+                      e.currentTarget.style.transform = "translateY(-1px)";
                     }}
                     onMouseLeave={e => {
                       e.currentTarget.style.background = "var(--accent-bg)";
                       e.currentTarget.style.borderColor = "rgba(59,130,246,0.2)";
+                      e.currentTarget.style.transform = "";
                     }}
                   >
                     <ActionIcon name={btn.icon} />
@@ -1131,7 +1168,7 @@ export function ConversationView() {
                 border: "none", cursor: "pointer",
                 fontSize: 11, fontWeight: 500,
                 boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
-                transition: "all 0.2s",
+                transition: `all 0.2s ${EASE}`,
                 zIndex: 10,
               }}
             >
@@ -1213,7 +1250,7 @@ export function ConversationView() {
             display: "flex", alignItems: "flex-end", gap: 6,
             background: "var(--bg-elevated)", border: "1px solid var(--border)",
             borderRadius: 14, padding: "4px 4px 4px 14px",
-            transition: "border-color 0.2s ease, box-shadow 0.2s ease",
+            transition: `border-color 0.2s ${EASE}, box-shadow 0.2s ${EASE}`,
           }}
             onFocus={e => {
               e.currentTarget.style.borderColor = "rgba(59,130,246,0.3)";
@@ -1297,8 +1334,9 @@ export function ConversationView() {
               {showSlashMenu && filteredSlashCommands.length > 0 && (
                 <div style={{
                   position: "absolute", bottom: "calc(100% + 8px)", left: 0, right: 0,
-                  background: "var(--bg-surface)", border: "1px solid var(--border)",
-                  borderRadius: 10, padding: 4, maxHeight: 260, overflowY: "auto",
+                  ...innerPanel,
+                  background: "var(--bg-surface)", borderRadius: 10, padding: 4,
+                  maxHeight: 260, overflowY: "auto",
                   boxShadow: "0 -8px 32px rgba(0,0,0,0.5)", zIndex: 100,
                   backdropFilter: "blur(12px)",
                 }}>
@@ -1314,11 +1352,11 @@ export function ConversationView() {
                         padding: "7px 10px", borderRadius: 6, cursor: "pointer",
                         display: "flex", alignItems: "center", gap: 10,
                         background: i === slashIndex ? "var(--accent-bg)" : "transparent",
-                        transition: "background 0.1s",
+                        transition: `background 0.15s ${EASE}`,
                       }}
                     >
                       <span style={{
-                        fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
+                        fontSize: 11, fontFamily: MONO,
                         color: i === slashIndex ? "var(--accent-hover)" : "var(--text-secondary)",
                         fontWeight: 600, minWidth: 72,
                       }}>
@@ -1332,12 +1370,13 @@ export function ConversationView() {
             </div>
             <button
               onClick={() => fileInputRef.current?.click()}
+              aria-label="Attach file"
               title="Attach document"
               style={{
                 padding: 6, borderRadius: 8, border: "none", cursor: "pointer", flexShrink: 0,
                 display: "flex", alignItems: "center",
                 background: attachments.length > 0 ? "rgba(59,130,246,0.1)" : "transparent",
-                transition: "all 0.2s",
+                transition: `all 0.2s ${EASE}`,
               }}
               onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
               onMouseLeave={e => { e.currentTarget.style.background = attachments.length > 0 ? "rgba(59,130,246,0.1)" : "transparent"; }}
@@ -1345,11 +1384,12 @@ export function ConversationView() {
               <Paperclip style={{
                 width: 15, height: 15,
                 color: attachments.length > 0 ? "var(--accent)" : "var(--text-muted)",
-                transition: "color 0.2s",
+                transition: `color 0.2s ${EASE}`,
               }} />
             </button>
             <button
               onClick={handleMicClick}
+              aria-label="Voice input"
               style={{
                 padding: 6, borderRadius: 8, border: "none", cursor: "pointer", flexShrink: 0,
                 display: "flex", alignItems: "center",
@@ -1362,7 +1402,7 @@ export function ConversationView() {
                 animation: isListening
                   ? "mic-pulse 1.5s ease-in-out infinite"
                   : "none",
-                transition: "all 0.2s",
+                transition: `all 0.2s ${EASE}`,
               }}
             >
               <Mic style={{
@@ -1372,7 +1412,7 @@ export function ConversationView() {
                   : isListening
                     ? "var(--accent-hover)"
                     : "var(--text-muted)",
-                transition: "color 0.2s",
+                transition: `color 0.2s ${EASE}`,
               }} />
             </button>
             <button
@@ -1385,8 +1425,8 @@ export function ConversationView() {
                 background: thinkingLevel ? "rgba(139,92,246,0.1)" : "transparent",
                 color: thinkingLevel ? "rgba(139,92,246,0.9)" : "var(--text-muted)",
                 display: "flex", alignItems: "center", gap: 3,
-                transition: "all 0.2s",
-                fontSize: 9, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace",
+                transition: `all 0.2s ${EASE}`,
+                fontSize: 9, fontWeight: 600, fontFamily: MONO,
                 letterSpacing: 0.3,
               }}
               onMouseEnter={e => {
@@ -1404,6 +1444,7 @@ export function ConversationView() {
             {isLoading ? (
               <button
                 onClick={cancelRequest}
+                aria-label="Stop generating"
                 title="Stop generating"
                 style={{
                   padding: 8, borderRadius: 8, flexShrink: 0, border: "1px solid rgba(248,113,113,0.3)",
@@ -1411,7 +1452,7 @@ export function ConversationView() {
                   background: "rgba(248,113,113,0.12)",
                   color: "#f87171",
                   display: "flex", alignItems: "center",
-                  transition: "all 0.2s",
+                  transition: `all 0.2s ${EASE}`,
                 }}
               >
                 <Square style={{ width: 13, height: 13, fill: "currentColor" }} />
@@ -1419,6 +1460,7 @@ export function ConversationView() {
             ) : (
               <button
                 data-send-btn
+                aria-label="Send message"
                 onClick={() => {
                   const pending = pendingSendRef.current;
                   pendingSendRef.current = null;
@@ -1432,7 +1474,7 @@ export function ConversationView() {
                     : "var(--bg-elevated)",
                   color: (input.trim() || attachments.length > 0) ? "var(--chat-user-text)" : "var(--text-muted)",
                   display: "flex", alignItems: "center",
-                  transition: "all 0.2s",
+                  transition: `all 0.2s ${EASE}`,
                 }}
               >
                 <Send style={{ width: 15, height: 15 }} />
@@ -1547,11 +1589,12 @@ function MessageBubble({ message, isLatest, meta, onImageClick }: { message: Mes
             data-copy
             style={{
               position: "absolute", top: 6, right: 6, display: "flex", gap: 2,
-              opacity: 0, transition: "opacity 0.15s", zIndex: 2,
+              opacity: 0, transition: `opacity 0.15s ${EASE}`, zIndex: 2,
             }}
           >
             <button
               onClick={handleSpeak}
+              aria-label="Read aloud"
               title="Read aloud"
               style={{
                 padding: 4, borderRadius: 5,
@@ -1563,6 +1606,7 @@ function MessageBubble({ message, isLatest, meta, onImageClick }: { message: Mes
             </button>
             <button
               onClick={handleCopy}
+              aria-label="Copy message"
               title="Copy"
               style={{
                 padding: 4, borderRadius: 5,
@@ -1595,7 +1639,7 @@ function MessageBubble({ message, isLatest, meta, onImageClick }: { message: Mes
                           maxWidth: 260, maxHeight: 200, borderRadius: 8,
                           objectFit: "cover", cursor: "pointer",
                           border: "1px solid rgba(255,255,255,0.15)",
-                          transition: "opacity 0.15s",
+                          transition: `opacity 0.15s ${EASE}`,
                         }}
                         onMouseEnter={e => (e.currentTarget.style.opacity = "0.85")}
                         onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
@@ -1773,7 +1817,7 @@ function LocalImage({ src, alt, onImageClick }: { src?: string; alt?: string; on
             Could not load image
           </span>
           {src && (
-            <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
+            <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO, wordBreak: "break-all" }}>
               {src}
             </span>
           )}
@@ -1928,7 +1972,7 @@ function ToolCallBubble({ step }: { step: AgentStep }) {
           display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px",
           borderRadius: 8, cursor: "pointer", border: "none",
           background: isExecuting ? "rgba(139,92,246,0.1)" : "rgba(139,92,246,0.06)",
-          transition: "background 0.15s",
+          transition: `all 0.2s ${EASE}`,
           maxWidth: "100%",
         }}
         onMouseEnter={e => e.currentTarget.style.background = "rgba(139,92,246,0.15)"}
@@ -1941,10 +1985,10 @@ function ToolCallBubble({ step }: { step: AgentStep }) {
             : <ChevronRight style={{ width: 10, height: 10, color: "var(--accent)", flexShrink: 0 }} />
         }
         <span style={{ fontSize: 12, flexShrink: 0 }}>{toolIcon()}</span>
-        <span style={{ fontSize: 11, color: "var(--accent-hover)", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>{tool}</span>
+        <span style={{ fontSize: 11, color: "var(--accent-hover)", fontFamily: MONO, fontWeight: 600 }}>{tool}</span>
         {detail && (
           <span style={{
-            fontSize: 10, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 10, color: "var(--text-muted)", fontFamily: MONO,
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 300,
           }}>
             {detail}
@@ -1962,9 +2006,9 @@ function ToolCallBubble({ step }: { step: AgentStep }) {
       </button>
       {expanded && step.result && (
         <div style={{
+          ...innerPanel,
           marginTop: 4, padding: "8px 12px", borderRadius: 8,
-          background: "var(--bg-surface)", border: "1px solid var(--border)",
-          fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: "var(--text-secondary)",
+          fontSize: 11, fontFamily: MONO, color: "var(--text-secondary)",
           maxHeight: 200, overflow: "auto", whiteSpace: "pre-wrap",
         }}>
           {step.result.output?.slice(0, 1000) || step.result.error}
@@ -2004,10 +2048,10 @@ function PersistedToolBadge({ tool, args, status }: { tool: string; args: Record
       fontSize: 10, maxWidth: "100%",
     }}>
       <span>{icon}</span>
-      <span style={{ color: "var(--accent-hover)", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, fontSize: 10 }}>{tool}</span>
+      <span style={{ color: "var(--accent-hover)", fontFamily: MONO, fontWeight: 600, fontSize: 10 }}>{tool}</span>
       {detail && (
         <span style={{
-          color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace",
+          color: "var(--text-muted)", fontFamily: MONO,
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 250, fontSize: 9,
         }}>
           {detail}
@@ -2072,6 +2116,7 @@ function ImageLightbox({ src, name, onClose }: { src: string; name: string; onCl
         <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>{name}</span>
         <button
           onClick={onClose}
+          aria-label="Close"
           style={{
             background: "rgba(255,255,255,0.1)", border: "none", borderRadius: 6,
             padding: "4px 8px", cursor: "pointer", display: "flex", alignItems: "center",

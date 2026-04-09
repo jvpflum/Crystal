@@ -3,11 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { useAppStore, type AppView, type CommandCenterTabId } from "@/stores/appStore";
 import { askCrystalAI, type AiSearchResult } from "@/lib/search-ai";
 import {
-  Home, MessageSquare, Building2, Bot, Store, Cpu, Radio, Brain,
+  Home, MessageSquare, LayoutDashboard, Bot, Store, Cpu, Radio, Brain,
   Clock, Anchor, Wrench, Shield, Stethoscope, Activity, Settings,
   Trash2, HeartPulse, ShieldCheck, Thermometer, RotateCcw, Search,
   Network, Globe, FolderOpen, Mail, Users, GitBranch, Factory,
   Smartphone, Webhook, Phone, Sparkles, Loader2, ArrowRight, ExternalLink,
+  Map, BarChart3,
 } from "lucide-react";
 
 interface CommandItem {
@@ -51,42 +52,51 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
   const isQuestion = looksLikeQuestion(query);
 
   const commands: CommandItem[] = useMemo(() => [
-    { id: "home",         icon: Home,          label: "Home",      description: "Dashboard overview",          category: "Navigation", action: () => setView("home" as AppView) },
-    { id: "chat",         icon: MessageSquare, label: "Chat",      description: "Open conversation",           category: "Navigation", action: () => setView("conversation" as AppView) },
-    { id: "command-center", icon: Building2,   label: "Command Center", description: "Calendar, workflows, scheduled jobs & heartbeat", category: "Navigation", action: () => setView("command-center" as AppView) },
-    // Sidebar views
-    { id: "agents",       icon: Bot,           label: "Agents",       description: "Agents, sessions & task dispatch",  category: "Navigation", action: () => setView("agents" as AppView) },
-    { id: "factory",      icon: Factory,       label: "The Forge",    description: "Builds, sub-agents & software dev", category: "Navigation", action: () => setView("factory" as AppView) },
-    { id: "models",       icon: Cpu,           label: "Models",       description: "Manage LLM models",                 category: "Navigation", action: () => setView("models" as AppView) },
-    { id: "channels",     icon: Radio,         label: "Channels",     description: "Communication channels",            category: "Navigation", action: () => setView("channels" as AppView) },
-    { id: "memory",       icon: Brain,         label: "Memory",       description: "Knowledge & memory store",          category: "Navigation", action: () => setView("memory" as AppView) },
-    { id: "cron",         icon: Clock,         label: "Scheduled Jobs", description: "Command Center → Scheduled tab", category: "Navigation", action: () => setView("command-center" as AppView, { centerTab: "scheduled" }) },
-    { id: "hooks",        icon: Anchor,        label: "Hooks",        description: "Event hooks & triggers",            category: "Navigation", action: () => setView("hooks" as AppView) },
-    { id: "tools",        icon: Wrench,        label: "Tools & Skills", description: "Skills, sandbox & tool permissions", category: "Navigation", action: () => setView("tools" as AppView) },
-    { id: "doctor",       icon: Stethoscope,   label: "Doctor",       description: "System diagnostics & health",       category: "Navigation", action: () => setView("doctor" as AppView) },
-    { id: "settings",     icon: Settings,      label: "Settings",     description: "App preferences & security",        category: "Navigation", action: () => setView("settings" as AppView) },
-    // Hidden views – accessible only via Ctrl+K
-    { id: "skills",       icon: Store,         label: "Skills",       description: "Browse OpenClaw skills",             category: "Navigation", action: () => setView("tools" as AppView) },
-    { id: "security",     icon: Shield,        label: "Security",     description: "Security settings & audit",         category: "Navigation", action: () => setView("security" as AppView) },
-    { id: "activity",     icon: Activity,      label: "Activity Log", description: "Activity & event log",              category: "Navigation", action: () => setView("activity" as AppView) },
-    { id: "nodes",        icon: Network,       label: "Nodes",        description: "Manage OpenClaw nodes",             category: "Navigation", action: () => setView("nodes" as AppView) },
-    { id: "browser",      icon: Globe,         label: "Browser",      description: "Browser automation",                category: "Navigation", action: () => setView("browser" as AppView) },
-    { id: "workspace",    icon: FolderOpen,    label: "Workspace",    description: "File workspace explorer",           category: "Navigation", action: () => setView("workspace" as AppView) },
-    { id: "messaging",    icon: Mail,          label: "Messaging",    description: "Messaging & notifications",         category: "Navigation", action: () => setView("messaging" as AppView) },
-    { id: "directory",    icon: Users,         label: "Directory",    description: "Contact directory",                  category: "Navigation", action: () => setView("directory" as AppView) },
-    { id: "subagents",    icon: GitBranch,     label: "Sub-Agents",   description: "Sub-agents & ACP sessions",         category: "Navigation", action: () => setView("subagents" as AppView) },
-    { id: "sessions",     icon: Clock,         label: "Sessions",     description: "Agent sessions history",            category: "Navigation", action: () => setView("sessions" as AppView) },
-    { id: "tasks",        icon: Wrench,        label: "Tasks",        description: "Task queue & dispatch",             category: "Navigation", action: () => setView("tasks" as AppView) },
-    { id: "approvals",    icon: ShieldCheck,   label: "Approvals",    description: "Pending exec approvals",            category: "Navigation", action: () => setView("approvals" as AppView) },
-    { id: "devices",      icon: Smartphone,    label: "Devices",      description: "Connected devices",                 category: "Navigation", action: () => setView("devices" as AppView) },
-    { id: "webhooks",     icon: Webhook,       label: "Webhooks",     description: "Webhook endpoints",                 category: "Navigation", action: () => setView("webhooks" as AppView) },
-    { id: "voicecall",    icon: Phone,         label: "Voice Calls",  description: "Voice call interface",              category: "Navigation", action: () => setView("voicecall" as AppView) },
-    { id: "templates",    icon: Activity,      label: "Workflows",    description: "Workflow templates",                category: "Navigation", action: () => setView("templates" as AppView) },
-    { id: "clear-chat",   icon: Trash2,        label: "Clear chat",      description: "Clear current conversation",  category: "Actions", action: () => { setView("conversation" as AppView); } },
-    { id: "heartbeat",    icon: HeartPulse,     label: "Heartbeat",       description: "Send heartbeat ping",         category: "Actions", action: () => invoke("execute_command", { command: "openclaw system heartbeat", cwd: null }).catch(console.error) },
-    { id: "sec-audit",    icon: ShieldCheck,   label: "Security audit",  description: "Run a full security audit",   category: "Actions", action: () => setView("security" as AppView) },
-    { id: "health",       icon: Thermometer,   label: "Check health",    description: "Run system health check",     category: "Actions", action: () => setView("doctor" as AppView) },
-    { id: "restart-gw",   icon: RotateCcw,     label: "Restart gateway", description: "Restart OpenClaw gateway",    category: "OpenClaw", action: () => invoke("execute_command", { command: "openclaw gateway restart", cwd: null }).catch(console.error) },
+    // Primary navigation
+    { id: "home",           icon: Home,            label: "Home",           description: "Dashboard — performance, tokens, GPU, agents",    category: "Navigation", action: () => setView("home" as AppView) },
+    { id: "city",           icon: Map,             label: "Crystal City",   description: "Interactive agent city map",                      category: "Navigation", action: () => setView("city" as AppView) },
+    { id: "chat",           icon: MessageSquare,   label: "Chat",           description: "Conversation with OpenClaw agent",                category: "Navigation", action: () => setView("conversation" as AppView) },
+    { id: "command-center", icon: LayoutDashboard, label: "Command Center", description: "Calendar, workflows, cron jobs & heartbeat",     category: "Navigation", action: () => setView("command-center" as AppView) },
+    { id: "cron",           icon: Clock,           label: "Scheduled Jobs", description: "Command Center → Scheduled tab",                 category: "Navigation", action: () => setView("command-center" as AppView, { centerTab: "scheduled" }) },
+
+    // OpenClaw section
+    { id: "agents",       icon: Bot,       label: "Agents",     description: "Agent monitor, sessions & task dispatch",           category: "Navigation", action: () => setView("agents" as AppView) },
+    { id: "factory",      icon: Factory,   label: "Forge",      description: "Software factory, builds & Git integration",       category: "Navigation", action: () => setView("factory" as AppView) },
+    { id: "memory",       icon: Brain,     label: "Memory",     description: "Knowledge store, vector DB & embeddings",          category: "Navigation", action: () => setView("memory" as AppView) },
+    { id: "models",       icon: Cpu,       label: "Models",     description: "LLM model management & status",                    category: "Navigation", action: () => setView("models" as AppView) },
+    { id: "channels",     icon: Radio,     label: "Channels",   description: "Telegram channel configuration",                   category: "Navigation", action: () => setView("channels" as AppView) },
+    { id: "skills",       icon: Store,     label: "Skills",     description: "Browse & enable/disable OpenClaw skills",           category: "Navigation", action: () => setView("marketplace" as AppView) },
+    { id: "hooks",        icon: Anchor,    label: "Hooks",      description: "Agent lifecycle hooks & triggers",                  category: "Navigation", action: () => setView("hooks" as AppView) },
+
+    // System section
+    { id: "usage",        icon: BarChart3,   label: "Usage",        description: "Token costs, API spend & analytics",              category: "Navigation", action: () => setView("usage" as AppView) },
+    { id: "tools",        icon: Wrench,      label: "Tools",        description: "Skills toggles, ClawHub, sandbox & permissions",  category: "Navigation", action: () => setView("tools" as AppView) },
+    { id: "doctor",       icon: Stethoscope, label: "Doctor",       description: "System diagnostics & health checks",              category: "Navigation", action: () => setView("doctor" as AppView) },
+    { id: "settings",     icon: Settings,    label: "Settings",     description: "Preferences, API keys & gateway config",          category: "Navigation", action: () => setView("settings" as AppView) },
+
+    // Extended views
+    { id: "sessions",     icon: Clock,       label: "Sessions",     description: "Agent session history & cleanup",   category: "Navigation", action: () => setView("sessions" as AppView) },
+    { id: "templates",    icon: Activity,    label: "Workflows",    description: "Workflow templates & automations",   category: "Navigation", action: () => setView("templates" as AppView) },
+    { id: "activity",     icon: Activity,    label: "Activity Log", description: "Gateway event log & feed",           category: "Navigation", action: () => setView("activity" as AppView) },
+    { id: "security",     icon: Shield,      label: "Security",     description: "Security audit dashboard",           category: "Navigation", action: () => setView("security" as AppView) },
+    { id: "tasks",        icon: Wrench,      label: "Tasks",        description: "Background task queue & dispatch",   category: "Navigation", action: () => setView("tasks" as AppView) },
+    { id: "approvals",    icon: ShieldCheck, label: "Approvals",    description: "Pending exec approvals",             category: "Navigation", action: () => setView("approvals" as AppView) },
+    { id: "subagents",    icon: GitBranch,   label: "Sub-Agents",   description: "Sub-agents & ACP sessions",          category: "Navigation", action: () => setView("subagents" as AppView) },
+    { id: "nodes",        icon: Network,     label: "Nodes",        description: "Multi-node OpenClaw management",     category: "Navigation", action: () => setView("nodes" as AppView) },
+    { id: "browser",      icon: Globe,       label: "Browser",      description: "Browser automation interface",       category: "Navigation", action: () => setView("browser" as AppView) },
+    { id: "workspace",    icon: FolderOpen,  label: "Workspace",    description: "File workspace explorer",            category: "Navigation", action: () => setView("workspace" as AppView) },
+    { id: "messaging",    icon: Mail,        label: "Messaging",    description: "Notifications & messages",           category: "Navigation", action: () => setView("messaging" as AppView) },
+    { id: "directory",    icon: Users,       label: "Directory",    description: "Contact directory",                   category: "Navigation", action: () => setView("directory" as AppView) },
+    { id: "devices",      icon: Smartphone,  label: "Devices",      description: "Connected devices",                  category: "Navigation", action: () => setView("devices" as AppView) },
+    { id: "webhooks",     icon: Webhook,     label: "Webhooks",     description: "Webhook endpoint management",        category: "Navigation", action: () => setView("webhooks" as AppView) },
+    { id: "voicecall",    icon: Phone,       label: "Voice Calls",  description: "Voice call interface (Riva STT/TTS)", category: "Navigation", action: () => setView("voicecall" as AppView) },
+
+    // Quick actions
+    { id: "clear-chat",   icon: Trash2,      label: "Clear chat",      description: "Clear current conversation",       category: "Actions", action: () => { setView("conversation" as AppView); } },
+    { id: "heartbeat",    icon: HeartPulse,  label: "Heartbeat",       description: "Send heartbeat ping",              category: "Actions", action: () => invoke("execute_command", { command: "openclaw system heartbeat", cwd: null }).catch(console.error) },
+    { id: "sec-audit",    icon: ShieldCheck, label: "Security audit",  description: "Run a full security audit",        category: "Actions", action: () => setView("security" as AppView) },
+    { id: "health",       icon: Thermometer, label: "Check health",    description: "Run system health check",          category: "Actions", action: () => setView("doctor" as AppView) },
+    { id: "restart-gw",   icon: RotateCcw,   label: "Restart gateway", description: "Restart OpenClaw gateway",         category: "OpenClaw", action: () => invoke("execute_command", { command: "openclaw gateway restart", cwd: null }).catch(console.error) },
   ], [setView]);
 
   const fuzzyMatch = useCallback((text: string, pattern: string) => {

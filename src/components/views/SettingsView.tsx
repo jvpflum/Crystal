@@ -15,6 +15,7 @@ import {
 } from "@/stores/tokenUsageStore";
 import { LobsterIcon } from "@/components/LobsterIcon";
 import { parseOpenClawSecurityAuditJson } from "@/lib/securityAudit";
+import { EASE, glowCard, hoverLift, hoverReset, pressDown, pressUp, innerPanel, sectionLabel, monoValue, mutedCaption, iconTile, inputStyle, btnPrimary, btnSecondary, viewContainer, scrollArea, row as rowStyle, MONO } from "@/styles/viewStyles";
 
 /* ── Keyframes ── */
 
@@ -27,38 +28,10 @@ const LEGACY_AI_SYSTEM_PROMPT_KEY = "crystal_ai_system_prompt";
 const DEFAULT_AI_SYSTEM_PROMPT_FALLBACK =
   "You are Crystal, an intelligent AI assistant powered by OpenClaw.";
 
-/* ── Shared style tokens ── */
-
-const SECTION_HEADER: CSSProperties = {
-  fontSize: 10, fontWeight: 600, textTransform: "uppercase",
-  letterSpacing: 1, color: "var(--text-muted)", marginBottom: 8, userSelect: "none",
-};
-
-const CARD: CSSProperties = {
-  background: "var(--bg-elevated)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
-  border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden",
-};
-
-const ROW: CSSProperties = {
-  display: "flex", alignItems: "center", justifyContent: "space-between",
-  padding: "10px 14px", borderBottom: "1px solid var(--border)",
-};
+/* ── Local style tokens ── */
 
 const LABEL: CSSProperties = { fontSize: 12, color: "var(--text-secondary)" };
 const VALUE: CSSProperties = { fontSize: 12, color: "var(--text)" };
-const MONO: CSSProperties = { fontFamily: "'JetBrains Mono', 'Fira Code', monospace" };
-
-const BTN_BASE: CSSProperties = {
-  padding: "6px 14px", borderRadius: 6, fontSize: 11, fontWeight: 500,
-  border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, transition: "opacity .15s",
-};
-const BTN_PRIMARY: CSSProperties = { ...BTN_BASE, background: "var(--accent-bg)", color: "var(--accent)" };
-const BTN_GHOST: CSSProperties = { ...BTN_BASE, background: "transparent", color: "var(--text-muted)" };
-
-const INPUT: CSSProperties = {
-  background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 6,
-  padding: "6px 10px", color: "var(--text)", fontSize: 12, outline: "none", ...MONO,
-};
 
 const dot = (color: string): CSSProperties => ({
   width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0,
@@ -591,28 +564,28 @@ export function SettingsView() {
   /* ── render ── */
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+    <div style={{ ...viewContainer, padding: 0 }}>
       <style>{KEYFRAMES}</style>
 
       <div style={{ padding: "18px 24px 8px", flexShrink: 0 }}>
         <h2 style={{ color: "var(--text)", fontSize: 16, fontWeight: 700, margin: 0 }}>Settings</h2>
-        <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 0" }}>
+        <p style={{ ...mutedCaption, margin: "4px 0 0", fontSize: 11 }}>
           Crystal &middot; OpenClaw configuration
         </p>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "4px 24px 28px" }}>
+      <div style={{ ...scrollArea, padding: "4px 24px 28px" }}>
 
         {/* ───────── THEME ───────── */}
         <Section title="THEME">
-          <div style={CARD}>
+          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
             <div style={{ padding: "12px 14px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))", gap: 8 }}>
               {THEMES.map((theme) => {
                 const active = themeId === theme.id;
                 return (
                   <button key={theme.id} onClick={() => setTheme(theme.id)} style={{
                     padding: 0, border: active ? "2px solid var(--accent)" : "2px solid var(--border)",
-                    borderRadius: 10, cursor: "pointer", background: "transparent", transition: "all 0.2s",
+                    borderRadius: 10, cursor: "pointer", background: "transparent", transition: `all 0.2s ${EASE}`,
                     overflow: "hidden", transform: active ? "scale(1.02)" : "scale(1)",
                     boxShadow: active ? "0 0 12px var(--accent-bg)" : "none",
                   }}>
@@ -634,8 +607,8 @@ export function SettingsView() {
 
         {/* ───────── OPENCLAW GATEWAY ───────── */}
         <Section title="OPENCLAW GATEWAY">
-          <div style={CARD}>
-            <div style={ROW}>
+          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+            <div style={rowStyle}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={dot(gatewayConnected ? "var(--success)" : "var(--error)")} />
                 <span style={LABEL}>Connection</span>
@@ -644,17 +617,17 @@ export function SettingsView() {
                 {gatewayConnected ? "Connected" : "Offline"}
               </span>
             </div>
-            <div style={ROW}>
+            <div style={rowStyle}>
               <span style={LABEL}>Port</span>
-              <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{gatewayPort}</span>
+              <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{gatewayPort}</span>
             </div>
-            <div style={ROW}>
+            <div style={rowStyle}>
               <span style={LABEL}>Latency</span>
-              <span style={{ ...VALUE, ...MONO, fontSize: 11, color: gatewayLatency !== null && gatewayLatency < 100 ? "var(--success)" : "var(--warning)" }}>
+              <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11, color: gatewayLatency !== null && gatewayLatency < 100 ? "var(--success)" : "var(--warning)" }}>
                 {gatewayLatency !== null ? `${gatewayLatency}ms` : "—"}
               </span>
             </div>
-            <div style={ROW}>
+            <div style={rowStyle}>
               <span style={LABEL}>Daemon</span>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: daemonInstalled ? "var(--success)" : "var(--error)", flexShrink: 0 }} />
@@ -663,38 +636,38 @@ export function SettingsView() {
             </div>
 
             {/* auth token */}
-            <div style={{ ...ROW, borderBottom: "none", flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+            <div style={{ ...rowStyle, borderBottom: "none", flexDirection: "column", alignItems: "stretch", gap: 6 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <span style={LABEL}>Gateway Token</span>
                 <span style={{ fontSize: 9, color: "var(--text-muted)" }}>For external clients</span>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--bg-elevated)", borderRadius: 8, padding: "6px 10px", border: "1px solid var(--border)" }}>
-                <code style={{ flex: 1, fontSize: 12, ...MONO, color: authToken ? "var(--text-secondary)" : "var(--text-muted)", letterSpacing: 0.5, wordBreak: "break-all", lineHeight: 1.4, userSelect: showAuthToken ? "text" : "none" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, ...innerPanel, padding: "6px 10px" }}>
+                <code style={{ flex: 1, fontSize: 12, fontFamily: MONO, color: authToken ? "var(--text-secondary)" : "var(--text-muted)", letterSpacing: 0.5, wordBreak: "break-all", lineHeight: 1.4, userSelect: showAuthToken ? "text" : "none" }}>
                   {authToken ? (showAuthToken ? authToken : "••••••••••••••••••••••••••••••••") : "No token found"}
                 </code>
-                <button onClick={() => setShowAuthToken(!showAuthToken)} style={{ ...BTN_GHOST, padding: 4, flexShrink: 0 }}><IconEye open={showAuthToken} /></button>
-                <button onClick={() => { if (authToken) { navigator.clipboard.writeText(authToken); setTokenCopied(true); setTimeout(() => setTokenCopied(false), 2000); } }} style={{ ...BTN_GHOST, padding: 4, flexShrink: 0, color: tokenCopied ? "var(--success)" : "var(--text-muted)" }}>
+                <button onClick={() => setShowAuthToken(!showAuthToken)} style={{ ...btnSecondary, padding: 4, flexShrink: 0 }}><IconEye open={showAuthToken} /></button>
+                <button onClick={() => { if (authToken) { navigator.clipboard.writeText(authToken); setTokenCopied(true); setTimeout(() => setTokenCopied(false), 2000); } }} style={{ ...btnSecondary, padding: 4, flexShrink: 0, color: tokenCopied ? "var(--success)" : "var(--text-muted)" }}>
                   {tokenCopied ? <IconCheck /> : <IconCopy />}
                 </button>
               </div>
             </div>
 
             <div style={{ padding: "8px 14px 10px", display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button onClick={handleStartGateway} style={BTN_PRIMARY}>
+              <button onClick={handleStartGateway} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>
                 <IconRefresh /> {gatewayConnected ? "Restart Gateway" : "Start Gateway"}
               </button>
-              <button onClick={measureLatency} style={{ ...BTN_GHOST, fontSize: 11 }}>Ping</button>
-              <button onClick={restartDaemon} disabled={daemonBusy} style={BTN_PRIMARY}>{daemonBusy ? <IconRefresh spin /> : null} Restart Daemon</button>
-              <button onClick={stopDaemon} disabled={daemonBusy} style={BTN_GHOST}>Stop</button>
+              <button onClick={measureLatency} style={{ ...btnSecondary, fontSize: 11 }}>Ping</button>
+              <button onClick={restartDaemon} disabled={daemonBusy} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>{daemonBusy ? <IconRefresh spin /> : null} Restart Daemon</button>
+              <button onClick={stopDaemon} disabled={daemonBusy} style={btnSecondary} onMouseDown={pressDown} onMouseUp={pressUp}>Stop</button>
             </div>
-            {daemonOutput && <pre style={{ margin: 0, padding: "8px 14px", fontSize: 10, ...MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 80, overflowY: "auto", borderTop: "1px solid var(--border)" }}>{daemonOutput}</pre>}
+            {daemonOutput && <pre style={{ margin: 0, padding: "8px 14px", fontSize: 10, fontFamily: MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 80, overflowY: "auto", borderTop: "1px solid var(--border)" }}>{daemonOutput}</pre>}
           </div>
         </Section>
 
         {/* ───────── DNS ───────── */}
         <Section title="DNS">
-          <div style={{ ...CARD, marginBottom: 8 }}>
-            <button onClick={() => { setDnsExpanded(!dnsExpanded); if (!dnsExpanded && !dnsConfig) loadDnsConfig(); }} style={{ ...ROW, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
+          <div style={{ ...glowCard("var(--accent)"), marginBottom: 8 }} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+            <button onClick={() => { setDnsExpanded(!dnsExpanded); if (!dnsExpanded && !dnsConfig) loadDnsConfig(); }} style={{ ...rowStyle, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d={dnsExpanded ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} /></svg>
                 <span style={{ ...LABEL, margin: 0 }}>DNS Configuration</span>
@@ -710,9 +683,9 @@ export function SettingsView() {
                 ) : dnsConfig ? (
                   <>
                     {Object.entries(dnsConfig).map(([key, val]) => (
-                      <div key={key} style={{ ...ROW, padding: "8px 0" }}>
+                      <div key={key} style={{ ...rowStyle, padding: "8px 0" }}>
                         <span style={LABEL}>{key}</span>
-                        <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{typeof val === "object" ? JSON.stringify(val) : String(val ?? "—")}</span>
+                        <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{typeof val === "object" ? JSON.stringify(val) : String(val ?? "—")}</span>
                       </div>
                     ))}
                   </>
@@ -723,8 +696,8 @@ export function SettingsView() {
                 <div style={{ marginTop: 8 }}>
                   <span style={{ ...LABEL, display: "block", marginBottom: 4 }}>Domain</span>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <input type="text" value={dnsDomain} onChange={e => setDnsDomain(e.target.value)} placeholder="example.com" style={{ ...INPUT, flex: 1 }} />
-                    <button onClick={saveDnsDomain} disabled={dnsSaving || !dnsDomain.trim()} style={BTN_PRIMARY}>
+                    <input type="text" value={dnsDomain} onChange={e => setDnsDomain(e.target.value)} placeholder="example.com" style={{ ...inputStyle, flex: 1 }} />
+                    <button onClick={saveDnsDomain} disabled={dnsSaving || !dnsDomain.trim()} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>
                       {dnsSaving ? <IconRefresh spin /> : null} {dnsSaving ? "Saving..." : "Save"}
                     </button>
                   </div>
@@ -736,14 +709,14 @@ export function SettingsView() {
                 </div>
 
                 <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                  <button onClick={checkDnsStatus} disabled={dnsStatusLoading} style={BTN_PRIMARY}>
+                  <button onClick={checkDnsStatus} disabled={dnsStatusLoading} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>
                     {dnsStatusLoading ? <IconRefresh spin /> : null} {dnsStatusLoading ? "Checking..." : "DNS Status"}
                   </button>
-                  <button onClick={loadDnsConfig} style={BTN_GHOST}><IconRefresh /> Refresh</button>
+                  <button onClick={loadDnsConfig} style={btnSecondary} onMouseDown={pressDown} onMouseUp={pressUp}><IconRefresh /> Refresh</button>
                 </div>
 
                 {dnsStatusOutput && (
-                  <pre style={{ marginTop: 8, fontSize: 10, ...MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 120, overflowY: "auto", padding: "8px 10px", background: "var(--bg-elevated)", borderRadius: 6, border: "1px solid var(--border)" }}>
+                  <pre style={{ marginTop: 8, fontSize: 10, fontFamily: MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 120, overflowY: "auto", ...innerPanel, padding: "8px 10px" }}>
                     {dnsStatusOutput}
                   </pre>
                 )}
@@ -754,37 +727,37 @@ export function SettingsView() {
 
         {/* ───────── OPENCLAW MODEL ───────── */}
         <Section title="OPENCLAW MODEL">
-          <div style={CARD}>
-            <div style={ROW}>
+          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+            <div style={rowStyle}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={dot(openclawClient.getModel() !== "default" ? "var(--accent)" : "var(--text-muted)")} />
                 <div>
                   <span style={{ ...LABEL, display: "block" }}>Active Model</span>
-                  <span style={{ fontSize: 12, color: "var(--text)", ...MONO, fontWeight: 500 }}>
+                  <span style={{ fontSize: 12, color: "var(--text)", fontFamily: MONO, fontWeight: 500 }}>
                     {openclawClient.getModelDisplayName(openclawClient.getModel())}
                   </span>
                 </div>
               </div>
-              <button onClick={() => setView("models")} style={{ ...BTN_PRIMARY, padding: "5px 14px" }}>
+              <button onClick={() => setView("models")} style={{ ...btnPrimary, padding: "5px 14px" }}>
                 Change Model
               </button>
             </div>
 
-            <div style={ROW}>
+            <div style={rowStyle}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 {checking ? <span style={{ animation: "_spin .8s linear infinite", display: "inline-flex" }}><IconRefresh /></span> : <span style={dot(isConnected ? "var(--success)" : "var(--error)")} />}
                 <span style={{ fontSize: 11, color: isConnected ? "var(--success)" : "var(--error)" }}>
                   {checking ? "Checking..." : isConnected ? "OpenClaw gateway connected" : "Gateway offline"}
                 </span>
               </div>
-              <button onClick={handleRefreshGateway} style={{ ...BTN_PRIMARY, padding: "4px 10px" }}>
+              <button onClick={handleRefreshGateway} style={{ ...btnPrimary, padding: "4px 10px" }}>
                 <IconRefresh spin={checking} /> Test
               </button>
             </div>
 
-            <div style={{ ...ROW, borderBottom: "none" }}>
+            <div style={{ ...rowStyle, borderBottom: "none" }}>
               <span style={LABEL}>Context Window</span>
-              <input type="text" value={contextWindow} onChange={(e) => setContextWindow(e.target.value)} onBlur={persistLocalAIModelSettings} style={{ ...INPUT, width: 80, textAlign: "right" }} />
+              <input type="text" value={contextWindow} onChange={(e) => setContextWindow(e.target.value)} onBlur={persistLocalAIModelSettings} style={{ ...inputStyle, width: 80, textAlign: "right" }} />
             </div>
           </div>
         </Section>
@@ -796,7 +769,7 @@ export function SettingsView() {
 
         {/* ───────── VOICE ───────── */}
         <Section title="VOICE">
-          <div style={CARD}>
+          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
             <VoiceProviderRow
               label="Speech to Text"
               providers={providerStatuses?.stt ?? []}
@@ -810,41 +783,41 @@ export function SettingsView() {
               onSelect={setTtsProvider}
             />
             {preferredStt === "whisper" && (
-              <div style={ROW}>
+              <div style={rowStyle}>
                 <span style={LABEL}>Whisper Model</span>
-                <select value={whisperModel} onChange={(e) => setWhisperModel(e.target.value)} style={{ ...INPUT, appearance: "none", paddingRight: 24, backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.4)' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center" }}>
+                <select value={whisperModel} onChange={(e) => setWhisperModel(e.target.value)} style={{ ...inputStyle, appearance: "none", paddingRight: 24, backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.4)' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center" }}>
                   {["tiny.en", "base.en", "small.en", "medium.en", "large-v3"].map((m) => <option key={m} value={m} style={{ background: "var(--bg-elevated)", color: "var(--text)" }}>{m}</option>)}
                 </select>
               </div>
             )}
             <div style={{ padding: "8px 14px 10px", display: "flex", gap: 8, borderTop: "1px solid var(--border)" }}>
-              <button onClick={handleRefreshVoice} style={BTN_PRIMARY}><IconRefresh spin={checkingVoice} /> Test Connections</button>
+              <button onClick={handleRefreshVoice} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}><IconRefresh spin={checkingVoice} /> Test Connections</button>
             </div>
           </div>
         </Section>
 
         {/* ───────── AI CONFIGURATION ───────── */}
         <Section title="AI CONFIGURATION">
-          <div style={CARD}>
-            <div style={ROW}>
+          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+            <div style={rowStyle}>
               <span style={LABEL}>Temperature</span>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <input type="range" min="0" max="2" step="0.05" value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))} onMouseUp={persistLocalAIModelSettings} style={{ width: 100, height: 4, accentColor: "var(--accent)", cursor: "pointer" }} />
-                <span style={{ ...VALUE, ...MONO, fontSize: 11, minWidth: 28, textAlign: "right" }}>{temperature.toFixed(2)}</span>
+                <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11, minWidth: 28, textAlign: "right" }}>{temperature.toFixed(2)}</span>
               </div>
             </div>
-            <div style={ROW}>
+            <div style={rowStyle}>
               <span style={LABEL}>Max Tokens</span>
-              <input type="text" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} onBlur={persistLocalAIModelSettings} style={{ ...INPUT, width: 80, textAlign: "right" }} />
+              <input type="text" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} onBlur={persistLocalAIModelSettings} style={{ ...inputStyle, width: 80, textAlign: "right" }} />
             </div>
             <div style={{ padding: "10px 14px", borderBottom: "none" }}>
               <span style={{ ...LABEL, display: "block", marginBottom: 4 }}>System Prompt</span>
               <p style={{ fontSize: 10, color: "var(--text-muted)", margin: "0 0 8px", lineHeight: 1.45 }}>
-                Synced with OpenClaw as <code style={{ ...MONO, fontSize: 9 }}>agents.defaults.systemPrompt</code> in{" "}
-                <code style={{ ...MONO, fontSize: 9 }}>~/.openclaw/openclaw.json</code> (merged into the gateway-built system prompt). If that field is empty, Crystal shows{" "}
-                <code style={{ ...MONO, fontSize: 9 }}>agents.list</code> entry <code style={{ ...MONO, fontSize: 9 }}>id: &quot;main&quot;</code> when present.
+                Synced with OpenClaw as <code style={{ fontFamily: MONO, fontSize: 9 }}>agents.defaults.systemPrompt</code> in{" "}
+                <code style={{ fontFamily: MONO, fontSize: 9 }}>~/.openclaw/openclaw.json</code> (merged into the gateway-built system prompt). If that field is empty, Crystal shows{" "}
+                <code style={{ fontFamily: MONO, fontSize: 9 }}>agents.list</code> entry <code style={{ fontFamily: MONO, fontSize: 9 }}>id: &quot;main&quot;</code> when present.
               </p>
-              <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} onBlur={() => { persistLocalAIModelSettings(); void flushSystemPromptToOpenClaw(); }} spellCheck={false} rows={5} style={{ width: "100%", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 10px", color: "var(--text-secondary)", fontSize: 11, lineHeight: 1.6, resize: "vertical", outline: "none", ...MONO, boxSizing: "border-box" }} />
+              <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} onBlur={() => { persistLocalAIModelSettings(); void flushSystemPromptToOpenClaw(); }} spellCheck={false} rows={5} style={{ width: "100%", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 10px", color: "var(--text-secondary)", fontSize: 11, lineHeight: 1.6, resize: "vertical", outline: "none", fontFamily: MONO, boxSizing: "border-box" }} />
               {systemPromptSaveError && (
                 <p style={{ fontSize: 10, color: "var(--error)", margin: "6px 0 0" }}>
                   {systemPromptSaveError} — kept a local copy; fix file permissions or path and try again.
@@ -856,31 +829,31 @@ export function SettingsView() {
 
         {/* ───────── SECURITY ───────── */}
         <Section title="SECURITY">
-          <div style={CARD}>
+          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
             <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div>
                 <span style={{ ...LABEL, display: "block" }}>Security Audit</span>
                 <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Run OpenClaw security checks</span>
               </div>
-              <button onClick={runAudit} disabled={auditing} style={BTN_PRIMARY}>
+              <button onClick={runAudit} disabled={auditing} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>
                 {auditing ? <IconRefresh spin /> : null} {auditing ? "Auditing..." : "Run Audit"}
               </button>
             </div>
             {auditResult && (
               <div style={{ padding: "0 14px 10px" }}>
-                <div style={{ display: "flex", gap: 12, padding: "8px 12px", background: "var(--bg-elevated)", borderRadius: 6, border: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", gap: 12, padding: "8px 12px", ...innerPanel }}>
                   <AuditBadge label="PASS" count={auditResult.pass} color="var(--success)" />
                   <AuditBadge label="WARN" count={auditResult.warn} color="var(--warning)" />
                   <AuditBadge label="FAIL" count={auditResult.fail} color="var(--error)" />
                 </div>
-                {auditResult.details && <pre style={{ marginTop: 6, fontSize: 10, ...MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 120, overflowY: "auto" }}>{auditResult.details}</pre>}
+                {auditResult.details && <pre style={{ marginTop: 6, fontSize: 10, fontFamily: MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 120, overflowY: "auto" }}>{auditResult.details}</pre>}
               </div>
             )}
-            <div style={ROW}>
+            <div style={rowStyle}>
               <span style={LABEL}>Tool Permissions</span>
               <span style={{ fontSize: 11, color: "var(--success)" }}>All Enabled</span>
             </div>
-            <div style={{ ...ROW, borderBottom: "none" }}>
+            <div style={{ ...rowStyle, borderBottom: "none" }}>
               <span style={LABEL}>Gateway Auth</span>
               <span style={{ fontSize: 11, color: authToken ? "var(--success)" : "var(--text-muted)" }}>{authToken ? "Enabled" : "Disabled"}</span>
             </div>
@@ -889,12 +862,12 @@ export function SettingsView() {
 
         {/* ───────── UPDATES ───────── */}
         <Section title="UPDATES">
-          <div style={CARD}>
-            <div style={ROW}>
+          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+            <div style={rowStyle}>
               <span style={LABEL}>Crystal Version</span>
-              <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>v{appVersion}</span>
+              <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>v{appVersion}</span>
             </div>
-            <div style={ROW}>
+            <div style={rowStyle}>
               <span style={LABEL}>Update Channel</span>
               <div style={{ display: "flex", gap: 4 }}>
                 {(["stable", "beta", "dev"] as const).map((ch) => (
@@ -902,7 +875,7 @@ export function SettingsView() {
                     padding: "3px 10px", borderRadius: 5, fontSize: 10, fontWeight: 500, cursor: "pointer", textTransform: "capitalize",
                     border: updateChannel === ch ? "1px solid var(--accent)" : "1px solid var(--border)",
                     background: updateChannel === ch ? "var(--accent-bg)" : "var(--bg-elevated)",
-                    color: updateChannel === ch ? "var(--accent)" : "var(--text-muted)", transition: "all .15s ease",
+                    color: updateChannel === ch ? "var(--accent)" : "var(--text-muted)", transition: `all 0.15s ${EASE}`,
                   }}>{ch}</button>
                 ))}
               </div>
@@ -910,11 +883,11 @@ export function SettingsView() {
             <div style={{ padding: "8px 14px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid var(--border)" }}>
               {updateStatus ? <span style={{ fontSize: 11, color: updateStatus.includes("available") ? "var(--warning)" : "var(--success)" }}>{updateStatus}</span> : <span />}
               <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={checkForUpdates} disabled={checkingUpdates} style={BTN_PRIMARY}>
+                <button onClick={checkForUpdates} disabled={checkingUpdates} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>
                   {checkingUpdates ? <IconRefresh spin /> : null} {checkingUpdates ? "Checking..." : "Check for Updates"}
                 </button>
                 {updateStatus?.includes("available") && (
-                  <button onClick={runUpdate} disabled={updating} style={{ ...BTN_BASE, background: "var(--accent)", color: "#fff" }}>
+                  <button onClick={runUpdate} disabled={updating} style={{ ...btnPrimary, background: "var(--accent)", color: "#fff" }}>
                     {updating ? <IconRefresh spin /> : null} {updating ? "Updating..." : "Update Now"}
                   </button>
                 )}
@@ -933,13 +906,13 @@ export function SettingsView() {
                       <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>Updating OpenClaw...</span>
                     </div>
                   ) : (
-                    <pre style={{ margin: 0, fontSize: 11, color: updateSuccess ? "var(--success)" : "var(--error)", whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "'JetBrains Mono', monospace" }}>
+                    <pre style={{ margin: 0, fontSize: 11, color: updateSuccess ? "var(--success)" : "var(--error)", whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: MONO }}>
                       {updateOutput}
                     </pre>
                   )}
                 </div>
                 {updateSuccess === true && (
-                  <button onClick={restartGatewayAfterUpdate} disabled={restarting} style={{ ...BTN_PRIMARY, marginTop: 8 }}>
+                  <button onClick={restartGatewayAfterUpdate} disabled={restarting} style={{ ...btnPrimary, marginTop: 8 }}>
                     {restarting ? <IconRefresh spin /> : null} {restarting ? "Restarting..." : "Restart Gateway"}
                   </button>
                 )}
@@ -950,20 +923,20 @@ export function SettingsView() {
 
         {/* ───────── OPENCLAW CONFIG ───────── */}
         <Section title="OPENCLAW CONFIG">
-          <div style={CARD}>
-            <div style={{ ...ROW, borderBottom: "1px solid var(--border)" }}>
+          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+            <div style={{ ...rowStyle, borderBottom: "1px solid var(--border)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" /></svg>
-                <span style={{ fontSize: 10, color: "var(--text-muted)", ...MONO }}>{configPath}</span>
+                <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO }}>{configPath}</span>
               </div>
-              <button onClick={() => navigator.clipboard.writeText(configPath)} style={{ ...BTN_GHOST, padding: 4 }}><IconCopy /></button>
+              <button onClick={() => navigator.clipboard.writeText(configPath)} style={{ ...btnSecondary, padding: 4 }}><IconCopy /></button>
             </div>
             <div style={{ padding: "10px 14px" }}>
-              <textarea value={configText} onChange={(e) => setConfigText(e.target.value)} spellCheck={false} style={{ width: "100%", minHeight: 160, maxHeight: 300, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 12px", color: "var(--text-secondary)", fontSize: 11, lineHeight: 1.7, resize: "vertical", outline: "none", ...MONO, boxSizing: "border-box", tabSize: 2 }} />
+              <textarea value={configText} onChange={(e) => setConfigText(e.target.value)} spellCheck={false} style={{ width: "100%", minHeight: 160, maxHeight: 300, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 12px", color: "var(--text-secondary)", fontSize: 11, lineHeight: 1.7, resize: "vertical", outline: "none", fontFamily: MONO, boxSizing: "border-box", tabSize: 2 }} />
             </div>
             <div style={{ padding: "0 14px 10px", display: "flex", gap: 8, alignItems: "center" }}>
-              <button onClick={loadConfig} disabled={loadingConfig} style={BTN_GHOST}><IconRefresh spin={loadingConfig} /> Reload</button>
-              <button onClick={saveConfig} style={BTN_PRIMARY}>{configSaved ? <IconCheck /> : null} {configSaved ? "Saved" : "Save"}</button>
+              <button onClick={loadConfig} disabled={loadingConfig} style={btnSecondary} onMouseDown={pressDown} onMouseUp={pressUp}><IconRefresh spin={loadingConfig} /> Reload</button>
+              <button onClick={saveConfig} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>{configSaved ? <IconCheck /> : null} {configSaved ? "Saved" : "Save"}</button>
             </div>
           </div>
         </Section>
@@ -971,28 +944,28 @@ export function SettingsView() {
 
         {/* ───────── CONFIG CLI ───────── */}
         <Section title="CONFIG CLI">
-          <div style={CARD}>
+          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
             <div style={{ padding: "10px 14px" }}>
               <span style={{ ...LABEL, display: "block", marginBottom: 6 }}>Get / Set Configuration</span>
               <div style={{ display: "flex", gap: 6 }}>
-                <input type="text" value={configKey} onChange={(e) => setConfigKey(e.target.value)} placeholder="config.key" style={{ ...INPUT, flex: 1 }} />
-                <button onClick={getConfigValue} style={BTN_PRIMARY}>Get</button>
+                <input type="text" value={configKey} onChange={(e) => setConfigKey(e.target.value)} placeholder="config.key" style={{ ...inputStyle, flex: 1 }} />
+                <button onClick={getConfigValue} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>Get</button>
               </div>
               <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                <input type="text" value={configValue} onChange={(e) => setConfigValue(e.target.value)} placeholder="new value" style={{ ...INPUT, flex: 1 }} />
-                <button onClick={setConfigValue_} style={BTN_PRIMARY}>Set</button>
-                <button onClick={unsetConfigValue} style={{ ...BTN_GHOST, color: "var(--error)" }}>Unset</button>
+                <input type="text" value={configValue} onChange={(e) => setConfigValue(e.target.value)} placeholder="new value" style={{ ...inputStyle, flex: 1 }} />
+                <button onClick={setConfigValue_} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>Set</button>
+                <button onClick={unsetConfigValue} style={{ ...btnSecondary, color: "var(--error)" }}>Unset</button>
               </div>
             </div>
-            {configOutput && <pre style={{ margin: 0, padding: "8px 14px", fontSize: 10, ...MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 80, overflowY: "auto", borderTop: "1px solid var(--border)" }}>{configOutput}</pre>}
+            {configOutput && <pre style={{ margin: 0, padding: "8px 14px", fontSize: 10, fontFamily: MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 80, overflowY: "auto", borderTop: "1px solid var(--border)" }}>{configOutput}</pre>}
           </div>
         </Section>
 
         {/* ───────── OPENCLAW CONFIGURATION ───────── */}
         <Section title="OPENCLAW CONFIGURATION">
           {/* Config Validate */}
-          <div style={{ ...CARD, marginBottom: 8 }}>
-            <button onClick={() => toggleOcSection("validate")} style={{ ...ROW, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
+          <div style={{ ...glowCard("var(--accent)"), marginBottom: 8 }} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+            <button onClick={() => toggleOcSection("validate")} style={{ ...rowStyle, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d={ocExpanded.validate ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} /></svg>
                 <span style={{ ...LABEL, margin: 0 }}>Config Validate</span>
@@ -1001,7 +974,7 @@ export function SettingsView() {
             </button>
             {ocExpanded.validate && (
               <div style={{ padding: "8px 14px 12px" }}>
-                <button onClick={runConfigValidate} disabled={ocValidating} style={BTN_PRIMARY}>
+                <button onClick={runConfigValidate} disabled={ocValidating} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>
                   {ocValidating ? <IconRefresh spin /> : null} {ocValidating ? "Validating..." : "Validate Config"}
                 </button>
                 {ocValidateResult && (
@@ -1013,7 +986,7 @@ export function SettingsView() {
                       </span>
                     </div>
                     {ocValidateResult.errors && ocValidateResult.errors.length > 0 && (
-                      <pre style={{ margin: "6px 0 0", fontSize: 10, ...MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                      <pre style={{ margin: "6px 0 0", fontSize: 10, fontFamily: MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                         {ocValidateResult.errors.join("\n")}
                       </pre>
                     )}
@@ -1024,8 +997,8 @@ export function SettingsView() {
           </div>
 
           {/* Memory Config */}
-          <div style={{ ...CARD, marginBottom: 8 }}>
-            <button onClick={() => { toggleOcSection("memory"); if (!ocExpanded.memory && !ocMemoryConfig) loadMemoryConfig(); }} style={{ ...ROW, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
+          <div style={{ ...glowCard("var(--accent)"), marginBottom: 8 }} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+            <button onClick={() => { toggleOcSection("memory"); if (!ocExpanded.memory && !ocMemoryConfig) loadMemoryConfig(); }} style={{ ...rowStyle, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d={ocExpanded.memory ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} /></svg>
                 <span style={{ ...LABEL, margin: 0 }}>Memory Config</span>
@@ -1040,42 +1013,42 @@ export function SettingsView() {
                   </div>
                 ) : ocMemoryConfig ? (
                   <>
-                    <div style={{ ...ROW, padding: "8px 0" }}>
+                    <div style={{ ...rowStyle, padding: "8px 0" }}>
                       <span style={LABEL}>Embedding Provider</span>
-                      <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{String(ocMemoryConfig.embeddingProvider || ocMemoryConfig.provider || "—")}</span>
+                      <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{String(ocMemoryConfig.embeddingProvider || ocMemoryConfig.provider || "—")}</span>
                     </div>
-                    <div style={{ ...ROW, padding: "8px 0" }}>
+                    <div style={{ ...rowStyle, padding: "8px 0" }}>
                       <span style={LABEL}>Index Status</span>
                       <span style={{ ...VALUE, fontSize: 11, color: ocMemoryConfig.indexed ? "var(--success)" : "var(--text-muted)" }}>
                         {ocMemoryConfig.indexed ? "Indexed" : (ocMemoryConfig.indexStatus ? String(ocMemoryConfig.indexStatus) : "Unknown")}
                       </span>
                     </div>
                     {ocMemoryConfig.totalEntries !== undefined && (
-                      <div style={{ ...ROW, padding: "8px 0" }}>
+                      <div style={{ ...rowStyle, padding: "8px 0" }}>
                         <span style={LABEL}>Total Entries</span>
-                        <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{String(ocMemoryConfig.totalEntries)}</span>
+                        <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{String(ocMemoryConfig.totalEntries)}</span>
                       </div>
                     )}
                     <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                      <button onClick={runReindex} disabled={ocReindexing} style={BTN_PRIMARY}>
+                      <button onClick={runReindex} disabled={ocReindexing} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>
                         {ocReindexing ? <IconRefresh spin /> : null} {ocReindexing ? "Reindexing..." : "Reindex"}
                       </button>
-                      <button onClick={loadMemoryConfig} style={BTN_GHOST}><IconRefresh /> Refresh</button>
+                      <button onClick={loadMemoryConfig} style={btnSecondary} onMouseDown={pressDown} onMouseUp={pressUp}><IconRefresh /> Refresh</button>
                     </div>
                     {ocReindexResult && (
-                      <pre style={{ marginTop: 6, fontSize: 10, ...MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap" }}>{ocReindexResult}</pre>
+                      <pre style={{ marginTop: 6, fontSize: 10, fontFamily: MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap" }}>{ocReindexResult}</pre>
                     )}
                   </>
                 ) : (
-                  <button onClick={loadMemoryConfig} style={{ ...BTN_GHOST, marginTop: 4 }}>Load Memory Config</button>
+                  <button onClick={loadMemoryConfig} style={{ ...btnSecondary, marginTop: 4 }}>Load Memory Config</button>
                 )}
               </div>
             )}
           </div>
 
           {/* Session Config */}
-          <div style={{ ...CARD, marginBottom: 8 }}>
-            <button onClick={() => { toggleOcSection("session"); if (!ocExpanded.session && !ocSessionConfig) loadSessionConfig(); }} style={{ ...ROW, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
+          <div style={{ ...glowCard("var(--accent)"), marginBottom: 8 }} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+            <button onClick={() => { toggleOcSection("session"); if (!ocExpanded.session && !ocSessionConfig) loadSessionConfig(); }} style={{ ...rowStyle, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d={ocExpanded.session ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} /></svg>
                 <span style={{ ...LABEL, margin: 0 }}>Session Config</span>
@@ -1090,40 +1063,40 @@ export function SettingsView() {
                   </div>
                 ) : ocSessionConfig ? (
                   <>
-                    <div style={{ ...ROW, padding: "8px 0" }}>
+                    <div style={{ ...rowStyle, padding: "8px 0" }}>
                       <span style={LABEL}>DM Scope</span>
-                      <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{String(ocSessionConfig.dmScope ?? "—")}</span>
+                      <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{String(ocSessionConfig.dmScope ?? "—")}</span>
                     </div>
-                    <div style={{ ...ROW, padding: "8px 0" }}>
+                    <div style={{ ...rowStyle, padding: "8px 0" }}>
                       <span style={LABEL}>Reset Mode</span>
-                      <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{String(ocSessionConfig.resetMode ?? "—")}</span>
+                      <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{String(ocSessionConfig.resetMode ?? "—")}</span>
                     </div>
-                    <div style={{ ...ROW, padding: "8px 0" }}>
+                    <div style={{ ...rowStyle, padding: "8px 0" }}>
                       <span style={LABEL}>Maintenance Mode</span>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span style={{
-                          fontSize: 11, fontWeight: 600, ...MONO,
+                          fontSize: 11, fontWeight: 600, fontFamily: MONO,
                           color: String(ocSessionConfig.maintenanceMode || "off") === "off" ? "var(--success)" : String(ocSessionConfig.maintenanceMode) === "warn" ? "var(--warning)" : "var(--error)",
                         }}>
                           {String(ocSessionConfig.maintenanceMode || "off")}
                         </span>
-                        <button onClick={toggleMaintenanceMode} disabled={ocMaintenanceToggling} style={{ ...BTN_GHOST, padding: "2px 8px", fontSize: 9 }}>
+                        <button onClick={toggleMaintenanceMode} disabled={ocMaintenanceToggling} style={{ ...btnSecondary, padding: "2px 8px", fontSize: 9 }}>
                           {ocMaintenanceToggling ? "..." : "Toggle"}
                         </button>
                       </div>
                     </div>
-                    <button onClick={loadSessionConfig} style={{ ...BTN_GHOST, marginTop: 4 }}><IconRefresh /> Refresh</button>
+                    <button onClick={loadSessionConfig} style={{ ...btnSecondary, marginTop: 4 }}><IconRefresh /> Refresh</button>
                   </>
                 ) : (
-                  <button onClick={loadSessionConfig} style={{ ...BTN_GHOST, marginTop: 4 }}>Load Session Config</button>
+                  <button onClick={loadSessionConfig} style={{ ...btnSecondary, marginTop: 4 }}>Load Session Config</button>
                 )}
               </div>
             )}
           </div>
 
           {/* Heartbeat Config */}
-          <div style={{ ...CARD, marginBottom: 8 }}>
-            <button onClick={() => { toggleOcSection("heartbeat"); if (!ocExpanded.heartbeat && !ocHeartbeatConfig) loadHeartbeatConfig(); }} style={{ ...ROW, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
+          <div style={{ ...glowCard("var(--accent)"), marginBottom: 8 }} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+            <button onClick={() => { toggleOcSection("heartbeat"); if (!ocExpanded.heartbeat && !ocHeartbeatConfig) loadHeartbeatConfig(); }} style={{ ...rowStyle, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d={ocExpanded.heartbeat ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} /></svg>
                 <span style={{ ...LABEL, margin: 0 }}>Heartbeat Config</span>
@@ -1138,38 +1111,38 @@ export function SettingsView() {
                   </div>
                 ) : ocHeartbeatConfig ? (
                   <>
-                    <div style={{ ...ROW, padding: "8px 0" }}>
+                    <div style={{ ...rowStyle, padding: "8px 0" }}>
                       <span style={LABEL}>Interval</span>
-                      <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{String(ocHeartbeatConfig.interval ?? ocHeartbeatConfig.intervalMs ?? "—")}</span>
+                      <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{String(ocHeartbeatConfig.interval ?? ocHeartbeatConfig.intervalMs ?? "—")}</span>
                     </div>
-                    <div style={{ ...ROW, padding: "8px 0" }}>
+                    <div style={{ ...rowStyle, padding: "8px 0" }}>
                       <span style={LABEL}>Target</span>
-                      <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{String(ocHeartbeatConfig.target ?? "—")}</span>
+                      <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{String(ocHeartbeatConfig.target ?? "—")}</span>
                     </div>
-                    <div style={{ ...ROW, padding: "8px 0", flexDirection: "column", alignItems: "stretch", gap: 4 }}>
+                    <div style={{ ...rowStyle, padding: "8px 0", flexDirection: "column", alignItems: "stretch", gap: 4 }}>
                       <span style={LABEL}>Prompt</span>
-                      <span style={{ ...VALUE, ...MONO, fontSize: 10, color: "var(--text-muted)", lineHeight: 1.5, maxHeight: 48, overflow: "hidden", textOverflow: "ellipsis" }}>
+                      <span style={{ ...VALUE, fontFamily: MONO, fontSize: 10, color: "var(--text-muted)", lineHeight: 1.5, maxHeight: 48, overflow: "hidden", textOverflow: "ellipsis" }}>
                         {String(ocHeartbeatConfig.prompt ?? "—").slice(0, 200)}{String(ocHeartbeatConfig.prompt ?? "").length > 200 ? "..." : ""}
                       </span>
                     </div>
                     {ocHeartbeatConfig.activeHours && (
-                      <div style={{ ...ROW, padding: "8px 0" }}>
+                      <div style={{ ...rowStyle, padding: "8px 0" }}>
                         <span style={LABEL}>Active Hours</span>
-                        <span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{typeof ocHeartbeatConfig.activeHours === "object" ? JSON.stringify(ocHeartbeatConfig.activeHours) : String(ocHeartbeatConfig.activeHours)}</span>
+                        <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{typeof ocHeartbeatConfig.activeHours === "object" ? JSON.stringify(ocHeartbeatConfig.activeHours) : String(ocHeartbeatConfig.activeHours)}</span>
                       </div>
                     )}
-                    <button onClick={loadHeartbeatConfig} style={{ ...BTN_GHOST, marginTop: 4 }}><IconRefresh /> Refresh</button>
+                    <button onClick={loadHeartbeatConfig} style={{ ...btnSecondary, marginTop: 4 }}><IconRefresh /> Refresh</button>
                   </>
                 ) : (
-                  <button onClick={loadHeartbeatConfig} style={{ ...BTN_GHOST, marginTop: 4 }}>Load Heartbeat Config</button>
+                  <button onClick={loadHeartbeatConfig} style={{ ...btnSecondary, marginTop: 4 }}>Load Heartbeat Config</button>
                 )}
               </div>
             )}
           </div>
 
           {/* Thinking Level */}
-          <div style={{ ...CARD, marginBottom: 8 }}>
-            <div style={ROW}>
+          <div style={{ ...glowCard("var(--accent)"), marginBottom: 8 }} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+            <div style={rowStyle}>
               <span style={LABEL}>Thinking Level</span>
               <div style={{ display: "flex", gap: 4 }}>
                 {([undefined, "auto", "minimal", "medium", "high"] as (ThinkingLevel | undefined)[]).map(level => {
@@ -1180,7 +1153,7 @@ export function SettingsView() {
                       padding: "3px 10px", borderRadius: 5, fontSize: 10, fontWeight: 500, cursor: "pointer", textTransform: "capitalize",
                       border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
                       background: active ? "var(--accent-bg)" : "var(--bg-elevated)",
-                      color: active ? "var(--accent)" : "var(--text-muted)", transition: "all .15s ease",
+                      color: active ? "var(--accent)" : "var(--text-muted)", transition: `all 0.15s ${EASE}`,
                     }}>{label}</button>
                   );
                 })}
@@ -1196,20 +1169,20 @@ export function SettingsView() {
 
         {/* ───────── ABOUT ───────── */}
         <Section title="ABOUT">
-          <div style={CARD}>
-            <div style={{ ...ROW, gap: 12, borderBottom: "1px solid var(--border)" }}>
+          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+            <div style={{ ...rowStyle, gap: 12, borderBottom: "1px solid var(--border)" }}>
               <div style={{ width: 36, height: 36, borderRadius: 10, overflow: "hidden", flexShrink: 0 }}><LobsterIcon size={36} /></div>
               <div style={{ flex: 1 }}>
                 <span style={{ color: "var(--text)", fontSize: 14, fontWeight: 600, display: "block" }}>Crystal</span>
                 <span style={{ fontSize: 10, color: "var(--text-muted)" }}>The OpenClaw Desktop Frontend</span>
               </div>
             </div>
-            <div style={ROW}><span style={LABEL}>App Version</span><span style={{ ...VALUE, ...MONO, fontSize: 11 }}>v{appVersion}</span></div>
-            <div style={ROW}><span style={LABEL}>OpenClaw Version</span><span style={{ ...VALUE, ...MONO, fontSize: 11 }}>{openclawVersion}</span></div>
-            <div style={ROW}><span style={LABEL}>Runtime</span><span style={{ ...VALUE, ...MONO, fontSize: 11 }}>Tauri 2</span></div>
+            <div style={rowStyle}><span style={LABEL}>App Version</span><span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>v{appVersion}</span></div>
+            <div style={rowStyle}><span style={LABEL}>OpenClaw Version</span><span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{openclawVersion}</span></div>
+            <div style={rowStyle}><span style={LABEL}>Runtime</span><span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>Tauri 2</span></div>
             <div style={{ padding: "10px 14px 12px", display: "flex", gap: 12, borderTop: "1px solid var(--border)" }}>
-              <a href="https://docs.openclaw.ai" target="_blank" rel="noopener noreferrer" style={{ ...BTN_PRIMARY, textDecoration: "none" }}><IconExternal /> Docs</a>
-              <a href="https://github.com/openclaw" target="_blank" rel="noopener noreferrer" style={{ ...BTN_GHOST, textDecoration: "none" }}><IconExternal /> GitHub</a>
+              <a href="https://docs.openclaw.ai" target="_blank" rel="noopener noreferrer" style={{ ...btnPrimary, textDecoration: "none" }}><IconExternal /> Docs</a>
+              <a href="https://github.com/openclaw" target="_blank" rel="noopener noreferrer" style={{ ...btnSecondary, textDecoration: "none" }}><IconExternal /> GitHub</a>
             </div>
           </div>
         </Section>
@@ -1228,13 +1201,13 @@ function TokenStatsSection() {
 
   return (
     <Section title="TOKEN STATS & REWARDS">
-      <div style={CARD}>
+      <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
         <div style={{ padding: "14px 14px 10px" }}>
           <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 8, lineHeight: 1.45 }}>
             Lifetime total in Crystal. Command-palette AI uses billed tokens when OpenAI returns them; chat uses a rough estimate (~4 characters per token) because the gateway stream does not expose usage.
           </div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 28, fontWeight: 800, color: "var(--accent)", ...MONO }}>{formatLifetimeTokens(totalTokens)}</span>
+            <span style={{ ...monoValue, fontSize: 28, fontWeight: 800, color: "var(--accent)" }}>{formatLifetimeTokens(totalTokens)}</span>
             <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>tokens all-time</span>
           </div>
           {next ? (
@@ -1244,7 +1217,7 @@ function TokenStatsSection() {
                 <span>{formatLifetimeTokens(totalTokens)} / {formatLifetimeTokens(next.threshold)}</span>
               </div>
               <div style={{ height: 6, borderRadius: 3, background: "var(--bg-input)", overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${progress}%`, background: "var(--accent)", borderRadius: 3, transition: "width 0.4s ease" }} />
+                <div style={{ height: "100%", width: `${progress}%`, background: "var(--accent)", borderRadius: 3, transition: `width 0.4s ${EASE}` }} />
               </div>
             </div>
           ) : (
@@ -1273,7 +1246,7 @@ function TokenStatsSection() {
             );
           })}
         </div>
-        <div style={{ ...ROW, borderTop: "1px solid var(--border)", borderBottom: "none" }}>
+        <div style={{ ...rowStyle, borderTop: "1px solid var(--border)", borderBottom: "none" }}>
           <span style={LABEL}>Reset lifetime stats</span>
           <button
             type="button"
@@ -1282,7 +1255,7 @@ function TokenStatsSection() {
                 resetLifetimeStats();
               }
             }}
-            style={{ ...BTN_GHOST, fontSize: 10 }}
+            style={{ ...btnSecondary, fontSize: 10 }}
           >
             Reset
           </button>
@@ -1293,7 +1266,7 @@ function TokenStatsSection() {
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
-  return <div style={{ marginBottom: 18 }}><div style={SECTION_HEADER}>{title}</div>{children}</div>;
+  return <div style={{ marginBottom: 18 }}><div style={sectionLabel}>{title}</div>{children}</div>;
 }
 
 /* ── Voice Provider Selector ── */
@@ -1323,7 +1296,7 @@ function VoiceProviderRow({ label, providers, preferredId, onSelect }: {
               onClick={() => onSelect(p.id)}
               style={{
                 padding: "5px 12px", borderRadius: 6, fontSize: 10, fontWeight: 500,
-                cursor: "pointer", transition: "all .15s ease",
+                cursor: "pointer", transition: `all 0.15s ${EASE}`,
                 display: "flex", alignItems: "center", gap: 6,
                 border: isSelected ? "1px solid var(--accent)" : "1px solid var(--border)",
                 background: isSelected ? "var(--accent-bg)" : "var(--bg-elevated)",
@@ -1345,7 +1318,7 @@ function VoiceProviderRow({ label, providers, preferredId, onSelect }: {
             <>
               <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--success)", flexShrink: 0 }} />
               <span style={{ fontSize: 11, color: "var(--success)" }}>Connected</span>
-              {meta?.port && <span style={{ fontSize: 10, color: "var(--text-muted)", ...MONO }}>:{meta.port}</span>}
+              {meta?.port && <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO }}>:{meta.port}</span>}
             </>
           ) : (
             <>
@@ -1377,17 +1350,6 @@ const API_PROVIDERS = [
   { id: "mistral", label: "Mistral", placeholder: "...", color: "#ff7000" },
 ] as const;
 
-const CARD_S: CSSProperties = {
-  background: "var(--bg-elevated)", backdropFilter: "blur(20px)",
-  border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden",
-};
-
-const ROW_S: CSSProperties = {
-  display: "flex", alignItems: "center", justifyContent: "space-between",
-  padding: "10px 14px", borderBottom: "1px solid var(--border)",
-};
-
-const MONO_S: CSSProperties = { fontFamily: "'JetBrains Mono', 'Fira Code', monospace" };
 
 function ApiKeysSection() {
   const [profiles, setProfiles] = useState<Record<string, { type: string; provider: string; key: string }>>({});
@@ -1518,13 +1480,13 @@ function ApiKeysSection() {
   };
 
   if (loading) {
-    return <div style={{ ...CARD_S, padding: 20, textAlign: "center" }}>
+    return <div style={{ ...glowCard("var(--accent)"), padding: 20, textAlign: "center" }}>
       <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading API keys...</span>
     </div>;
   }
 
   return (
-    <div style={CARD_S}>
+    <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
       <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
         <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
           API keys for cloud LLM providers. Stored in OpenClaw's auth-profiles.
@@ -1556,7 +1518,7 @@ function ApiKeysSection() {
         const isVisible = showKeys[provider.id];
 
         return (
-          <div key={provider.id} style={{ ...ROW_S, flexDirection: "column", alignItems: "stretch", gap: 6, borderBottom: "1px solid var(--border)" }}>
+          <div key={provider.id} style={{ ...rowStyle, flexDirection: "column", alignItems: "stretch", gap: 6, borderBottom: "1px solid var(--border)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: hasKey ? provider.color : "var(--border)", flexShrink: 0 }} />
@@ -1603,7 +1565,7 @@ function ApiKeysSection() {
 
             {/* Show masked key */}
             {hasKey && !isEditing && (
-              <code style={{ fontSize: 10, color: "var(--text-muted)", ...MONO_S, letterSpacing: 0.5 }}>
+              <code style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO, letterSpacing: 0.5 }}>
                 {isVisible ? profile.key : maskKey(profile.key)}
               </code>
             )}
@@ -1620,7 +1582,7 @@ function ApiKeysSection() {
                   style={{
                     flex: 1, background: "var(--bg-surface)", border: "1px solid var(--border)",
                     borderRadius: 6, padding: "6px 10px", color: "var(--text)", fontSize: 11,
-                    outline: "none", ...MONO_S,
+                    outline: "none", fontFamily: MONO,
                   }}
                 />
                 <button
@@ -1877,13 +1839,6 @@ function SandboxPanel() {
     setLogsLoading(false);
   };
 
-  const CARD_S: React.CSSProperties = {
-    background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden",
-  };
-  const ROW_S: React.CSSProperties = {
-    display: "flex", alignItems: "center", justifyContent: "space-between",
-    padding: "10px 14px", borderBottom: "1px solid var(--border)",
-  };
   const feedbackColors: Record<string, { bg: string; fg: string; border: string }> = {
     success: { bg: "rgba(74,222,128,0.08)", fg: "#4ade80", border: "rgba(74,222,128,0.2)" },
     error:   { bg: "rgba(248,113,113,0.08)", fg: "#f87171", border: "rgba(248,113,113,0.2)" },
@@ -1892,7 +1847,7 @@ function SandboxPanel() {
 
   if (loading) {
     return (
-      <div style={{ ...CARD_S, padding: "20px 14px", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+      <div style={{ ...glowCard("var(--accent)"), padding: "20px 14px", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
         <IconRefresh spin />
         <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Checking OpenShell...</span>
       </div>
@@ -1921,13 +1876,10 @@ function SandboxPanel() {
       )}
 
       {/* Main toggle card */}
-      <div style={CARD_S}>
-        <div style={{ ...ROW_S, borderBottom: "1px solid var(--border)" }}>
+      <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+        <div style={{ ...rowStyle, borderBottom: "1px solid var(--border)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
-              background: sandboxMode !== "off" ? "rgba(74,222,128,0.12)" : "rgba(255,255,255,0.04)",
-            }}>
+            <div style={iconTile(sandboxMode !== "off" ? "#4ade80" : "var(--text-muted)", 32)}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={sandboxMode !== "off" ? "#4ade80" : "var(--text-muted)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="7" width="20" height="14" rx="2" ry="2" /><path d="M16 7V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v3" /><line x1="12" y1="12" x2="12" y2="16" />
               </svg>
@@ -1946,14 +1898,14 @@ function SandboxPanel() {
             <button onClick={handleToggle} disabled={toggling} style={{
               width: 48, height: 26, borderRadius: 13, border: "none", cursor: toggling ? "wait" : "pointer",
               background: sandboxMode !== "off" ? "#4ade80" : "rgba(255,255,255,0.12)",
-              position: "relative", transition: "background 0.2s", flexShrink: 0,
+              position: "relative", transition: `background 0.2s ${EASE}`, flexShrink: 0,
               opacity: toggling ? 0.6 : 1,
             }}>
               <div style={{
                 width: 20, height: 20, borderRadius: "50%", background: "#fff",
                 position: "absolute", top: 3,
                 left: sandboxMode !== "off" ? 25 : 3,
-                transition: "left 0.2s",
+                transition: `left 0.2s ${EASE}`,
                 boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
               }} />
             </button>
@@ -1970,7 +1922,7 @@ function SandboxPanel() {
         </div>
 
         {/* Status row */}
-        <div style={{ ...ROW_S, borderBottom: expanded ? "1px solid var(--border)" : "none" }}>
+        <div style={{ ...rowStyle, borderBottom: expanded ? "1px solid var(--border)" : "none" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{
               width: 7, height: 7, borderRadius: "50%",

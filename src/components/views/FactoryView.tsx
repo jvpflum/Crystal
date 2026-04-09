@@ -7,19 +7,25 @@ import { escapeShellArg } from "@/lib/tools";
 import { invalidateCronJobsCliCache } from "@/stores/dataStore";
 import { RunWorkspace } from "@/components/factory/RunWorkspace";
 import {
+  EASE, glowCard, hoverLift, hoverReset, pressDown, pressUp,
+  innerPanel, sectionLabel, iconTile,
+  inputStyle, btnPrimary, btnSecondary,
+  emptyState, row as rowStyle, MONO,
+} from "@/styles/viewStyles";
+import {
   Loader2, RefreshCw, Play, Zap, GitBranch, Bot, Terminal,
   Square, Send, FileText, Eye, ChevronRight, ChevronDown,
   Cpu, FolderOpen, Navigation as NavIcon, Clock, ExternalLink,
+  GitCommit, Upload, Globe, Check, AlertTriangle,
 } from "lucide-react";
 
-const MONO: CSSProperties = { fontFamily: "'JetBrains Mono', 'Fira Code', monospace" };
-const CARD: CSSProperties = { background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" };
-const BTN: CSSProperties = { padding: "6px 14px", borderRadius: 6, fontSize: 11, fontWeight: 500, border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, transition: "all .15s ease" };
-const BTN_PRIMARY: CSSProperties = { ...BTN, background: "var(--accent-bg)", color: "var(--accent)" };
-const BTN_GHOST: CSSProperties = { ...BTN, background: "transparent", color: "var(--text-muted)" };
-const BTN_DANGER: CSSProperties = { ...BTN, background: "rgba(239,68,68,0.1)", color: "#ef4444" };
-const INPUT: CSSProperties = { background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 12px", color: "var(--text)", fontSize: 12, outline: "none", width: "100%", boxSizing: "border-box", ...MONO };
-const LABEL: CSSProperties = { fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 4 };
+const BTN_DANGER: CSSProperties = {
+  background: "rgba(239,68,68,0.1)", color: "#ef4444",
+  border: "none", borderRadius: 10, padding: "6px 14px",
+  fontSize: 11, fontWeight: 500, cursor: "pointer",
+  display: "inline-flex", alignItems: "center", gap: 6,
+  transition: `all 0.2s ${EASE}`,
+};
 
 const STATUS_COLORS: Record<string, string> = {
   queued: "var(--text-muted)", running: "var(--accent)", completed: "var(--success)", failed: "var(--error)", cancelled: "var(--text-muted)",
@@ -234,7 +240,7 @@ function sortBuildersForDisplay(a: LiveBuilder, b: LiveBuilder): number {
   return tb - ta;
 }
 
-type TabId = "builds" | "projects" | "schedule";
+type TabId = "builds" | "projects" | "deploy" | "schedule";
 
 const FORGE_CRON_PRESETS: { label: string; value: string }[] = [
   { label: "2:00 AM every night", value: "0 2 * * *" },
@@ -274,7 +280,7 @@ function IconFolder() {
   return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>;
 }
 function IconChevron({ open }: { open: boolean }) {
-  return <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ transition: "transform .15s", transform: open ? "rotate(90deg)" : "rotate(0deg)" }}><polyline points="9 18 15 12 9 6" /></svg>;
+  return <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ transition: `transform 0.15s ${EASE}`, transform: open ? "rotate(90deg)" : "rotate(0deg)" }}><polyline points="9 18 15 12 9 6" /></svg>;
 }
 
 export function FactoryView() {
@@ -287,19 +293,20 @@ export function FactoryView() {
       <div style={{ padding: "18px 24px 0", flexShrink: 0 }}>
         <h2 style={{ color: "var(--text)", fontSize: 16, fontWeight: 700, margin: 0 }}>The Forge</h2>
         <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "2px 0 12px" }}>
-          Claude Code builds, sub-agents, and autonomous software development
+          Codex &amp; ACP autonomous builds &middot; Git operations &middot; Preview &amp; deploy
         </p>
         <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--border)" }}>
           {([
             { id: "builds" as TabId, label: "Builds", icon: <Cpu style={{ width: 11, height: 11 }} /> },
             { id: "projects" as TabId, label: "Projects", icon: <FolderOpen style={{ width: 11, height: 11 }} /> },
+            { id: "deploy" as TabId, label: "Git & Deploy", icon: <GitBranch style={{ width: 11, height: 11 }} /> },
             { id: "schedule" as TabId, label: "Schedule", icon: <Clock style={{ width: 11, height: 11 }} /> },
           ]).map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
               padding: "8px 20px", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer",
               background: "transparent", color: tab === t.id ? "var(--accent)" : "var(--text-muted)",
               borderBottom: tab === t.id ? "2px solid var(--accent)" : "2px solid transparent",
-              transition: "all 0.15s", display: "flex", alignItems: "center", gap: 6,
+              transition: `all 0.15s ${EASE}`, display: "flex", alignItems: "center", gap: 6,
             }}>
               {t.icon} {t.label}
             </button>
@@ -307,7 +314,7 @@ export function FactoryView() {
         </div>
       </div>
 
-      {tab === "builds" ? <BuildsTab /> : tab === "projects" ? <ProjectsTab /> : <ForgeScheduleTab />}
+      {tab === "builds" ? <BuildsTab /> : tab === "projects" ? <ProjectsTab /> : tab === "deploy" ? <DeployTab /> : <ForgeScheduleTab />}
     </div>
   );
 }
@@ -328,7 +335,7 @@ function BuildsTab() {
   const [task, setTask] = useState("");
   const [cwd, setCwd] = useState("");
   const [customCwd, setCustomCwd] = useState("");
-  const [runtime, setRuntime] = useState<string>("claude-code");
+  const [runtime, setRuntime] = useState<string>("codex");
   const [model, setModel] = useState("");
   const [thinking, setThinking] = useState("default");
   const [spawning, setSpawning] = useState(false);
@@ -484,40 +491,42 @@ function BuildsTab() {
 
       {/* Spawn Build Card */}
       <div style={{ marginBottom: 20 }}>
-        <button onClick={() => setSpawnOpen(!spawnOpen)} style={{
+        <button onClick={() => setSpawnOpen(!spawnOpen)} data-glow="#d4a574"
+          onMouseEnter={hoverLift} onMouseLeave={hoverReset} onMouseDown={pressDown} onMouseUp={pressUp}
+          style={{
           display: "flex", alignItems: "center", gap: 10, width: "100%",
           padding: "14px 18px", borderRadius: spawnOpen ? "10px 10px 0 0" : 10,
           background: "linear-gradient(135deg, rgba(212,165,116,0.08), rgba(139,92,246,0.08))",
           border: "1px solid rgba(212,165,116,0.2)", cursor: "pointer", color: "var(--text)",
-          transition: "all 0.15s",
+          transition: `all 0.2s ${EASE}`,
         }}>
           {spawnOpen ? <ChevronDown style={{ width: 14, height: 14, color: "#d4a574" }} /> : <ChevronRight style={{ width: 14, height: 14, color: "#d4a574" }} />}
           <div style={{ width: 28, height: 28, borderRadius: 7, background: "rgba(212,165,116,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#d4a574" }}>C</div>
           <div style={{ flex: 1, textAlign: "left" }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>New Build</div>
-            <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 1 }}>Spawn a Claude Code sub-agent to build software autonomously</div>
+            <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 1 }}>Spawn an autonomous agent (Codex, Gemini, ACP) to build software</div>
           </div>
           <Play style={{ width: 16, height: 16, color: "#d4a574" }} />
         </button>
 
         {spawnOpen && (
-          <div style={{ ...CARD, borderRadius: "0 0 10px 10px", borderTop: "none" }}>
+          <div style={{ ...innerPanel, borderRadius: "0 0 10px 10px", borderTop: "none" }}>
             <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
               <div>
-                <span style={LABEL}>What should Claude Code build? *</span>
+                <span style={sectionLabel}>What should Claude Code build? *</span>
                 <textarea value={task} onChange={e => setTask(e.target.value)}
                   placeholder="Build a REST API with Express and TypeScript that has user auth, CRUD endpoints for posts, and PostgreSQL integration..."
-                  rows={4} style={{ ...INPUT, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
+                  rows={4} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
                   onKeyDown={e => { if (e.key === "Enter" && e.ctrlKey && task.trim()) spawnBuild(); }}
                 />
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
-                  <span style={LABEL}>Working Directory</span>
+                  <span style={sectionLabel}>Working Directory</span>
                   {projects.length > 0 ? (
                     <select value={cwd} onChange={e => setCwd(e.target.value)}
-                      style={{ ...INPUT, fontFamily: "inherit" }}>
+                      style={{ ...inputStyle, fontFamily: "inherit" }}>
                       <option value="">Default (agent home)</option>
                       {projects.map(p => (
                         <option key={p.id} value={p.path}>{p.name} — {p.path}</option>
@@ -526,32 +535,32 @@ function BuildsTab() {
                     </select>
                   ) : (
                     <input value={cwd} onChange={e => setCwd(e.target.value)}
-                      placeholder="C:\Users\...\Projects\my-app" style={INPUT} />
+                      placeholder="C:\Users\...\Projects\my-app" style={inputStyle} />
                   )}
                   {cwd === "__custom__" && (
                     <input value={customCwd} onChange={e => setCustomCwd(e.target.value)}
-                      placeholder="Enter custom path..." style={{ ...INPUT, marginTop: 6 }} autoFocus />
+                      placeholder="Enter custom path..." style={{ ...inputStyle, marginTop: 6 }} autoFocus />
                   )}
                 </div>
                 <div>
-                  <span style={LABEL}>Runtime</span>
-                  <select value={runtime} onChange={e => setRuntime(e.target.value)} style={{ ...INPUT, fontFamily: "inherit" }}>
-                    <option value="claude-code">Claude Code</option>
-                    <option value="codex">Codex</option>
+                  <span style={sectionLabel}>Runtime</span>
+                  <select value={runtime} onChange={e => setRuntime(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }}>
+                    <option value="codex">Codex (OpenAI)</option>
                     <option value="gemini-cli">Gemini CLI</option>
+                    <option value="claude-code">Claude Code</option>
                   </select>
                 </div>
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
-                  <span style={LABEL}>Model Override</span>
+                  <span style={sectionLabel}>Model Override</span>
                   <input value={model} onChange={e => setModel(e.target.value)}
-                    placeholder="Default (claude-sonnet-4)" style={INPUT} />
+                    placeholder="Default (auto)" style={inputStyle} />
                 </div>
                 <div>
-                  <span style={LABEL}>Thinking Level</span>
-                  <select value={thinking} onChange={e => setThinking(e.target.value)} style={{ ...INPUT, fontFamily: "inherit" }}>
+                  <span style={sectionLabel}>Thinking Level</span>
+                  <select value={thinking} onChange={e => setThinking(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }}>
                     {["default", "minimal", "low", "medium", "high"].map(l => (
                       <option key={l} value={l}>{l}</option>
                     ))}
@@ -562,8 +571,9 @@ function BuildsTab() {
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
                 <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Ctrl+Enter to launch</span>
                 <button onClick={spawnBuild} disabled={spawning || !task.trim() || (cwd === "__custom__" && !customCwd.trim())}
+                  onMouseDown={pressDown} onMouseUp={pressUp}
                   style={{
-                    ...BTN, padding: "10px 24px", fontWeight: 600, fontSize: 12,
+                    ...btnPrimary, padding: "10px 24px", fontWeight: 600, fontSize: 12,
                     background: task.trim() && !(cwd === "__custom__" && !customCwd.trim()) ? "#d4a574" : "var(--bg-hover)",
                     color: task.trim() && !(cwd === "__custom__" && !customCwd.trim()) ? "#fff" : "var(--text-muted)",
                     opacity: !task.trim() || spawning || (cwd === "__custom__" && !customCwd.trim()) ? 0.5 : 1,
@@ -586,26 +596,26 @@ function BuildsTab() {
           { label: "ACP Sessions", value: builders.filter(b => b.source === "acp").length, color: "#c084fc", icon: <Terminal style={{ width: 12, height: 12 }} /> },
         ].map(s => (
           <div key={s.label} style={{
-            ...CARD, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, flex: "1 1 140px",
-          }}>
+            ...glowCard(s.color), padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, flex: "1 1 140px",
+          }} data-glow={s.color} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
             <div style={{ color: s.color }}>{s.icon}</div>
             <div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: s.color, ...MONO }}>{s.value}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: s.color, fontFamily: MONO }}>{s.value}</div>
               <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 500 }}>{s.label}</div>
             </div>
           </div>
         ))}
-        <button onClick={() => loadBuilders()} disabled={loading} style={{ ...BTN_GHOST, alignSelf: "center" }}>
+        <button onClick={() => loadBuilders()} disabled={loading} style={{ ...btnSecondary, alignSelf: "center" }}>
           <RefreshCw style={{ width: 12, height: 12, ...(loading ? { animation: "_spin 1s linear infinite" } : {}) }} /> Refresh
         </button>
       </div>
 
       {projectGithubChips.length > 0 && (
-        <div style={{ ...CARD, padding: "10px 14px", marginBottom: 16, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+        <div style={{ ...innerPanel, padding: "10px 14px", marginBottom: 16, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>GitHub</span>
           {projectGithubChips.map(({ p, url }) => (
             <a key={p.id} href={url} target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: 10, ...MONO, color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4, textDecoration: "none", padding: "4px 8px", borderRadius: 6, background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+              style={{ fontSize: 10, fontFamily: MONO, color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4, textDecoration: "none", padding: "4px 8px", borderRadius: 6, background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
               <GitBranch style={{ width: 10, height: 10 }} /> {p.name}
             </a>
           ))}
@@ -618,8 +628,8 @@ function BuildsTab() {
           <Loader2 style={{ width: 20, height: 20, color: "var(--accent)", animation: "_spin 1s linear infinite" }} />
         </div>
       ) : builders.length === 0 ? (
-        <div style={{ ...CARD, padding: "40px 20px", textAlign: "center" }}>
-          <div style={{ width: 48, height: 48, borderRadius: 12, background: "rgba(212,165,116,0.1)", display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+        <div style={{ ...glowCard("var(--text-muted)"), ...emptyState }}>
+          <div style={iconTile("#d4a574", 48)}>
             <Bot style={{ width: 24, height: 24, color: "#d4a574", opacity: 0.5 }} />
           </div>
           <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: "0 0 4px" }}>No active builds</p>
@@ -679,11 +689,11 @@ function BuildsTab() {
             {recentLocalRuns.map(r => {
               const proj = projects.find(p => p.id === r.projectId);
               return (
-                <div key={r.id} style={{ ...CARD, padding: "10px 14px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+                <div key={r.id} style={{ ...rowStyle, alignItems: "flex-start", justifyContent: "space-between" }} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>{proj?.name ?? "Project"}</div>
                     <div style={{ fontSize: 10, color: "var(--text-secondary)", marginTop: 2, lineHeight: 1.4, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{r.objective}</div>
-                    <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 4, ...MONO }}>{r.agentType} · {new Date(r.createdAt).toLocaleString()}</div>
+                    <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 4, fontFamily: MONO }}>{r.agentType} · {new Date(r.createdAt).toLocaleString()}</div>
                   </div>
                   <span style={{
                     fontSize: 8, padding: "2px 6px", borderRadius: 4, fontWeight: 600, textTransform: "uppercase", flexShrink: 0,
@@ -705,9 +715,8 @@ function BuildsTab() {
             <button onClick={() => setOutput(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: 10, cursor: "pointer" }}>Dismiss</button>
           </div>
           <pre style={{
-            margin: 0, padding: "10px 14px", borderRadius: 10,
-            background: "var(--bg-elevated)", border: "1px solid var(--border)",
-            fontSize: 11, ...MONO, color: "var(--text-secondary)",
+            ...innerPanel, margin: 0, padding: "10px 14px",
+            fontSize: 11, fontFamily: MONO, color: "var(--text-secondary)",
             whiteSpace: "pre-wrap", wordBreak: "break-word",
             maxHeight: 300, overflowY: "auto",
           }}>
@@ -750,10 +759,10 @@ function BuilderCard({ builder, steerInput, sendInput, onSteerChange, onSendChan
 
   return (
     <div style={{
-      ...CARD,
-      borderColor: isActive ? `${statusColor(builder.status)}40` : "var(--border)",
+      ...glowCard(statusColor(builder.status)),
+      borderColor: isActive ? `${statusColor(builder.status)}40` : undefined,
       borderLeft: `3px solid ${statusColor(builder.status)}`,
-    }}>
+    }} data-glow={statusColor(builder.status)} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
       {/* Header */}
       <div style={{ padding: "12px 14px", display: "flex", alignItems: "flex-start", gap: 10 }}>
         <div style={{
@@ -768,7 +777,7 @@ function BuilderCard({ builder, steerInput, sendInput, onSteerChange, onSendChan
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", ...MONO }}>{builder.id}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", fontFamily: MONO }}>{builder.id}</span>
             <span style={{
               fontSize: 8, padding: "2px 6px", borderRadius: 4, fontWeight: 600, textTransform: "uppercase",
               background: isClaudeCode ? "rgba(212,165,116,0.12)" : builder.source === "acp" ? "rgba(168,85,247,0.12)" : "rgba(59,130,246,0.12)",
@@ -795,18 +804,18 @@ function BuilderCard({ builder, steerInput, sendInput, onSteerChange, onSendChan
 
           <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
             {builder.model && (
-              <span style={{ fontSize: 9, color: "var(--text-muted)", ...MONO, display: "flex", alignItems: "center", gap: 3 }}>
+              <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: MONO, display: "flex", alignItems: "center", gap: 3 }}>
                 <Cpu style={{ width: 9, height: 9 }} /> {builder.model}
               </span>
             )}
             {builder.cwd && (
-              <span style={{ fontSize: 9, color: "var(--text-muted)", ...MONO, display: "flex", alignItems: "center", gap: 3 }}>
+              <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: MONO, display: "flex", alignItems: "center", gap: 3 }}>
                 <FolderOpen style={{ width: 9, height: 9 }} /> {matchedProject ? matchedProject.name : builder.cwd}
               </span>
             )}
             {githubUrl && (
               <a href={githubUrl} target="_blank" rel="noopener noreferrer"
-                style={{ fontSize: 9, color: "var(--accent)", ...MONO, display: "inline-flex", alignItems: "center", gap: 3, textDecoration: "none" }}
+                style={{ fontSize: 9, color: "var(--accent)", fontFamily: MONO, display: "inline-flex", alignItems: "center", gap: 3, textDecoration: "none" }}
                 title={githubUrl}>
                 <GitBranch style={{ width: 9, height: 9 }} /> GitHub <ExternalLink style={{ width: 8, height: 8, opacity: 0.7 }} />
               </a>
@@ -822,14 +831,14 @@ function BuilderCard({ builder, steerInput, sendInput, onSteerChange, onSendChan
         {/* Actions */}
         <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
           <button onClick={onToggleLog}
-            style={{ ...BTN_GHOST, padding: "4px 8px", fontSize: 10 }} title="View log">
+            style={{ ...btnSecondary, padding: "4px 8px", fontSize: 10 }} title="View log">
             <Eye style={{ width: 10, height: 10 }} />
           </button>
           {builder.source === "subagent" && (
             <>
               <button onClick={() => onAction(`Info-${builder.id}`, `/subagents info ${cmdTok}`)}
                 disabled={isActionLoading(`Info-${builder.id}`)}
-                style={{ ...BTN_GHOST, padding: "4px 8px", fontSize: 10 }} title="Info">
+                style={{ ...btnSecondary, padding: "4px 8px", fontSize: 10 }} title="Info">
                 {isActionLoading(`Info-${builder.id}`) ? <Loader2 style={{ width: 10, height: 10, animation: "_spin 1s linear infinite" }} /> : <FileText style={{ width: 10, height: 10 }} />}
               </button>
               <button onClick={() => onAction(`Kill-${builder.id}`, `/subagents kill ${cmdTok}`)}
@@ -843,7 +852,7 @@ function BuilderCard({ builder, steerInput, sendInput, onSteerChange, onSendChan
             <>
               <button onClick={() => onAction(`Doctor-${builder.id}`, `/acp doctor ${cmdTok}`)}
                 disabled={isActionLoading(`Doctor-${builder.id}`)}
-                style={{ ...BTN_GHOST, padding: "4px 8px", fontSize: 10, color: "#c084fc" }} title="Doctor">
+                style={{ ...btnSecondary, padding: "4px 8px", fontSize: 10, color: "#c084fc" }} title="Doctor">
                 {isActionLoading(`Doctor-${builder.id}`) ? <Loader2 style={{ width: 10, height: 10, animation: "_spin 1s linear infinite" }} /> : <FileText style={{ width: 10, height: 10 }} />}
               </button>
               <button onClick={() => onAction(`Cancel-${builder.id}`, `/acp cancel ${cmdTok}`)}
@@ -875,7 +884,7 @@ function BuilderCard({ builder, steerInput, sendInput, onSteerChange, onSendChan
                   onSteerChange("");
                 }
               }}
-              style={{ ...INPUT, flex: 1, fontSize: 10, padding: "5px 8px" }} />
+              style={{ ...inputStyle, flex: 1, fontSize: 10, padding: "5px 8px" }} />
             <button onClick={() => {
               if (steerInput.trim()) {
                 const cmd = builder.source === "acp" ? `/acp steer ${cmdTok} ${steerInput}` : `/subagents steer ${cmdTok} ${steerInput}`;
@@ -883,7 +892,7 @@ function BuilderCard({ builder, steerInput, sendInput, onSteerChange, onSendChan
                 onSteerChange("");
               }
             }} disabled={!steerInput.trim() || isActionLoading(`Steer-${builder.id}`)}
-              style={{ ...BTN_GHOST, padding: "4px 8px", fontSize: 10, borderColor: "rgba(251,191,36,0.3)", color: "#fbbf24" }} title="Steer">
+              style={{ ...btnSecondary, padding: "4px 8px", fontSize: 10, borderColor: "rgba(251,191,36,0.3)", color: "#fbbf24" }} title="Steer">
               {isActionLoading(`Steer-${builder.id}`) ? <Loader2 style={{ width: 9, height: 9, animation: "_spin 1s linear infinite" }} /> : <NavIcon style={{ width: 9, height: 9 }} />}
             </button>
           </div>
@@ -898,14 +907,14 @@ function BuilderCard({ builder, steerInput, sendInput, onSteerChange, onSendChan
                     onSendChange("");
                   }
                 }}
-                style={{ ...INPUT, flex: 1, fontSize: 10, padding: "5px 8px" }} />
+                style={{ ...inputStyle, flex: 1, fontSize: 10, padding: "5px 8px" }} />
               <button onClick={() => {
                 if (sendInput.trim()) {
                   onAction(`Send-${builder.id}`, `/subagents send ${cmdTok} ${sendInput}`);
                   onSendChange("");
                 }
               }} disabled={!sendInput.trim() || isActionLoading(`Send-${builder.id}`)}
-                style={{ ...BTN_PRIMARY, padding: "4px 8px", fontSize: 10 }} title="Send">
+                style={{ ...btnPrimary, padding: "4px 8px", fontSize: 10 }} title="Send">
                 {isActionLoading(`Send-${builder.id}`) ? <Loader2 style={{ width: 9, height: 9, animation: "_spin 1s linear infinite" }} /> : <Send style={{ width: 9, height: 9 }} />}
               </button>
             </div>
@@ -945,10 +954,10 @@ function LogPanel({ commandTarget, source }: {
   }, [log]);
 
   return (
-    <div style={{ borderTop: "1px solid var(--border)" }}>
+    <div style={{ ...innerPanel, borderTop: "1px solid var(--border)", borderRadius: 0 }}>
       <div style={{ padding: "4px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg-base)" }}>
         <span style={{ fontSize: 9, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--text-muted)" }}>Build Output</span>
-        <button onClick={fetchLog} disabled={loading} style={{ ...BTN_GHOST, padding: "2px 6px", fontSize: 9 }}>
+        <button onClick={fetchLog} disabled={loading} style={{ ...btnSecondary, padding: "2px 6px", fontSize: 9 }}>
           <RefreshCw style={{ width: 9, height: 9, ...(loading ? { animation: "_spin 1s linear infinite" } : {}) }} /> Refresh
         </button>
       </div>
@@ -958,7 +967,7 @@ function LogPanel({ commandTarget, source }: {
         </div>
       ) : (
         <pre ref={logRef} style={{
-          margin: 0, padding: "8px 14px", fontSize: 10, lineHeight: 1.6, ...MONO,
+          margin: 0, padding: "8px 14px", fontSize: 10, lineHeight: 1.6, fontFamily: MONO,
           color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-word",
           maxHeight: 250, overflowY: "auto", background: "var(--bg-base)",
         }}>
@@ -986,7 +995,7 @@ function ForgeScheduleTab() {
   const [projectId, setProjectId] = useState<string>("");
   const [task, setTask] = useState("");
   const [cwdExtra, setCwdExtra] = useState("");
-  const [runtime, setRuntime] = useState("claude-code");
+  const [runtime, setRuntime] = useState("codex");
   const [model, setModel] = useState("");
   const [thinking, setThinking] = useState("default");
   const [cronExpression, setCronExpression] = useState(FORGE_CRON_PRESETS[0].value);
@@ -1057,7 +1066,7 @@ function ForgeScheduleTab() {
   return (
     <div style={{ flex: 1, overflow: "auto", padding: "16px 24px 24px" }}>
       <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "0 0 16px", maxWidth: 640, lineHeight: 1.5 }}>
-        Define build recipes and when they should run. Registering sends the same <span style={MONO}>/acp spawn</span> message as New Build to OpenClaw cron (see Command Center → Scheduled).
+        Define build recipes and when they should run. Registering sends the same <span style={{ fontFamily: MONO }}>/acp spawn</span> message as New Build to OpenClaw cron (see Command Center → Scheduled).
       </p>
 
       {feedback && (
@@ -1071,20 +1080,20 @@ function ForgeScheduleTab() {
         </div>
       )}
 
-      <div style={{ ...CARD, padding: 16, marginBottom: 20 }}>
+      <div style={{ ...glowCard("var(--accent)"), padding: 16, marginBottom: 20 }} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginBottom: 12 }}>New scheduled build</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div>
-            <span style={LABEL}>Name</span>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="Nightly API sync" style={INPUT} />
+            <span style={sectionLabel}>Name</span>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="Nightly API sync" style={inputStyle} />
           </div>
           <div>
-            <span style={LABEL}>When (cron)</span>
+            <span style={sectionLabel}>When (cron)</span>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
               {FORGE_CRON_PRESETS.map(p => (
                 <button key={p.value} type="button" onClick={() => setCronExpression(p.value)}
                   style={{
-                    ...BTN_GHOST, fontSize: 10,
+                    ...btnSecondary, fontSize: 10,
                     borderColor: cronExpression === p.value ? "var(--accent)" : "var(--border)",
                     color: cronExpression === p.value ? "var(--accent)" : "var(--text-muted)",
                   }}>
@@ -1092,32 +1101,32 @@ function ForgeScheduleTab() {
                 </button>
               ))}
             </div>
-            <input value={cronExpression} onChange={e => setCronExpression(e.target.value)} placeholder="0 2 * * *" style={{ ...INPUT, ...MONO }} />
+            <input value={cronExpression} onChange={e => setCronExpression(e.target.value)} placeholder="0 2 * * *" style={{ ...inputStyle, fontFamily: MONO }} />
           </div>
           <div>
-            <span style={LABEL}>Project folder (optional)</span>
-            <select value={projectId} onChange={e => setProjectId(e.target.value)} style={{ ...INPUT, fontFamily: "inherit" }}>
+            <span style={sectionLabel}>Project folder (optional)</span>
+            <select value={projectId} onChange={e => setProjectId(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }}>
               <option value="">None — use custom path below</option>
               {projects.map(p => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
             {!selectedProject && (
-              <input value={cwdExtra} onChange={e => setCwdExtra(e.target.value)} placeholder="Or enter working directory path" style={{ ...INPUT, marginTop: 8 }} />
+              <input value={cwdExtra} onChange={e => setCwdExtra(e.target.value)} placeholder="Or enter working directory path" style={{ ...inputStyle, marginTop: 8 }} />
             )}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div>
-              <span style={LABEL}>Runtime</span>
-              <select value={runtime} onChange={e => setRuntime(e.target.value)} style={{ ...INPUT, fontFamily: "inherit" }}>
-                <option value="claude-code">Claude Code</option>
-                <option value="codex">Codex</option>
+              <span style={sectionLabel}>Runtime</span>
+              <select value={runtime} onChange={e => setRuntime(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }}>
+                <option value="codex">Codex (OpenAI)</option>
                 <option value="gemini-cli">Gemini CLI</option>
+                <option value="claude-code">Claude Code</option>
               </select>
             </div>
             <div>
-              <span style={LABEL}>Thinking</span>
-              <select value={thinking} onChange={e => setThinking(e.target.value)} style={{ ...INPUT, fontFamily: "inherit" }}>
+              <span style={sectionLabel}>Thinking</span>
+              <select value={thinking} onChange={e => setThinking(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }}>
                 {["default", "minimal", "low", "medium", "high"].map(l => (
                   <option key={l} value={l}>{l}</option>
                 ))}
@@ -1125,16 +1134,17 @@ function ForgeScheduleTab() {
             </div>
           </div>
           <div>
-            <span style={LABEL}>Model override</span>
-            <input value={model} onChange={e => setModel(e.target.value)} placeholder="Optional" style={INPUT} />
+            <span style={sectionLabel}>Model override</span>
+            <input value={model} onChange={e => setModel(e.target.value)} placeholder="Optional" style={inputStyle} />
           </div>
           <div>
-            <span style={LABEL}>Build instructions *</span>
-            <textarea value={task} onChange={e => setTask(e.target.value)} rows={4} style={{ ...INPUT, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} placeholder="What the agent should do each run..." />
+            <span style={sectionLabel}>Build instructions *</span>
+            <textarea value={task} onChange={e => setTask(e.target.value)} rows={4} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} placeholder="What the agent should do each run..." />
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button type="button" onClick={saveSchedule} disabled={!name.trim() || !task.trim()}
-              style={{ ...BTN_PRIMARY, padding: "8px 18px", opacity: !name.trim() || !task.trim() ? 0.5 : 1 }}>
+              onMouseDown={pressDown} onMouseUp={pressUp}
+              style={{ ...btnPrimary, padding: "8px 18px", opacity: !name.trim() || !task.trim() ? 0.5 : 1 }}>
               Save schedule
             </button>
           </div>
@@ -1145,18 +1155,18 @@ function ForgeScheduleTab() {
         Saved schedules ({forgeSchedules.length})
       </div>
       {forgeSchedules.length === 0 ? (
-        <div style={{ ...CARD, padding: 28, textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
+        <div style={{ ...glowCard("var(--text-muted)"), ...emptyState, padding: 28, fontSize: 12 }}>
           No schedules yet. Add one above, then register with OpenClaw.
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {forgeSchedules.map(s => (
-            <div key={s.id} style={{ ...CARD, padding: "12px 14px" }}>
+            <div key={s.id} style={{ ...rowStyle, padding: "12px 14px" }} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{s.name}</div>
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", ...MONO, marginTop: 4 }}>{s.cronExpression}</div>
-                  {s.cwd && <div style={{ fontSize: 10, color: "var(--text-secondary)", marginTop: 4, ...MONO }}>{s.cwd}</div>}
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO, marginTop: 4 }}>{s.cronExpression}</div>
+                  {s.cwd && <div style={{ fontSize: 10, color: "var(--text-secondary)", marginTop: 4, fontFamily: MONO }}>{s.cwd}</div>}
                   <div style={{ fontSize: 10, color: "var(--text-secondary)", marginTop: 6, lineHeight: 1.4 }}>{s.task}</div>
                   {s.lastRegisteredAt && (
                     <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 6 }}>Last registered {new Date(s.lastRegisteredAt).toLocaleString()}</div>
@@ -1164,7 +1174,8 @@ function ForgeScheduleTab() {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
                   <button type="button" onClick={() => registerCron(s)} disabled={registering === s.id}
-                    style={{ ...BTN_PRIMARY, padding: "6px 12px", fontSize: 10, whiteSpace: "nowrap" }}>
+                    onMouseDown={pressDown} onMouseUp={pressUp}
+                    style={{ ...btnPrimary, padding: "6px 12px", fontSize: 10, whiteSpace: "nowrap" }}>
                     {registering === s.id ? <Loader2 style={{ width: 12, height: 12, animation: "_spin 1s linear infinite" }} /> : <Clock style={{ width: 11, height: 11 }} />}
                     Register with OpenClaw
                   </button>
@@ -1250,7 +1261,7 @@ function ProjectsTab() {
   return (
     <div style={{ flex: 1, display: "flex", overflow: "hidden", padding: "12px 24px 24px", gap: 16 }}>
       <div style={{ width: 240, flexShrink: 0, display: "flex", flexDirection: "column", gap: 6, overflowY: "auto" }}>
-        <button onClick={() => setShowNewProject(true)} style={{ ...BTN_PRIMARY, marginBottom: 8 }}>
+        <button onClick={() => setShowNewProject(true)} onMouseDown={pressDown} onMouseUp={pressUp} style={{ ...btnPrimary, marginBottom: 8 }}>
           <IconPlus /> New Project
         </button>
         {projects.map(p => {
@@ -1258,9 +1269,10 @@ function ProjectsTab() {
           const running = activeRunCount(p.id);
           return (
             <button key={p.id} onClick={() => { selectProject(p.id); setFocusedRunId(null); }}
-              style={{ ...CARD, padding: "10px 12px", cursor: "pointer", textAlign: "left", borderColor: active ? "var(--accent)" : "var(--border)", background: active ? "var(--accent-bg)" : "var(--bg-elevated)", transition: "all .15s ease" }}>
+              style={{ ...glowCard(active ? "var(--accent)" : "var(--text-muted)"), padding: "10px 12px", cursor: "pointer", textAlign: "left", borderColor: active ? "var(--accent)" : undefined, background: active ? "var(--accent-bg)" : undefined, transition: `all 0.2s ${EASE}` }}
+              data-glow={active ? "var(--accent)" : undefined} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
               <div style={{ fontSize: 12, fontWeight: 600, color: active ? "var(--accent)" : "var(--text)", marginBottom: 2 }}>{p.name}</div>
-              <div style={{ fontSize: 10, color: "var(--text-muted)", ...MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.path}</div>
+              <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.path}</div>
               {running > 0 && (
                 <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 4 }}>
                   <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--accent)", animation: "_pulse 1.5s ease-in-out infinite" }} />
@@ -1299,11 +1311,11 @@ function ProjectHeader({ project, runCount, activeCount, onDelete }: {
   project: FactoryProject; runCount: number; activeCount: number; onDelete: () => void;
 }) {
   return (
-    <div style={{ ...CARD, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+    <div style={{ ...glowCard("var(--accent)"), padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
       <div>
         <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{project.name}</div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
-          <span style={{ fontSize: 10, color: "var(--text-muted)", ...MONO }}>{project.path}</span>
+          <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO }}>{project.path}</span>
           <span style={{ fontSize: 10, color: "var(--text-muted)" }}>&middot; {runCount} run{runCount !== 1 ? "s" : ""}</span>
           {activeCount > 0 && <span style={{ fontSize: 10, color: "var(--accent)" }}>&middot; {activeCount} active</span>}
         </div>
@@ -1339,33 +1351,33 @@ function NewProjectForm({ onSubmit, onCancel }: {
   };
 
   return (
-    <div style={{ ...CARD, padding: 16, flexShrink: 0 }}>
+    <div style={{ ...glowCard("var(--accent)"), padding: 16, flexShrink: 0 }} data-glow="var(--accent)">
       <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", marginBottom: 12 }}>New Project</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div>
-          <span style={LABEL}>Project Name *</span>
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="My App" style={INPUT} autoFocus onKeyDown={e => { if (e.key === "Enter") handleSubmit(); }} />
+          <span style={sectionLabel}>Project Name *</span>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="My App" style={inputStyle} autoFocus onKeyDown={e => { if (e.key === "Enter") handleSubmit(); }} />
         </div>
         <div>
-          <span style={LABEL}>Folder</span>
-          <div style={{ ...INPUT, background: "var(--bg-base)", color: "var(--text-muted)", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={sectionLabel}>Folder</span>
+          <div style={{ ...inputStyle, background: "var(--bg-base)", color: "var(--text-muted)", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
             <IconFolder /> <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>~/Projects/{name.trim() ? slugify(name) : "..."}</span>
           </div>
         </div>
         <div style={{ gridColumn: "1 / -1" }}>
-          <span style={LABEL}>Description</span>
-          <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="A React dashboard with auth..." style={INPUT} />
+          <span style={sectionLabel}>Description</span>
+          <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="A React dashboard with auth..." style={inputStyle} />
         </div>
         <div style={{ gridColumn: "1 / -1" }}>
-          <span style={LABEL}>Tech Stack (comma separated)</span>
-          <input value={stack} onChange={e => setStack(e.target.value)} placeholder="react, typescript, tailwind" style={INPUT} />
+          <span style={sectionLabel}>Tech Stack (comma separated)</span>
+          <input value={stack} onChange={e => setStack(e.target.value)} placeholder="react, typescript, tailwind" style={inputStyle} />
         </div>
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button onClick={handleSubmit} disabled={!name.trim() || creating} style={{ ...BTN_PRIMARY, opacity: !name.trim() || creating ? 0.5 : 1 }}>
+        <button onClick={handleSubmit} disabled={!name.trim() || creating} onMouseDown={pressDown} onMouseUp={pressUp} style={{ ...btnPrimary, opacity: !name.trim() || creating ? 0.5 : 1 }}>
           <IconPlus /> {creating ? "Creating..." : "Create Project"}
         </button>
-        <button onClick={onCancel} style={BTN_GHOST}>Cancel</button>
+        <button onClick={onCancel} onMouseDown={pressDown} onMouseUp={pressUp} style={btnSecondary}>Cancel</button>
       </div>
     </div>
   );
@@ -1377,7 +1389,7 @@ function NewRunForm({ onSubmit }: { onSubmit: (agentType: AgentType, objective: 
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div style={{ ...CARD, flexShrink: 0, overflow: "visible" }}>
+    <div style={{ ...glowCard("var(--accent)"), flexShrink: 0, overflow: "visible" }}>
       <button onClick={() => setExpanded(!expanded)}
         style={{ width: "100%", padding: "10px 16px", display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", cursor: "pointer", color: "var(--text)" }}>
         <IconChevron open={expanded} />
@@ -1387,21 +1399,21 @@ function NewRunForm({ onSubmit }: { onSubmit: (agentType: AgentType, objective: 
       {expanded && (
         <div style={{ padding: "0 16px 14px", borderTop: "1px solid var(--border)" }}>
           <div style={{ marginTop: 12 }}>
-            <span style={LABEL}>Agent ID</span>
+            <span style={sectionLabel}>Agent ID</span>
             <input value={agentType} onChange={e => setAgentType(e.target.value)}
               placeholder="claude-code, cortex, main, ..."
-              style={{ ...INPUT, fontFamily: "inherit", marginBottom: 10 }} />
+              style={{ ...inputStyle, fontFamily: "inherit", marginBottom: 10 }} />
           </div>
           <div>
-            <span style={LABEL}>Objective</span>
+            <span style={sectionLabel}>Objective</span>
             <textarea value={objective} onChange={e => setObjective(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && e.ctrlKey) { if (objective.trim()) { onSubmit(agentType, objective.trim()); setObjective(""); } } }}
               placeholder="Describe what to build (Ctrl+Enter to start)"
-              rows={3} style={{ ...INPUT, resize: "vertical", lineHeight: 1.5, fontFamily: "inherit" }} />
+              rows={3} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5, fontFamily: "inherit" }} />
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
             <button onClick={() => { if (objective.trim()) { onSubmit(agentType, objective.trim()); setObjective(""); } }}
-              disabled={!objective.trim()} style={{ ...BTN_PRIMARY, opacity: !objective.trim() ? 0.5 : 1 }}>
+              disabled={!objective.trim()} onMouseDown={pressDown} onMouseUp={pressUp} style={{ ...btnPrimary, opacity: !objective.trim() ? 0.5 : 1 }}>
               <Play style={{ width: 11, height: 11 }} /> Build
             </button>
             <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Ctrl+Enter</span>
@@ -1421,7 +1433,7 @@ function RunsList({ runs, onCancel, onRemove, onClearCompleted, onOpenWorkspace 
     <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
       {runs.length > 0 && hasCompleted && (
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button onClick={onClearCompleted} style={{ ...BTN_GHOST, fontSize: 10 }}>Clear Completed</button>
+          <button onClick={onClearCompleted} style={{ ...btnSecondary, fontSize: 10 }}>Clear Completed</button>
         </div>
       )}
       {runs.length === 0 && (
@@ -1458,7 +1470,7 @@ function RunCard({ run, onCancel, onRemove, onOpenWorkspace }: {
   const duration = run.startedAt ? elapsed((run.completedAt ?? now) - run.startedAt) : "—";
 
   return (
-    <div style={{ ...CARD, borderColor: isActive ? "var(--accent)" + "40" : "var(--border)" }}>
+    <div style={{ ...glowCard(isActive ? "var(--accent)" : "var(--text-muted)"), borderColor: isActive ? "var(--accent)" + "40" : undefined }} data-glow={isActive ? "var(--accent)" : undefined} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
       <button onClick={() => setExpanded(!expanded)}
         style={{ width: "100%", padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: "pointer", color: "var(--text)" }}>
         <span style={{ width: 20, height: 20, borderRadius: 5, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: color, color: "#fff" }}>
@@ -1473,7 +1485,7 @@ function RunCard({ run, onCancel, onRemove, onOpenWorkspace }: {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          <span style={{ fontSize: 10, color: "var(--text-muted)", ...MONO }}>{duration}</span>
+          <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO }}>{duration}</span>
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: STATUS_COLORS[run.status] ?? "var(--text-muted)" }} />
           <span style={{ fontSize: 10, color: STATUS_COLORS[run.status], textTransform: "capitalize" }}>{run.status}</span>
           <IconChevron open={expanded} />
@@ -1483,16 +1495,664 @@ function RunCard({ run, onCancel, onRemove, onOpenWorkspace }: {
         <div style={{ borderTop: "1px solid var(--border)" }}>
           {run.error && <div style={{ padding: "8px 14px", background: "rgba(239,68,68,0.06)", fontSize: 11, color: "#ef4444" }}>{run.error}</div>}
           {(run.output || !isActive) && (
-            <pre ref={outputRef} style={{ margin: 0, padding: "10px 14px", fontSize: 10, lineHeight: 1.6, ...MONO, color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 300, overflowY: "auto", background: "var(--bg-base)" }}>
+            <pre ref={outputRef} style={{ margin: 0, padding: "10px 14px", fontSize: 10, lineHeight: 1.6, fontFamily: MONO, color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 300, overflowY: "auto", background: "var(--bg-base)" }}>
               {run.output || "No output captured."}
             </pre>
           )}
           <div style={{ padding: "8px 14px", display: "flex", gap: 8, borderTop: "1px solid var(--border)" }}>
-            <button onClick={onOpenWorkspace} style={BTN_PRIMARY}><IconFolder /> Workspace</button>
-            {isActive && <button onClick={onCancel} style={BTN_DANGER}><IconStop /> Cancel</button>}
-            {!isActive && <button onClick={onRemove} style={BTN_GHOST}><IconTrash /> Remove</button>}
+            <button onClick={onOpenWorkspace} onMouseDown={pressDown} onMouseUp={pressUp} style={btnPrimary}><IconFolder /> Workspace</button>
+            {isActive && <button onClick={onCancel} onMouseDown={pressDown} onMouseUp={pressUp} style={BTN_DANGER}><IconStop /> Cancel</button>}
+            {!isActive && <button onClick={onRemove} onMouseDown={pressDown} onMouseUp={pressUp} style={btnSecondary}><IconTrash /> Remove</button>}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   DEPLOY TAB — Git operations, preview, and deployment pipeline
+   ══════════════════════════════════════════════════════════════════════ */
+
+interface GitFileEntry { status: string; path: string; staged: boolean }
+interface GitLogEntry { hash: string; message: string; ago: string; author: string }
+
+async function runGit(args: string, dir: string): Promise<{ stdout: string; stderr: string; code: number }> {
+  return invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+    command: `git -C "${dir}" ${args}`,
+    cwd: null,
+  });
+}
+
+function parseGitStatusOutput(raw: string): GitFileEntry[] {
+  const entries: GitFileEntry[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    if (line.length < 3) continue;
+    const idx = line[0];
+    const wt = line[1];
+    const fp = line.slice(3);
+    if (!fp) continue;
+    if (idx !== " " && idx !== "?") entries.push({ status: idx, path: fp, staged: true });
+    if (wt !== " " && wt !== undefined) entries.push({ status: wt === "?" ? "?" : wt, path: fp, staged: false });
+  }
+  return entries;
+}
+
+function parseGitLogOutput(raw: string): GitLogEntry[] {
+  return raw.split(/\r?\n/).filter(l => l.includes("<|>")).map(line => {
+    const parts = line.split("<|>");
+    return { hash: parts[0] ?? "", message: parts[1] ?? "", ago: parts[2] ?? "", author: parts[3] ?? "" };
+  }).filter(e => e.hash);
+}
+
+const GIT_STATUS_META: Record<string, { color: string }> = {
+  M: { color: "#fbbf24" },
+  A: { color: "#4ade80" },
+  D: { color: "#f87171" },
+  R: { color: "#60a5fa" },
+  C: { color: "#a78bfa" },
+  "?": { color: "#94a3b8" },
+  U: { color: "#ef4444" },
+};
+
+const PREVIEW_PRESETS = [
+  { label: "npm run dev", cmd: "npm run dev", ports: [3000, 5173] },
+  { label: "npm start", cmd: "npm start", ports: [3000] },
+  { label: "yarn dev", cmd: "yarn dev", ports: [3000, 5173] },
+  { label: "python http", cmd: "python -m http.server 8000", ports: [8000] },
+];
+
+function DeployTab() {
+  const { projects } = useFactoryStore();
+  const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
+  const project = projects.find(p => p.id === projectId) ?? null;
+
+  const [isGitRepo, setIsGitRepo] = useState<boolean | null>(null);
+  const [branch, setBranch] = useState("");
+  const [remoteUrl, setRemoteUrl] = useState("");
+  const [gitFiles, setGitFiles] = useState<GitFileEntry[]>([]);
+  const [gitLog, setGitLog] = useState<GitLogEntry[]>([]);
+  const [commitMsg, setCommitMsg] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const [loading, setLoading] = useState(false);
+  const [gitIniting, setGitIniting] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const [pushing, setPushing] = useState(false);
+  const [pulling, setPulling] = useState(false);
+
+  const [addingRemote, setAddingRemote] = useState(false);
+  const [remoteInput, setRemoteInput] = useState("");
+
+  const [previewCmd, setPreviewCmd] = useState("npm run dev");
+  const [previewPid, setPreviewPid] = useState<number | null>(null);
+  const [previewStarting, setPreviewStarting] = useState(false);
+  const [previewPorts, setPreviewPorts] = useState<number[]>([3000, 5173]);
+
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+  const [cmdOutput, setCmdOutput] = useState<{ title: string; content: string } | null>(null);
+
+  useEffect(() => {
+    if (feedback) { const t = setTimeout(() => setFeedback(null), 5000); return () => clearTimeout(t); }
+  }, [feedback]);
+
+  const loadGitInfo = useCallback(async () => {
+    if (!project?.path) return;
+    setLoading(true);
+    try {
+      const check = await runGit("rev-parse --is-inside-work-tree", project.path);
+      const isRepo = check.code === 0 && check.stdout.trim() === "true";
+      setIsGitRepo(isRepo);
+
+      if (!isRepo) {
+        setBranch(""); setRemoteUrl(""); setGitFiles([]); setGitLog([]);
+        setLoading(false);
+        return;
+      }
+
+      const [branchRes, remoteRes, statusRes, logRes] = await Promise.all([
+        runGit("branch --show-current", project.path),
+        runGit("remote get-url origin", project.path).catch(() => ({ stdout: "", stderr: "", code: 1 })),
+        runGit("status --porcelain", project.path),
+        runGit('log -20 --format="%h<|>%s<|>%ar<|>%an"', project.path).catch(() => ({ stdout: "", stderr: "", code: 1 })),
+      ]);
+
+      setBranch(branchRes.stdout.trim());
+      setRemoteUrl(remoteRes.code === 0 ? remoteRes.stdout.trim() : "");
+      setGitFiles(parseGitStatusOutput(statusRes.stdout));
+      setGitLog(parseGitLogOutput(logRes.stdout));
+    } catch {
+      setIsGitRepo(false);
+    }
+    setLoading(false);
+  }, [project?.path]);
+
+  useEffect(() => {
+    if (project) loadGitInfo();
+    else setIsGitRepo(null);
+  }, [project, loadGitInfo]);
+
+  const gitInit = async () => {
+    if (!project?.path) return;
+    setGitIniting(true);
+    try {
+      const res = await runGit("init", project.path);
+      if (res.code === 0) {
+        setFeedback({ type: "success", msg: "Git repository initialized" });
+        await loadGitInfo();
+      } else {
+        setFeedback({ type: "error", msg: res.stderr || "git init failed" });
+      }
+    } catch (e) {
+      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "git init failed" });
+    }
+    setGitIniting(false);
+  };
+
+  const stageFiles = async (files: string[]) => {
+    if (!project?.path || files.length === 0) return;
+    try {
+      for (const f of files) {
+        await runGit(`add -- "${f}"`, project.path);
+      }
+      setFeedback({ type: "success", msg: `Staged ${files.length} file(s)` });
+      setSelected(new Set());
+      await loadGitInfo();
+    } catch (e) {
+      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "git add failed" });
+    }
+  };
+
+  const stageAll = async () => {
+    if (!project?.path) return;
+    try {
+      const res = await runGit("add -A", project.path);
+      if (res.code === 0) {
+        setFeedback({ type: "success", msg: "Staged all changes" });
+        await loadGitInfo();
+      } else {
+        setFeedback({ type: "error", msg: res.stderr || "git add failed" });
+      }
+    } catch (e) {
+      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "git add failed" });
+    }
+  };
+
+  const unstageAll = async () => {
+    if (!project?.path) return;
+    try {
+      await runGit("reset HEAD", project.path);
+      setFeedback({ type: "success", msg: "Unstaged all files" });
+      await loadGitInfo();
+    } catch (e) {
+      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "git reset failed" });
+    }
+  };
+
+  const commit = async () => {
+    if (!project?.path || !commitMsg.trim()) return;
+    setCommitting(true);
+    try {
+      const escaped = commitMsg.trim().replace(/`/g, "``").replace(/"/g, '`"').replace(/\$/g, "`$");
+      const res = await runGit(`commit -m "${escaped}"`, project.path);
+      if (res.code === 0) {
+        setFeedback({ type: "success", msg: "Committed successfully" });
+        setCommitMsg("");
+        setCmdOutput({ title: "Commit", content: res.stdout });
+        await loadGitInfo();
+      } else {
+        setFeedback({ type: "error", msg: res.stderr || res.stdout || "Commit failed" });
+      }
+    } catch (e) {
+      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Commit failed" });
+    }
+    setCommitting(false);
+  };
+
+  const push = async () => {
+    if (!project?.path) return;
+    setPushing(true);
+    try {
+      const branchName = branch || "main";
+      const res = await runGit(`push -u origin ${branchName}`, project.path);
+      if (res.code === 0) {
+        setFeedback({ type: "success", msg: `Pushed ${branchName} to origin` });
+        setCmdOutput({ title: "Push", content: res.stdout || res.stderr || "Success" });
+      } else {
+        setFeedback({ type: "error", msg: res.stderr || "Push failed" });
+        if (res.stderr) setCmdOutput({ title: "Push Error", content: res.stderr });
+      }
+    } catch (e) {
+      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Push failed" });
+    }
+    setPushing(false);
+  };
+
+  const pull = async () => {
+    if (!project?.path) return;
+    setPulling(true);
+    try {
+      const res = await runGit("pull", project.path);
+      if (res.code === 0) {
+        setFeedback({ type: "success", msg: "Pulled latest changes" });
+        setCmdOutput({ title: "Pull", content: res.stdout || res.stderr || "Already up to date." });
+        await loadGitInfo();
+      } else {
+        setFeedback({ type: "error", msg: res.stderr || "Pull failed" });
+      }
+    } catch (e) {
+      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Pull failed" });
+    }
+    setPulling(false);
+  };
+
+  const addRemote = async () => {
+    if (!project?.path || !remoteInput.trim()) return;
+    try {
+      const res = await runGit(`remote add origin ${remoteInput.trim()}`, project.path);
+      if (res.code === 0) {
+        setFeedback({ type: "success", msg: "Remote origin added" });
+        setRemoteUrl(remoteInput.trim());
+        setAddingRemote(false);
+        setRemoteInput("");
+      } else {
+        setFeedback({ type: "error", msg: res.stderr || "Failed to add remote" });
+      }
+    } catch (e) {
+      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Failed to add remote" });
+    }
+  };
+
+  const startPreview = async () => {
+    if (!project?.path || !previewCmd.trim()) return;
+    setPreviewStarting(true);
+    try {
+      const escaped = previewCmd.trim().replace(/"/g, '\\"');
+      const spawnCmd = `$proc = Start-Process -FilePath "cmd" -ArgumentList "/c ${escaped}" -WorkingDirectory "${project.path}" -WindowStyle Hidden -PassThru; $proc.Id`;
+      const res = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: spawnCmd, cwd: null,
+      });
+      const pid = parseInt(res.stdout.trim(), 10);
+      if (!isNaN(pid)) {
+        setPreviewPid(pid);
+        setFeedback({ type: "success", msg: `Preview started (PID ${pid})` });
+      } else {
+        setFeedback({ type: "error", msg: "Failed to start preview process" });
+      }
+    } catch (e) {
+      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Failed to start preview" });
+    }
+    setPreviewStarting(false);
+  };
+
+  const stopPreview = async () => {
+    if (previewPid === null) return;
+    try {
+      await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: `Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${previewPid} } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; Stop-Process -Id ${previewPid} -Force -ErrorAction SilentlyContinue`,
+        cwd: null,
+      });
+      setPreviewPid(null);
+      setFeedback({ type: "success", msg: "Preview stopped" });
+    } catch {
+      setPreviewPid(null);
+    }
+  };
+
+  const openInBrowser = async (port: number) => {
+    try {
+      await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+        command: `Start-Process "http://localhost:${port}"`, cwd: null,
+      });
+    } catch { /* best effort */ }
+  };
+
+  const toggleFile = (path: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(path) ? next.delete(path) : next.add(path);
+      return next;
+    });
+  };
+
+  const unstagedFiles = gitFiles.filter(f => !f.staged);
+  const stagedFiles = gitFiles.filter(f => f.staged);
+  const hasChanges = gitFiles.length > 0;
+  const canCommit = stagedFiles.length > 0 && commitMsg.trim().length > 0;
+  const ghUrl = remoteUrl ? githubBrowseUrlFromRemote(remoteUrl) : null;
+
+  return (
+    <div style={{ flex: 1, overflow: "auto", padding: "16px 24px 24px" }}>
+      {/* Project Selector */}
+      <div style={{ marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-end" }}>
+        <div style={{ flex: 1 }}>
+          <span style={sectionLabel}>Project</span>
+          <select value={projectId} onChange={e => setProjectId(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }}>
+            <option value="">Select a project...</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name} — {p.path}</option>)}
+          </select>
+        </div>
+        {ghUrl && (
+          <a href={ghUrl} target="_blank" rel="noopener noreferrer"
+            style={{ ...btnSecondary, padding: "8px 14px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--accent)", whiteSpace: "nowrap" }}>
+            <GitBranch style={{ width: 12, height: 12 }} /> GitHub <ExternalLink style={{ width: 10, height: 10, opacity: 0.6 }} />
+          </a>
+        )}
+      </div>
+
+      {feedback && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, marginBottom: 14,
+          background: feedback.type === "success" ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
+          border: `1px solid ${feedback.type === "success" ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)"}`,
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: feedback.type === "success" ? "#4ade80" : "#f87171" }} />
+          <span style={{ fontSize: 11, color: feedback.type === "success" ? "#4ade80" : "#f87171", flex: 1 }}>{feedback.msg}</span>
+          <button onClick={() => setFeedback(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}>×</button>
+        </div>
+      )}
+
+      {!project ? (
+        <div style={{ ...glowCard("var(--text-muted)"), ...emptyState }}>
+          <div style={iconTile("var(--accent)", 48)}>
+            <GitBranch style={{ width: 24, height: 24, color: "var(--accent)", opacity: 0.5 }} />
+          </div>
+          <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: "0 0 4px" }}>Select a project</p>
+          <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0 }}>Choose a project from the dropdown, or create one in the Projects tab</p>
+        </div>
+      ) : loading ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: 60 }}>
+          <Loader2 style={{ width: 24, height: 24, color: "var(--accent)", animation: "_spin 1s linear infinite" }} />
+        </div>
+      ) : isGitRepo === false ? (
+        <div style={{ ...glowCard("var(--accent)"), padding: 28, textAlign: "center" }} data-glow="var(--accent)">
+          <div style={{ ...iconTile("#fbbf24", 48), margin: "0 auto 12px" }}>
+            <AlertTriangle style={{ width: 24, height: 24, color: "#fbbf24" }} />
+          </div>
+          <p style={{ fontSize: 14, color: "var(--text)", margin: "0 0 4px", fontWeight: 600 }}>Not a Git repository</p>
+          <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "0 0 16px", fontFamily: MONO }}>{project.path}</p>
+          <button onClick={gitInit} disabled={gitIniting} onMouseDown={pressDown} onMouseUp={pressUp}
+            style={{ ...btnPrimary, padding: "10px 24px" }}>
+            {gitIniting ? <Loader2 style={{ width: 14, height: 14, animation: "_spin 1s linear infinite" }} /> : <GitBranch style={{ width: 14, height: 14 }} />}
+            Initialize Git Repository
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* Status Bar */}
+          <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+            <div style={{ ...glowCard("#60a5fa"), padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, flex: "1 1 160px" }}
+              data-glow="#60a5fa" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+              <GitBranch style={{ width: 14, height: 14, color: "#60a5fa" }} />
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#60a5fa", fontFamily: MONO }}>{branch || "HEAD"}</div>
+                <div style={{ fontSize: 9, color: "var(--text-muted)" }}>Current branch</div>
+              </div>
+            </div>
+            <div style={{ ...glowCard(remoteUrl ? "#4ade80" : "#fbbf24"), padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, flex: "1 1 200px" }}
+              data-glow={remoteUrl ? "#4ade80" : "#fbbf24"} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+              {remoteUrl ? <ExternalLink style={{ width: 14, height: 14, color: "#4ade80" }} /> : <AlertTriangle style={{ width: 14, height: 14, color: "#fbbf24" }} />}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: remoteUrl ? "#4ade80" : "#fbbf24", fontFamily: MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {remoteUrl || "No remote"}
+                </div>
+                <div style={{ fontSize: 9, color: "var(--text-muted)" }}>{remoteUrl ? "Remote origin" : "Add a remote to push"}</div>
+              </div>
+            </div>
+            <div style={{ ...glowCard(hasChanges ? "#fbbf24" : "var(--text-muted)"), padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, flex: "1 1 100px" }}
+              data-glow={hasChanges ? "#fbbf24" : "var(--text-muted)"} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+              <FileText style={{ width: 14, height: 14, color: hasChanges ? "#fbbf24" : "var(--text-muted)" }} />
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: hasChanges ? "#fbbf24" : "var(--text-muted)", fontFamily: MONO }}>{gitFiles.length}</div>
+                <div style={{ fontSize: 9, color: "var(--text-muted)" }}>Changes</div>
+              </div>
+            </div>
+            <button onClick={() => loadGitInfo()} disabled={loading} style={{ ...btnSecondary, alignSelf: "center" }}>
+              <RefreshCw style={{ width: 12, height: 12, ...(loading ? { animation: "_spin 1s linear infinite" } : {}) }} /> Refresh
+            </button>
+          </div>
+
+          {/* Source Control + Commit/Push grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
+            {/* Changed Files */}
+            <div style={{ ...glowCard("var(--accent)") }} data-glow="var(--accent)">
+              <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>Source Control</span>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {selected.size > 0 && (
+                    <button onClick={() => stageFiles([...selected])} onMouseDown={pressDown} onMouseUp={pressUp}
+                      style={{ ...btnPrimary, padding: "4px 10px", fontSize: 10 }}>
+                      <Check style={{ width: 10, height: 10 }} /> Stage {selected.size}
+                    </button>
+                  )}
+                  {unstagedFiles.length > 0 && (
+                    <button onClick={stageAll} onMouseDown={pressDown} onMouseUp={pressUp}
+                      style={{ ...btnSecondary, padding: "4px 10px", fontSize: 10 }}>
+                      Stage All
+                    </button>
+                  )}
+                  {stagedFiles.length > 0 && (
+                    <button onClick={unstageAll} onMouseDown={pressDown} onMouseUp={pressUp}
+                      style={{ ...btnSecondary, padding: "4px 10px", fontSize: 10, color: "#fbbf24", borderColor: "rgba(251,191,36,0.2)" }}>
+                      Unstage
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div style={{ maxHeight: 280, overflowY: "auto" }}>
+                {stagedFiles.length > 0 && (
+                  <>
+                    <div style={{ padding: "6px 14px", fontSize: 9, fontWeight: 600, color: "#4ade80", textTransform: "uppercase", letterSpacing: 0.5, background: "rgba(74,222,128,0.04)" }}>
+                      Staged ({stagedFiles.length})
+                    </div>
+                    {stagedFiles.map(f => (
+                      <div key={`s-${f.path}`} style={{ padding: "5px 14px", display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
+                        <Check style={{ width: 10, height: 10, color: "#4ade80", flexShrink: 0 }} />
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: GIT_STATUS_META[f.status]?.color ?? "var(--text-muted)", flexShrink: 0 }} />
+                        <span style={{ fontSize: 8, fontWeight: 600, color: GIT_STATUS_META[f.status]?.color, minWidth: 12 }}>{f.status}</span>
+                        <span style={{ color: "var(--text-secondary)", fontFamily: MONO, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.path}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {unstagedFiles.length > 0 && (
+                  <>
+                    <div style={{ padding: "6px 14px", fontSize: 9, fontWeight: 600, color: "#fbbf24", textTransform: "uppercase", letterSpacing: 0.5, background: "rgba(251,191,36,0.04)" }}>
+                      Unstaged ({unstagedFiles.length})
+                    </div>
+                    {unstagedFiles.map(f => (
+                      <div key={`u-${f.path}`}
+                        onClick={() => toggleFile(f.path)}
+                        style={{
+                          padding: "5px 14px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+                          borderBottom: "1px solid rgba(255,255,255,0.02)",
+                          background: selected.has(f.path) ? "rgba(99,102,241,0.06)" : "transparent",
+                          transition: `background 0.15s ${EASE}`,
+                        }}>
+                        <input type="checkbox" checked={selected.has(f.path)} readOnly
+                          style={{ width: 12, height: 12, accentColor: "var(--accent)", cursor: "pointer", flexShrink: 0 }} />
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: GIT_STATUS_META[f.status]?.color ?? "var(--text-muted)", flexShrink: 0 }} />
+                        <span style={{ fontSize: 8, fontWeight: 600, color: GIT_STATUS_META[f.status]?.color, minWidth: 12 }}>{f.status}</span>
+                        <span style={{ color: "var(--text-secondary)", fontFamily: MONO, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.path}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {!hasChanges && (
+                  <div style={{ padding: "28px 14px", textAlign: "center", color: "var(--text-muted)" }}>
+                    <Check style={{ width: 20, height: 20, marginBottom: 6, opacity: 0.4 }} />
+                    <p style={{ fontSize: 11, margin: 0 }}>Working tree clean</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Commit + Sync */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ ...glowCard("var(--accent)"), padding: 14 }} data-glow="var(--accent)">
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                  <GitCommit style={{ width: 12, height: 12, color: "var(--accent)" }} /> Commit
+                </div>
+                <textarea value={commitMsg} onChange={e => setCommitMsg(e.target.value)}
+                  placeholder="Commit message..."
+                  rows={3} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5, marginBottom: 8 }}
+                  onKeyDown={e => { if (e.key === "Enter" && e.ctrlKey && canCommit) commit(); }} />
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button onClick={commit} disabled={!canCommit || committing} onMouseDown={pressDown} onMouseUp={pressUp}
+                    style={{ ...btnPrimary, flex: 1, opacity: !canCommit || committing ? 0.5 : 1 }}>
+                    {committing ? <Loader2 style={{ width: 12, height: 12, animation: "_spin 1s linear infinite" }} /> : <GitCommit style={{ width: 12, height: 12 }} />}
+                    Commit
+                  </button>
+                  <span style={{ fontSize: 9, color: "var(--text-muted)" }}>Ctrl+Enter</span>
+                </div>
+                {stagedFiles.length === 0 && hasChanges && (
+                  <p style={{ fontSize: 9, color: "var(--text-muted)", margin: "6px 0 0" }}>Stage files first</p>
+                )}
+              </div>
+
+              <div style={{ ...glowCard("#4ade80"), padding: 14 }} data-glow="#4ade80">
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                  <Upload style={{ width: 12, height: 12, color: "#4ade80" }} /> Sync with Remote
+                </div>
+                {remoteUrl ? (
+                  <>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={push} disabled={pushing} onMouseDown={pressDown} onMouseUp={pressUp}
+                        style={{ ...btnPrimary, flex: 1, opacity: pushing ? 0.5 : 1, background: "#4ade80", color: "#000" }}>
+                        {pushing ? <Loader2 style={{ width: 12, height: 12, animation: "_spin 1s linear infinite" }} /> : <Upload style={{ width: 12, height: 12 }} />}
+                        Push
+                      </button>
+                      <button onClick={pull} disabled={pulling} onMouseDown={pressDown} onMouseUp={pressUp}
+                        style={{ ...btnSecondary, flex: 1, opacity: pulling ? 0.5 : 1 }}>
+                        {pulling ? <Loader2 style={{ width: 12, height: 12, animation: "_spin 1s linear infinite" }} /> : <RefreshCw style={{ width: 12, height: 12 }} />}
+                        Pull
+                      </button>
+                    </div>
+                    <p style={{ fontSize: 9, color: "var(--text-muted)", margin: "6px 0 0", fontFamily: MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {remoteUrl}
+                    </p>
+                  </>
+                ) : addingRemote ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <input value={remoteInput} onChange={e => setRemoteInput(e.target.value)}
+                      placeholder="https://github.com/user/repo.git"
+                      style={{ ...inputStyle, fontSize: 11 }}
+                      onKeyDown={e => { if (e.key === "Enter" && remoteInput.trim()) addRemote(); }}
+                      autoFocus />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={addRemote} disabled={!remoteInput.trim()} onMouseDown={pressDown} onMouseUp={pressUp}
+                        style={{ ...btnPrimary, flex: 1, fontSize: 10, opacity: !remoteInput.trim() ? 0.5 : 1 }}>
+                        Add Origin
+                      </button>
+                      <button onClick={() => { setAddingRemote(false); setRemoteInput(""); }} onMouseDown={pressDown} onMouseUp={pressUp}
+                        style={{ ...btnSecondary, fontSize: 10 }}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => setAddingRemote(true)} onMouseDown={pressDown} onMouseUp={pressUp}
+                    style={{ ...btnSecondary, width: "100%", color: "#fbbf24", borderColor: "rgba(251,191,36,0.2)" }}>
+                    <GitBranch style={{ width: 12, height: 12 }} /> Add Remote Origin
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Preview */}
+          <div style={{ ...glowCard("#8b5cf6"), padding: 14, marginBottom: 20 }} data-glow="#8b5cf6" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
+                <Globe style={{ width: 14, height: 14, color: "#8b5cf6" }} /> Preview &amp; Dev Server
+              </div>
+              {previewPid !== null && (
+                <span style={{ fontSize: 9, color: "#4ade80", display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#4ade80", animation: "_pulse 1.5s ease-in-out infinite" }} />
+                  Running (PID {previewPid})
+                </span>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+              {PREVIEW_PRESETS.map(p => (
+                <button key={p.cmd} onClick={() => { setPreviewCmd(p.cmd); setPreviewPorts(p.ports); }}
+                  style={{
+                    ...btnSecondary, padding: "4px 10px", fontSize: 10,
+                    borderColor: previewCmd === p.cmd ? "rgba(139,92,246,0.4)" : "var(--border)",
+                    color: previewCmd === p.cmd ? "#a78bfa" : "var(--text-muted)",
+                  }}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={previewCmd} onChange={e => setPreviewCmd(e.target.value)} placeholder="npm run dev" style={{ ...inputStyle, flex: 1, fontSize: 12 }} />
+              {previewPid === null ? (
+                <button onClick={startPreview} disabled={previewStarting || !previewCmd.trim()} onMouseDown={pressDown} onMouseUp={pressUp}
+                  style={{ ...btnPrimary, background: "#8b5cf6", opacity: previewStarting || !previewCmd.trim() ? 0.5 : 1, whiteSpace: "nowrap" }}>
+                  {previewStarting ? <Loader2 style={{ width: 12, height: 12, animation: "_spin 1s linear infinite" }} /> : <Play style={{ width: 12, height: 12 }} />}
+                  Start
+                </button>
+              ) : (
+                <button onClick={stopPreview} onMouseDown={pressDown} onMouseUp={pressUp}
+                  style={{ ...BTN_DANGER, whiteSpace: "nowrap" }}>
+                  <Square style={{ width: 10, height: 10 }} /> Stop
+                </button>
+              )}
+            </div>
+            {previewPid !== null && (
+              <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 9, color: "var(--text-muted)", alignSelf: "center" }}>Open:</span>
+                {previewPorts.map(port => (
+                  <button key={port} onClick={() => openInBrowser(port)} onMouseDown={pressDown} onMouseUp={pressUp}
+                    style={{ ...btnSecondary, padding: "4px 10px", fontSize: 10, color: "#8b5cf6", borderColor: "rgba(139,92,246,0.25)" }}>
+                    <Globe style={{ width: 10, height: 10 }} /> localhost:{port}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Git History */}
+          {gitLog.length > 0 && (
+            <div style={{ ...glowCard("var(--text-muted)") }}>
+              <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", fontSize: 11, fontWeight: 600, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
+                <Clock style={{ width: 12, height: 12, color: "var(--text-muted)" }} /> Recent Commits ({gitLog.length})
+              </div>
+              <div style={{ maxHeight: 260, overflowY: "auto" }}>
+                {gitLog.map((entry, i) => (
+                  <div key={`${entry.hash}-${i}`} style={{
+                    padding: "7px 14px", display: "flex", alignItems: "center", gap: 10,
+                    borderBottom: "1px solid rgba(255,255,255,0.02)", fontSize: 11,
+                  }}>
+                    <span style={{ fontSize: 10, fontFamily: MONO, color: "var(--accent)", fontWeight: 600, flexShrink: 0, letterSpacing: "0.02em" }}>{entry.hash}</span>
+                    <span style={{ color: "var(--text-secondary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.message}</span>
+                    <span style={{ fontSize: 9, color: "var(--text-muted)", flexShrink: 0, whiteSpace: "nowrap" }}>{entry.ago}</span>
+                    <span style={{ fontSize: 9, color: "var(--text-muted)", flexShrink: 0, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.author}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Command Output */}
+          {cmdOutput && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--text-muted)" }}>{cmdOutput.title}</span>
+                <button onClick={() => setCmdOutput(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: 10, cursor: "pointer" }}>Dismiss</button>
+              </div>
+              <pre style={{
+                ...innerPanel, margin: 0, padding: "10px 14px",
+                fontSize: 11, fontFamily: MONO, color: "var(--text-secondary)",
+                whiteSpace: "pre-wrap", wordBreak: "break-word",
+                maxHeight: 200, overflowY: "auto",
+              }}>
+                {cmdOutput.content}
+              </pre>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

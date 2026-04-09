@@ -44,6 +44,8 @@ struct ServerProcesses {
     http_client: reqwest::Client,
 }
 
+const STREAM_BUF_CAP: usize = 4 * 1024 * 1024; // 4 MB rolling window
+
 struct StreamingProcess {
     stdout_buf: Mutex<String>,
     stderr_buf: Mutex<String>,
@@ -52,6 +54,9 @@ struct StreamingProcess {
     done: Mutex<bool>,
     exit_code: Mutex<Option<i32>>,
     pid: u32,
+    /// Bytes trimmed from the front of stdout so far (used to adjust cursor)
+    stdout_trimmed: Mutex<usize>,
+    stderr_trimmed: Mutex<usize>,
 }
 
 #[derive(Serialize)]
@@ -301,6 +306,8 @@ fn start_streaming_command(state: tauri::State<AppState>, command: String, cwd: 
         done: Mutex::new(false),
         exit_code: Mutex::new(None),
         pid,
+        stdout_trimmed: Mutex::new(0),
+        stderr_trimmed: Mutex::new(0),
     });
 
     let stdout = child.stdout.take();
@@ -315,6 +322,14 @@ fn start_streaming_command(state: tauri::State<AppState>, command: String, cwd: 
                     let mut buf = proc_out.stdout_buf.lock().unwrap_or_else(|e| e.into_inner());
                     buf.push_str(&line);
                     buf.push('\n');
+                    if buf.len() > STREAM_BUF_CAP {
+                        let trim = buf.len() - STREAM_BUF_CAP;
+                        let boundary = buf[trim..].find('\n').map(|p| trim + p + 1).unwrap_or(trim);
+                        buf.drain(..boundary);
+                        let mut cursor = proc_out.read_cursor.lock().unwrap_or_else(|e| e.into_inner());
+                        *cursor = cursor.saturating_sub(boundary);
+                        *proc_out.stdout_trimmed.lock().unwrap_or_else(|e| e.into_inner()) += boundary;
+                    }
                 }
             }
         });
@@ -329,6 +344,14 @@ fn start_streaming_command(state: tauri::State<AppState>, command: String, cwd: 
                     let mut buf = proc_err.stderr_buf.lock().unwrap_or_else(|e| e.into_inner());
                     buf.push_str(&line);
                     buf.push('\n');
+                    if buf.len() > STREAM_BUF_CAP {
+                        let trim = buf.len() - STREAM_BUF_CAP;
+                        let boundary = buf[trim..].find('\n').map(|p| trim + p + 1).unwrap_or(trim);
+                        buf.drain(..boundary);
+                        let mut cursor = proc_err.stderr_cursor.lock().unwrap_or_else(|e| e.into_inner());
+                        *cursor = cursor.saturating_sub(boundary);
+                        *proc_err.stderr_trimmed.lock().unwrap_or_else(|e| e.into_inner()) += boundary;
+                    }
                 }
             }
         });
@@ -404,7 +427,28 @@ fn kill_streaming_command(state: tauri::State<AppState>, id: String) -> Result<(
 
 #[tauri::command]
 fn cleanup_streaming_command(state: tauri::State<AppState>, id: String) {
-    state.streaming.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+    let mut map = state.streaming.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(proc) = map.get(&id) {
+        let done = *proc.done.lock().unwrap_or_else(|e| e.into_inner());
+        if !done {
+            let pid = proc.pid;
+            #[cfg(target_os = "windows")]
+            {
+                let mut cmd = Command::new("taskkill");
+                cmd.args(["/F", "/T", "/PID", &pid.to_string()])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .stdin(Stdio::null())
+                    .creation_flags(CREATE_NO_WINDOW);
+                let _ = cmd.output();
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
+            }
+        }
+    }
+    map.remove(&id);
 }
 
 fn resolve_path(path: &str) -> String {

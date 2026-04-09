@@ -2,6 +2,7 @@
 
 :root {
   --bg-base: #0a0b0f;
+  --bg-primary: #0a0b0f;
   --bg-surface: #111318;
   --bg-elevated: rgba(255,255,255,0.03);
   --bg-hover: rgba(255,255,255,0.055);

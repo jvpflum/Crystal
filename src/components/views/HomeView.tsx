@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback, type CSSProperties } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "@/stores/appStore";
 import { openclawClient } from "@/lib/openclaw";
 import { cachedCommand } from "@/lib/cache";
-import { GpuMonitor } from "@/components/widgets/GpuMonitor";
+import { GpuMonitor, NvidiaLogo } from "@/components/widgets/GpuMonitor";
 import { LobsterIcon } from "@/components/LobsterIcon";
 import {
   Bot, Activity, Wrench,
@@ -11,10 +11,11 @@ import {
   Loader2,
   MemoryStick, Bolt, Trash2, Wifi, BatteryFull,
   RefreshCw, Power, RotateCcw, FolderCog, ShieldCheck,
-  MonitorDown, Layers, XCircle, ChevronRight,
+  MonitorDown, Layers, XCircle, ChevronRight, Database, Search,
 } from "lucide-react";
 import { useDataStore } from "@/stores/dataStore";
 import { useTokenUsageStore, formatLifetimeTokens } from "@/stores/tokenUsageStore";
+import { APP_VERSION } from "@/lib/version";
 
 /* ═══════════════════════════════════════════════════════════════
    Types & caches
@@ -37,6 +38,7 @@ interface MetaInfo {
   llmModel: string;
   ollamaReachable: boolean | null;
   ollamaModel: string;
+  ollamaRunning: boolean;
 }
 
 interface SysStats {
@@ -49,20 +51,42 @@ interface SysStats {
   uptime: string;
 }
 
-function memoryChunkCount(mem: Record<string, unknown> | null | undefined): number {
-  if (!mem || typeof mem !== "object") return 0;
+interface VectorStoreInfo {
+  chunks: number;
+  files: number;
+  vectorReady: boolean;
+  ftsReady: boolean;
+  provider: string;
+  searchMode: string;
+  dirty: boolean;
+}
+
+function parseVectorStoreInfo(mem: Record<string, unknown> | null | undefined): VectorStoreInfo {
+  const base: VectorStoreInfo = { chunks: 0, files: 0, vectorReady: false, ftsReady: false, provider: "none", searchMode: "unknown", dirty: false };
+  if (!mem || typeof mem !== "object") return base;
+
   const st = mem.status as Record<string, unknown> | undefined;
   if (st && typeof st === "object") {
-    const n = Number(st.chunks ?? st.totalChunks ?? 0);
-    if (Number.isFinite(n)) return n;
+    base.chunks = Number(st.chunks ?? st.totalChunks ?? 0) || 0;
+    base.files = Number(st.files ?? 0) || 0;
+    base.dirty = Boolean(st.dirty);
+    base.provider = String(st.provider ?? "none");
+    const vector = st.vector as Record<string, unknown> | undefined;
+    const fts = st.fts as Record<string, unknown> | undefined;
+    const custom = st.custom as Record<string, unknown> | undefined;
+    base.vectorReady = Boolean(vector?.available);
+    base.ftsReady = Boolean(fts?.available);
+    base.searchMode = String(custom?.searchMode ?? "unknown");
+    return base;
   }
-  const top = Number(mem.totalChunks ?? mem.chunks ?? mem.count ?? 0);
-  return Number.isFinite(top) ? top : 0;
+
+  base.chunks = Number(mem.totalChunks ?? mem.chunks ?? mem.count ?? 0) || 0;
+  return base;
 }
 
 const META_INITIAL: MetaInfo = {
   openclawVersion: "—", telegramStatus: "unknown", telegramBot: "",
-  heartbeatInterval: "—", llmModel: "—", ollamaReachable: null, ollamaModel: "",
+  heartbeatInterval: "—", llmModel: "—", ollamaReachable: null, ollamaModel: "", ollamaRunning: false,
 };
 
 /* ═══════════════════════════════════════════════════════════════
@@ -80,62 +104,15 @@ function OpenAILogo({ size = 18, color = "currentColor" }: { size?: number; colo
   );
 }
 
-function OllamaLogo({ size = 18, color = "currentColor" }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path
-        d="M12 2C9.2 2 7 4.5 7 7.5c0 1.3.4 2.4 1.1 3.3C6.8 11.8 6 13.3 6 15c0 2.8 2.2 5 5 5h2c2.8 0 5-2.2 5-5 0-1.7-.8-3.2-2.1-4.2.7-.9 1.1-2 1.1-3.3C17 4.5 14.8 2 12 2zm-2.5 7a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm5 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zM12 12c-.6 0-1-.3-1-.7 0-.4.4-.7 1-.7s1 .3 1 .7c0 .4-.4.7-1 .7z"
-        fill={color}
-      />
-    </svg>
-  );
-}
 
 /* ═══════════════════════════════════════════════════════════════
    Micro-interaction helpers
    ═══════════════════════════════════════════════════════════════ */
 
-const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
-const SPRING = "cubic-bezier(0.34, 1.56, 0.64, 1)";
-
-const cardBase: CSSProperties = {
-  background: "rgba(255,255,255,0.022)",
-  border: "1px solid rgba(255,255,255,0.055)",
-  borderRadius: 16,
-  transition: `all 0.3s ${EASE}`,
-  position: "relative",
-  overflow: "hidden",
-};
-
-function glowCard(color: string, extra?: CSSProperties): CSSProperties {
-  return {
-    ...cardBase,
-    boxShadow: `0 0 24px color-mix(in srgb, ${color} 6%, transparent), inset 0 1px 0 rgba(255,255,255,0.035)`,
-    ...extra,
-  };
-}
-
-function hoverLift(e: React.MouseEvent<HTMLElement>) {
-  const el = e.currentTarget;
-  el.style.transform = "translateY(-2px) scale(1.005)";
-  el.style.borderColor = "rgba(255,255,255,0.1)";
-  el.style.boxShadow = el.dataset.glow
-    ? `0 8px 32px color-mix(in srgb, ${el.dataset.glow} 12%, transparent), inset 0 1px 0 rgba(255,255,255,0.06)`
-    : "0 8px 32px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.06)";
-}
-function hoverReset(e: React.MouseEvent<HTMLElement>) {
-  const el = e.currentTarget;
-  el.style.transform = "";
-  el.style.borderColor = "";
-  el.style.boxShadow = "";
-}
-
-function pressDown(e: React.MouseEvent<HTMLElement>) {
-  e.currentTarget.style.transform = "translateY(0px) scale(0.98)";
-}
-function pressUp(e: React.MouseEvent<HTMLElement>) {
-  e.currentTarget.style.transform = "translateY(-2px) scale(1.005)";
-}
+import {
+  EASE, SPRING, glowCard,
+  hoverLift, hoverReset, pressDown, pressUp,
+} from "@/styles/viewStyles";
 
 /* ═══════════════════════════════════════════════════════════════
    SVG Chart Components — refined
@@ -372,6 +349,118 @@ function GlowProgress({ value, max = 100, color, height = 4 }: {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   Vector Store Ring Visualization
+   ═══════════════════════════════════════════════════════════════ */
+
+function VectorRingViz({ chunks, files, vectorReady, ftsReady, loading }: {
+  chunks: number; files: number; vectorReady: boolean; ftsReady: boolean; loading: boolean;
+}) {
+  const size = 88;
+  const cx = size / 2, cy = size / 2;
+  const outerR = 38, innerR = 28, coreR = 20;
+  const segments = 36;
+  const maxVal = Math.max(chunks, 50);
+  const fillCount = maxVal > 0 ? Math.round((chunks / maxVal) * segments) : 0;
+
+  const bars: React.ReactElement[] = [];
+  for (let i = 0; i < segments; i++) {
+    const angle = (i / segments) * 2 * Math.PI - Math.PI / 2;
+    const isFilled = i < fillCount;
+    const x1 = cx + Math.cos(angle) * innerR;
+    const y1 = cy + Math.sin(angle) * innerR;
+    const x2 = cx + Math.cos(angle) * outerR;
+    const y2 = cy + Math.sin(angle) * outerR;
+    bars.push(
+      <line key={i} x1={x1} y1={y1} x2={x2} y2={y2}
+        stroke={isFilled ? "#06b6d4" : "rgba(255,255,255,0.06)"}
+        strokeWidth={2.5} strokeLinecap="round"
+        opacity={isFilled ? 0.6 + 0.4 * (i / segments) : 0.5}
+        style={isFilled ? { filter: "drop-shadow(0 0 2px #06b6d4)" } : undefined}
+      />
+    );
+  }
+
+  const statusDots: { angle: number; active: boolean; color: string }[] = [
+    { angle: -Math.PI * 0.25, active: vectorReady, color: "#22d3ee" },
+    { angle: Math.PI * 0.25, active: ftsReady, color: "#a78bfa" },
+    { angle: Math.PI * 0.75, active: files > 0, color: "#4ade80" },
+  ];
+
+  return (
+    <div style={{
+      position: "relative", width: size, height: size, flexShrink: 0,
+      transition: `transform 0.4s ${SPRING}`,
+    }}
+      onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.06) rotate(2deg)"; }}
+      onMouseLeave={e => { e.currentTarget.style.transform = "scale(1) rotate(0deg)"; }}
+    >
+      <svg width={size} height={size} style={{ filter: "drop-shadow(0 0 10px rgba(6,182,212,0.3))" }}>
+        <circle cx={cx} cy={cy} r={outerR + 3} fill="none" stroke="#06b6d4" strokeWidth={0.4} opacity={0.1} />
+        <circle cx={cx} cy={cy} r={coreR} fill="none" stroke="#06b6d4" strokeWidth={0.6} opacity={0.12} />
+        {bars}
+        {statusDots.map((dot, i) => (
+          <circle key={`sd${i}`}
+            cx={cx + Math.cos(dot.angle) * (outerR + 6)}
+            cy={cy + Math.sin(dot.angle) * (outerR + 6)}
+            r={2.5} fill={dot.active ? dot.color : "rgba(255,255,255,0.08)"}
+            style={dot.active ? { filter: `drop-shadow(0 0 4px ${dot.color})` } : undefined}
+          />
+        ))}
+      </svg>
+      <div style={{
+        position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+      }}>
+        <span style={{
+          fontSize: 18, fontWeight: 700, color: "var(--text)",
+          fontFamily: "'SF Mono', 'JetBrains Mono', monospace", lineHeight: 1,
+        }}>
+          {loading ? "…" : chunks}
+        </span>
+        <span style={{ fontSize: 7, color: "var(--text-muted)", letterSpacing: "0.06em", marginTop: 2, textTransform: "uppercase" }}>
+          vectors
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function VectorStatusRow({ icon: Icon, label, active, value }: {
+  icon: React.ElementType; label: string; active: boolean; value?: string;
+}) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 6,
+      padding: "3px 0",
+    }}>
+      <span style={{
+        width: 5, height: 5, borderRadius: "50%", flexShrink: 0,
+        background: active ? "var(--success)" : "rgba(255,255,255,0.12)",
+        boxShadow: active ? "0 0 6px var(--success)" : "none",
+        transition: `all 0.3s ${EASE}`,
+      }} />
+      <Icon style={{ width: 10, height: 10, color: active ? "#06b6d4" : "var(--text-muted)", opacity: active ? 1 : 0.4, flexShrink: 0 }} />
+      <span style={{
+        fontSize: 9, color: active ? "var(--text)" : "var(--text-muted)",
+        fontWeight: active ? 600 : 400, letterSpacing: "0.02em",
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+      }}>
+        {label}
+      </span>
+      {value && (
+        <span style={{
+          marginLeft: "auto", fontSize: 8, color: "#06b6d4",
+          fontFamily: "'SF Mono', 'JetBrains Mono', monospace",
+          fontWeight: 500, opacity: 0.7,
+        }}>
+          {value}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
    System stats parsing
    ═══════════════════════════════════════════════════════════════ */
 
@@ -426,7 +515,7 @@ export function HomeView() {
   const [sessionCount, setSessionCount] = useState<number>(
     () => (useDataStore.getState().sessions?.data as unknown[] | undefined)?.length ?? 0
   );
-  const [memoryChunks, setMemoryChunks] = useState<number>(0);
+  const [vectorStore, setVectorStore] = useState<VectorStoreInfo>({ chunks: 0, files: 0, vectorReady: false, ftsReady: false, provider: "none", searchMode: "unknown", dirty: false });
   const localLifetimeTokens = useTokenUsageStore(s => s.totalTokens);
   const recordTokens = useTokenUsageStore(s => s.recordTokens);
   const [gwTokenTotal, setGwTokenTotal] = useState<number>(0);
@@ -466,7 +555,7 @@ export function HomeView() {
           setGwTokenTotal(gwTotal);
           if (gwTotal > localLifetimeTokens) recordTokens(gwTotal - localLifetimeTokens);
         }
-        setMemoryChunks(memoryChunkCount(memory as Record<string, unknown> | null));
+        setVectorStore(parseVectorStoreInfo(memory as Record<string, unknown> | null));
       } catch { /* degrade gracefully */ }
       if (!cancelled) setStatsLoaded(true);
     })();
@@ -485,11 +574,13 @@ export function HomeView() {
           cachedCommand("openclaw --version", { ttl: 300_000 }),
           cachedCommand("openclaw health", { ttl: 60_000 }),
           cachedCommand("ollama ps", { ttl: 30_000 }),
+          cachedCommand("ollama list", { ttl: 60_000 }),
         ]);
         if (cancelled) return;
         const versionR = settled[0].status === "fulfilled" ? settled[0].value : { stdout: "", stderr: "", code: -1 };
         const healthR = settled[1].status === "fulfilled" ? settled[1].value : { stdout: "", stderr: "", code: -1 };
         const ollamaR = settled[2].status === "fulfilled" ? settled[2].value : { stdout: "", stderr: "", code: -1 };
+        const ollamaListR = settled[3].status === "fulfilled" ? settled[3].value : { stdout: "", stderr: "", code: -1 };
         const healthText = healthR.stdout || "";
         const versionMatch = (versionR.stdout || "").match(/OpenClaw\s+([\d.]+\S*)/i);
         const telegramMatch = healthText.match(/Telegram:\s*(\w+)(?:\s*\((@\w+)\))?/i);
@@ -497,17 +588,31 @@ export function HomeView() {
         const modelMatch = healthText.match(/agent model:\s*(\S+)/i);
         let ollamaReachable: boolean | null = null;
         let ollamaModel = "";
+        let ollamaRunning = false;
         if (settled[2].status === "fulfilled") {
           ollamaReachable = ollamaR.code === 0;
           const psLines = (ollamaR.stdout || "").split("\n").filter(l => l.trim());
           if (psLines.length > 1) {
             const modelLine = psLines[1].trim();
             const modelName = modelLine.split(/\s+/)[0];
-            if (modelName && !modelName.toLowerCase().startsWith("name")) ollamaModel = modelName;
+            if (modelName && !modelName.toLowerCase().startsWith("name")) {
+              ollamaModel = modelName;
+              ollamaRunning = true;
+            }
           }
-          if (!ollamaModel && ollamaReachable) {
-            ollamaModel = "idle";
+        }
+        if (!ollamaModel && ollamaListR.code === 0) {
+          ollamaReachable = true;
+          const listLines = (ollamaListR.stdout || "").split("\n").filter(l => l.trim());
+          if (listLines.length > 1) {
+            const firstModel = listLines[1].trim().split(/\s+/)[0];
+            if (firstModel && !firstModel.toLowerCase().startsWith("name")) {
+              ollamaModel = firstModel;
+            }
           }
+        }
+        if (!ollamaModel && ollamaReachable) {
+          ollamaModel = "no models";
         }
         const newMeta: MetaInfo = {
           openclawVersion: versionMatch?.[1] ?? "—",
@@ -517,6 +622,7 @@ export function HomeView() {
           llmModel: modelMatch?.[1] ?? openclawClient.getModel() ?? "—",
           ollamaReachable,
           ollamaModel,
+          ollamaRunning,
         };
         _metaCache = { data: newMeta, ts: Date.now() };
         setMeta(newMeta);
@@ -570,6 +676,7 @@ export function HomeView() {
   const cronBarColors = ["var(--success)", "var(--warning)", "var(--error)"];
   const cronBarLabels = ["On", "Off", "Fail"];
 
+  const memoryChunks = vectorStore.chunks;
   const memoryDots = Array.from({ length: 64 }, (_, i) => i < memoryChunks);
 
   return (
@@ -619,8 +726,13 @@ export function HomeView() {
       {/* ═══ Row 1: Ring Gauges + Radial Burst ═══ */}
       <div style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 14, marginBottom: 14 }}>
 
-        <div style={glowCard("var(--accent)", { padding: "20px 20px 16px" })}
-          data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+        <div style={{
+          padding: "20px 20px 16px", borderRadius: 16,
+          background: "transparent", border: "none", boxShadow: "none",
+          transition: `transform 0.3s ${EASE}`, position: "relative" as const,
+        }}
+          onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px) scale(1.005)"; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = ""; }}>
           <SectionLabel text="System Performance" />
           {sysLoading ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 36 }}>
@@ -643,10 +755,16 @@ export function HomeView() {
           )}
         </div>
 
-        <div style={glowCard("#e879f9", { padding: "20px 16px 16px", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer" })}
-          data-glow="#e879f9" onMouseEnter={hoverLift} onMouseLeave={hoverReset}
+        <div style={{
+          padding: "20px 16px 16px", borderRadius: 16, display: "flex", flexDirection: "column" as const,
+          alignItems: "center", cursor: "pointer",
+          background: "transparent", border: "none", boxShadow: "none",
+          transition: `transform 0.3s ${EASE}`, position: "relative" as const,
+        }}
+          onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px) scale(1.005)"; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = ""; }}
           onMouseDown={pressDown} onMouseUp={pressUp}
-          onClick={() => setView("settings")}>
+          onClick={() => setView("usage")}>
           <SectionLabel text="Lifetime Tokens" />
           <RadialBurst value={formatLifetimeTokens(lifetimeTokens)} label="tokens" color="#c084fc" />
         </div>
@@ -721,8 +839,8 @@ export function HomeView() {
         </div>
       </div>
 
-      {/* ═══ Row 3: Stats Tiles + Memory ═══ */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr) 1.3fr", gap: 14, marginBottom: 14 }}>
+      {/* ═══ Row 3: Stats Tiles ═══ */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 14 }}>
         <StatTile icon={Activity} label="Sessions" value={loading ? "…" : String(sessionCount)} color="var(--accent)"
           onClick={() => setView("conversation")} />
         <StatTile icon={Bot} label="Agents" value={loading ? "…" : String(agentCount)} color="#06b6d4"
@@ -730,22 +848,76 @@ export function HomeView() {
         <StatTile icon={Wrench} label="Skills" value={loading ? "…" : String(skillCount)} color="#a855f7"
           onClick={() => setView("marketplace")} />
         <StatTile icon={Zap} label="Heartbeat" value={loading ? "…" : meta.heartbeatInterval} color="#f59e0b" />
+      </div>
 
-        <div style={glowCard("var(--success)", { padding: "14px 16px" })}
-          data-glow="var(--success)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <SectionLabel text="Memory" />
-            <span style={{
-              fontSize: 16, fontWeight: 700, color: "var(--text)",
-              fontFamily: "'SF Mono', 'JetBrains Mono', monospace",
-            }}>
-              {loading ? "…" : memoryChunks}
-            </span>
+      {/* ═══ Row 3b: Memory + Vector Store ═══ */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+
+        {/* Memory Chunks — ring gauge */}
+        <div style={glowCard("var(--success)", { padding: "18px 20px", cursor: "pointer" })}
+          data-glow="var(--success)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}
+          onMouseDown={pressDown} onMouseUp={pressUp}
+          onClick={() => setView("memory")}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <SectionLabel text="Memory Chunks" />
+            <ChevronRight style={{ width: 12, height: 12, color: "var(--text-muted)", opacity: 0.4 }} />
           </div>
-          <DotMatrix data={memoryDots} cols={8} dotSize={5} gap={4} colorOn="var(--success)" />
-          <p style={{ margin: "8px 0 0", fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.03em" }}>
-            chunks stored
-          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+            <RingGauge
+              value={memoryChunks}
+              max={Math.max(memoryChunks, 100)}
+              size={88}
+              stroke={7}
+              color="var(--success)"
+              label="Chunks"
+              display={loading ? "…" : String(memoryChunks)}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <DotMatrix data={memoryDots} cols={8} dotSize={5} gap={4} colorOn="var(--success)" />
+              <p style={{ margin: "8px 0 0", fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.03em" }}>
+                stored in long-term memory
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Vector Store — segmented bar chart style */}
+        <div style={glowCard("#06b6d4", { padding: "18px 20px", cursor: "pointer" })}
+          data-glow="#06b6d4" onMouseEnter={hoverLift} onMouseLeave={hoverReset}
+          onMouseDown={pressDown} onMouseUp={pressUp}
+          onClick={() => setView("memory")}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <SectionLabel text="Vector Store" />
+            <ChevronRight style={{ width: 12, height: 12, color: "var(--text-muted)", opacity: 0.4 }} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+            <VectorRingViz
+              chunks={vectorStore.chunks}
+              files={vectorStore.files}
+              vectorReady={vectorStore.vectorReady}
+              ftsReady={vectorStore.ftsReady}
+              loading={loading}
+            />
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+              {/* Status indicators */}
+              <VectorStatusRow icon={Database} label="Vector DB" active={vectorStore.vectorReady} />
+              <VectorStatusRow icon={Search} label="Full-text Search" active={vectorStore.ftsReady} />
+              <VectorStatusRow icon={Layers} label="Provider" active={vectorStore.provider !== "none"} value={vectorStore.provider !== "none" ? vectorStore.provider : "—"} />
+              {vectorStore.dirty && (
+                <p style={{
+                  margin: 0, fontSize: 8, color: "var(--warning)",
+                  display: "flex", alignItems: "center", gap: 4,
+                  letterSpacing: "0.05em", fontWeight: 600, textTransform: "uppercase",
+                }}>
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--warning)", boxShadow: "0 0 6px var(--warning)", flexShrink: 0 }} />
+                  INDEX PENDING
+                </p>
+              )}
+              <p style={{ margin: "2px 0 0", fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.03em" }}>
+                {vectorStore.files > 0 ? `${vectorStore.files} files indexed` : "embeddings ready"}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -800,25 +972,29 @@ export function HomeView() {
             background: "rgba(255,255,255,0.018)", border: "1px solid rgba(255,255,255,0.04)",
             transition: `all 0.2s ${EASE}`,
           }}
-            onMouseEnter={e => { e.currentTarget.style.background = "color-mix(in srgb, #a855f7 6%, transparent)"; e.currentTarget.style.borderColor = "color-mix(in srgb, #a855f7 15%, transparent)"; }}
+            onMouseEnter={e => { e.currentTarget.style.background = "color-mix(in srgb, #76b900 6%, transparent)"; e.currentTarget.style.borderColor = "color-mix(in srgb, #76b900 15%, transparent)"; }}
             onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.018)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.04)"; }}
           >
             <div style={{
               width: 30, height: 30, borderRadius: 9, flexShrink: 0,
-              background: "color-mix(in srgb, #a855f7 10%, transparent)",
+              background: "color-mix(in srgb, #76b900 10%, transparent)",
               display: "flex", alignItems: "center", justifyContent: "center",
             }}>
-              <OllamaLogo size={15} color={meta.ollamaReachable ? "#a855f7" : "var(--text-muted)"} />
+              <NvidiaLogo size={15} color={meta.ollamaReachable ? "#76b900" : "var(--text-muted)"} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{
                 margin: 0, fontSize: 11, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                 color: meta.ollamaReachable ? "var(--text)" : "var(--text-muted)",
               }}>
-                {meta.ollamaModel && meta.ollamaModel !== "idle" ? meta.ollamaModel : meta.ollamaReachable ? "Idle" : "Offline"}
+                {meta.ollamaModel && meta.ollamaModel !== "no models"
+                  ? meta.ollamaModel
+                  : meta.ollamaReachable ? "No models installed" : "Offline"}
               </p>
               <p style={{ margin: "2px 0 0", fontSize: 8, color: "var(--text-muted)", letterSpacing: "0.04em" }}>
-                Local · Ollama
+                Local · Ollama{meta.ollamaModel && meta.ollamaModel !== "no models" && meta.ollamaReachable
+                  ? (meta.ollamaRunning ? " · Running" : " · Installed")
+                  : ""}
               </p>
             </div>
             <span style={{
@@ -906,7 +1082,7 @@ export function HomeView() {
           fontSize: 9, color: "var(--text-muted)", margin: 0,
           letterSpacing: "0.06em", fontWeight: 400,
         }}>
-          Powered by OpenClaw {meta.openclawVersion !== "—" ? `v${meta.openclawVersion}` : ""} · Crystal v0.6.0
+          Powered by OpenClaw {meta.openclawVersion !== "—" ? `v${meta.openclawVersion}` : ""} · Crystal v{APP_VERSION}
         </p>
       </div>
     </div>
@@ -1004,13 +1180,7 @@ function StatTile({ icon: Icon, label, value, color, onClick }: {
 
 /* ── Telegram Card ── */
 
-const TELEGRAM_TOPICS = [
-  { name: "Finance", threadId: 16, color: "#f59e0b", icon: "💰" },
-  { name: "Home", threadId: 17, color: "#10b981", icon: "🏠" },
-  { name: "System", threadId: 38, color: "#3b82f6", icon: "⚙️" },
-  { name: "Neighborhood", threadId: 89, color: "#8b5cf6", icon: "🏘️" },
-  { name: "Factory", threadId: 1195, color: "#06b6d4", icon: "🏭" },
-];
+import { TELEGRAM_TOPICS } from "@/lib/telegram";
 
 function TelegramCard({ onNavigate }: { onNavigate: () => void }) {
   const getCronJobs = useDataStore(s => s.getCronJobs);

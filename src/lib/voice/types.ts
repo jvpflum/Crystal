@@ -3,6 +3,7 @@
 export type VoiceState =
   | "idle"
   | "listening"
+  | "processing"
   | "transcribing"
   | "thinking"
   | "awaiting_confirmation"

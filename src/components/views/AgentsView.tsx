@@ -2,13 +2,14 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Bot, Plus, Trash2, RefreshCw, Loader2, Star, Pencil, Play, AlertTriangle,
   Send, ChevronDown, ChevronUp, Copy, Radio, Cpu, Network, Zap, Bell,
-  CheckCircle2, AlertCircle, X, Cloud, HardDrive,
+  CheckCircle2, AlertCircle, X, Cloud, HardDrive, ArrowRight, MessageSquare, Activity,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { escapeShellArg } from "@/lib/tools";
 import { cachedCommand } from "@/lib/cache";
 import { openclawClient } from "@/lib/openclaw";
 import { useAppStore } from "@/stores/appStore";
+import { EASE, glowCard, hoverLift, hoverReset, pressDown, pressUp, innerPanel, sectionLabel, iconTile, inputStyle, btnPrimary, btnSecondary, row as rowStyle, MONO } from "@/styles/viewStyles";
 
 interface Agent {
   id: string;
@@ -43,14 +44,13 @@ interface NodeItem { id: string; name?: string; label?: string; status?: string;
 
 type DetailTab = "overview" | "sessions" | "channels" | "tasks" | "compute";
 
-const MONO: React.CSSProperties = { fontFamily: "'JetBrains Mono', 'Fira Code', monospace" };
-const CARD: React.CSSProperties = { background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" };
-const ROW: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--border)" };
-const LABEL: React.CSSProperties = { fontSize: 11, color: "var(--text-secondary)" };
-const INPUT: React.CSSProperties = { background: "var(--bg-input)", border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", color: "var(--text)", fontSize: 12, outline: "none", ...MONO, boxSizing: "border-box" as const };
-const BTN_P: React.CSSProperties = { display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 6, border: "none", background: "var(--accent-bg)", color: "var(--accent)", fontSize: 11, fontWeight: 500, cursor: "pointer" };
-const BTN_G: React.CSSProperties = { display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "transparent", color: "var(--text-muted)", fontSize: 11, cursor: "pointer" };
-const SECT: React.CSSProperties = { fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--text-muted)", marginBottom: 8 };
+const CARD: React.CSSProperties = glowCard("#3b82f6");
+const ROW: React.CSSProperties = { ...rowStyle, justifyContent: "space-between" };
+const LABEL: React.CSSProperties = { ...sectionLabel, fontSize: 11 };
+const INPUT: React.CSSProperties = { ...inputStyle, fontFamily: MONO, fontSize: 12, boxSizing: "border-box" as const };
+const BTN_P: React.CSSProperties = { ...btnPrimary, display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", fontSize: 11 };
+const BTN_G: React.CSSProperties = { ...btnSecondary, display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", fontSize: 11 };
+const SECT: React.CSSProperties = { ...sectionLabel, marginBottom: 8 };
 
 export function AgentsView() {
   const setView = useAppStore(s => s.setView);
@@ -158,7 +158,14 @@ export function AgentsView() {
     loadModels();
   }, [loadAgents, loadBindings, loadChannels, loadModels]);
 
+  useEffect(() => {
+    const interval = setInterval(() => { loadAgents(); loadSessions(); }, 30_000);
+    return () => clearInterval(interval);
+  }, [loadAgents, loadSessions]);
+
   const selected = agents.find(a => a.id === selectedId);
+
+  useEffect(() => { loadSessions(); }, [loadSessions]);
 
   useEffect(() => {
     if (selected && detailTab === "sessions") loadSessions(selected.id);
@@ -345,7 +352,7 @@ export function AgentsView() {
             <button onClick={() => { loadAgents(); loadBindings(); loadChannels(); loadModels(); }} style={BTN_G}>
               <RefreshCw style={{ width: 11, height: 11 }} />
             </button>
-            <button onClick={() => setShowAddForm(!showAddForm)} style={BTN_P}>
+            <button onClick={() => setShowAddForm(!showAddForm)} style={BTN_P} onMouseDown={pressDown} onMouseUp={pressUp}>
               <Plus style={{ width: 11, height: 11 }} /> New
             </button>
           </div>
@@ -406,16 +413,13 @@ export function AgentsView() {
                     border: active ? "1px solid var(--accent)" : "1px solid transparent",
                     cursor: "pointer", marginBottom: 3,
                     background: active ? "var(--accent-bg)" : "transparent",
-                    transition: "all 0.15s",
+                    transition: `all 0.15s ${EASE}`,
                   }}
                   onMouseEnter={e => { if (!active) e.currentTarget.style.background = "var(--bg-hover)"; }}
                   onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{
-                      width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
-                      background: agent.isDefault ? "var(--accent-bg)" : "var(--bg-hover)",
-                    }}>
+                    <div style={iconTile(agent.isDefault ? "var(--accent)" : "var(--text-muted)", 32)}>
                       <Bot style={{ width: 16, height: 16, color: agent.isDefault ? "var(--accent)" : "var(--text-muted)" }} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -430,7 +434,7 @@ export function AgentsView() {
                           ? <HardDrive style={{ width: 9, height: 9, color: "#4ade80", flexShrink: 0 }} />
                           : <Cloud style={{ width: 9, height: 9, color: "#60a5fa", flexShrink: 0 }} />
                         )}
-                        <span style={{ fontSize: 10, color: "var(--text-muted)", ...MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {agent.model.split("/").pop()}
                         </span>
                         {sessionCount > 0 && (
@@ -472,7 +476,7 @@ export function AgentsView() {
             {/* Header */}
             <div style={{ padding: "14px 20px 0", flexShrink: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-                <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--accent-bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={iconTile("var(--accent)", 44)}>
                   <Bot style={{ width: 22, height: 22, color: "var(--accent)" }} />
                 </div>
                 <div style={{ flex: 1 }}>
@@ -487,7 +491,7 @@ export function AgentsView() {
                       ? <HardDrive style={{ width: 10, height: 10, color: "#4ade80" }} />
                       : <Cloud style={{ width: 10, height: 10, color: "#60a5fa" }} />
                     }
-                    <span style={{ fontSize: 11, color: "var(--text-muted)", ...MONO }}>{selected.model}</span>
+                    <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: MONO }}>{selected.model}</span>
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
@@ -548,7 +552,7 @@ export function AgentsView() {
                       <X style={{ width: 10, height: 10 }} />
                     </button>
                   </div>
-                  <pre style={{ margin: 0, padding: "8px 10px", borderRadius: 6, background: "var(--bg-surface)", border: "1px solid var(--border)", fontSize: 11, ...MONO, color: "var(--text-secondary)", whiteSpace: "pre-wrap", maxHeight: 120, overflowY: "auto" }}>
+                  <pre style={{ ...innerPanel, margin: 0, padding: "8px 10px", fontSize: 11, fontFamily: MONO, color: "var(--text-secondary)", whiteSpace: "pre-wrap", maxHeight: 120, overflowY: "auto" }}>
                     {testResult}
                   </pre>
                 </div>
@@ -591,17 +595,17 @@ export function AgentsView() {
             </div>
           </>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12 }}>
-            <Bot style={{ width: 40, height: 40, color: "var(--text-muted)", opacity: 0.2 }} />
-            <p style={{ fontSize: 13, color: "var(--text-muted)" }}>Select an agent to view details</p>
-            <p style={{ fontSize: 11, color: "var(--text-muted)", maxWidth: 300, textAlign: "center", lineHeight: 1.5, opacity: 0.6 }}>
-              Manage agents, assign models, dispatch tasks, and view compute infrastructure.
-            </p>
-          </div>
+          <MonitorDashboard
+            agents={agents} sessions={sessions} tasks={tasks}
+            onSelectAgent={(id) => { setSelectedId(id); setDetailTab("overview"); }}
+            taskPrompt={taskPrompt} setTaskPrompt={setTaskPrompt}
+            dispatchAgentId={dispatchAgentId} setDispatchAgentId={setDispatchAgentId}
+            onDispatch={dispatchTask}
+          />
         )}
       </div>
 
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } } @keyframes _pulse { 0%,100% { opacity:1 } 50% { opacity:.4 } } @keyframes indeterminate-bar { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }`}</style>
     </div>
   );
 }
@@ -616,7 +620,7 @@ function OverviewTab({ agent, models, onChangeModel }: { agent: Agent; models: M
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {/* Model card with change button */}
-      <div style={CARD}>
+      <div style={CARD} data-glow="#3b82f6" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
         <div style={{ ...ROW, padding: "12px 14px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {currentModel?.local
@@ -625,7 +629,7 @@ function OverviewTab({ agent, models, onChangeModel }: { agent: Agent; models: M
             }
             <div>
               <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{currentModel?.name || agent.model}</div>
-              <div style={{ fontSize: 10, color: "var(--text-muted)", ...MONO, marginTop: 1 }}>{agent.model}</div>
+              <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO, marginTop: 1 }}>{agent.model}</div>
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -660,14 +664,14 @@ function OverviewTab({ agent, models, onChangeModel }: { agent: Agent; models: M
         </div>
       </div>
 
-      <div style={CARD}>
+      <div style={CARD} data-glow="#3b82f6" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
         <div style={ROW}>
           <span style={LABEL}>Workspace</span>
-          <span style={{ fontSize: 11, color: "var(--text-muted)", ...MONO, wordBreak: "break-all" }}>{agent.workspace}</span>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: MONO, wordBreak: "break-all" }}>{agent.workspace}</span>
         </div>
         <div style={ROW}>
           <span style={LABEL}>Agent Directory</span>
-          <span style={{ fontSize: 11, color: "var(--text-muted)", ...MONO, wordBreak: "break-all" }}>{agent.agentDir}</span>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: MONO, wordBreak: "break-all" }}>{agent.agentDir}</span>
         </div>
         <div style={{ ...ROW, borderBottom: "none" }}>
           <span style={LABEL}>Bindings</span>
@@ -680,7 +684,7 @@ function OverviewTab({ agent, models, onChangeModel }: { agent: Agent; models: M
           <div style={SECT}>Routes</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {agent.routes.map((route, i) => (
-              <div key={i} style={{ padding: "6px 10px", borderRadius: 6, background: "var(--bg-elevated)", border: "1px solid var(--border)", fontSize: 11, color: "var(--text-secondary)", ...MONO }}>
+              <div key={i} style={{ ...innerPanel, padding: "6px 10px", fontSize: 11, color: "var(--text-secondary)", fontFamily: MONO }}>
                 {route}
               </div>
             ))}
@@ -759,7 +763,7 @@ function ComputeTab({ agent, models, onChangeModel }: { agent: Agent; models: Mo
       {/* Model assignment for this agent */}
       <div style={{ marginBottom: 20 }}>
         <div style={SECT}>Model Assignment</div>
-        <div style={CARD}>
+        <div style={CARD} data-glow="#3b82f6" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
           <div style={{ ...ROW, padding: "12px 14px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <Cpu style={{ width: 14, height: 14, color: "var(--accent)" }} />
@@ -790,7 +794,7 @@ function ComputeTab({ agent, models, onChangeModel }: { agent: Agent; models: Mo
         <div style={SECT}>Compute Backends ({models.length})</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {/* Local section */}
-          <div style={CARD}>
+          <div style={CARD} data-glow="#4ade80" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
             <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
               <HardDrive style={{ width: 13, height: 13, color: "#4ade80" }} />
               <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>Local GPU ({localModels.length})</span>
@@ -802,7 +806,7 @@ function ComputeTab({ agent, models, onChangeModel }: { agent: Agent; models: Mo
                 <div key={m.key} style={{ ...ROW, padding: "8px 14px" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 11, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</div>
-                    <div style={{ fontSize: 9, color: "var(--text-muted)", ...MONO }}>{(m.contextWindow / 1000).toFixed(0)}K ctx</div>
+                    <div style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: MONO }}>{(m.contextWindow / 1000).toFixed(0)}K ctx</div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <span style={{ width: 6, height: 6, borderRadius: "50%", background: m.available ? "#4ade80" : "#f87171" }} />
@@ -814,7 +818,7 @@ function ComputeTab({ agent, models, onChangeModel }: { agent: Agent; models: Mo
           </div>
 
           {/* Cloud section */}
-          <div style={CARD}>
+          <div style={CARD} data-glow="#60a5fa" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
             <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
               <Cloud style={{ width: 13, height: 13, color: "#60a5fa" }} />
               <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>Cloud ({cloudModels.length})</span>
@@ -826,7 +830,7 @@ function ComputeTab({ agent, models, onChangeModel }: { agent: Agent; models: Mo
                 <div key={m.key} style={{ ...ROW, padding: "8px 14px" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 11, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</div>
-                    <div style={{ fontSize: 9, color: "var(--text-muted)", ...MONO }}>{(m.contextWindow / 1000).toFixed(0)}K ctx &middot; {m.input}</div>
+                    <div style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: MONO }}>{(m.contextWindow / 1000).toFixed(0)}K ctx &middot; {m.input}</div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <span style={{ width: 6, height: 6, borderRadius: "50%", background: m.available ? "#60a5fa" : "#f87171" }} />
@@ -897,7 +901,7 @@ function ComputeTab({ agent, models, onChangeModel }: { agent: Agent; models: Mo
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {nodes.map(node => (
-              <div key={node.id} style={CARD}>
+              <div key={node.id} style={CARD} data-glow="#3b82f6" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
                 <div style={{ ...ROW, borderBottom: "none" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <Network style={{ width: 13, height: 13, color: "var(--accent)" }} />
@@ -907,7 +911,7 @@ function ComputeTab({ agent, models, onChangeModel }: { agent: Agent; models: Mo
                         {node.type && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: "var(--bg-hover)", border: "1px solid var(--border)", color: "var(--text-muted)" }}>{node.type}</span>}
                         {node.status && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 4, background: `${statusColor(node.status)}15`, color: statusColor(node.status) }}>{node.status}</span>}
                       </div>
-                      <div style={{ fontSize: 10, color: "var(--text-muted)", ...MONO, marginTop: 1 }}>{node.id}</div>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO, marginTop: 1 }}>{node.id}</div>
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 4 }}>
@@ -936,7 +940,7 @@ function ComputeTab({ agent, models, onChangeModel }: { agent: Agent; models: Mo
               <span style={SECT}>Output</span>
               <button onClick={() => setNodeOutput(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: 10, cursor: "pointer" }}>Dismiss</button>
             </div>
-            <pre style={{ margin: 0, padding: "8px 10px", borderRadius: 6, background: "var(--bg-elevated)", border: "1px solid var(--border)", fontSize: 11, ...MONO, color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 150, overflowY: "auto" }}>
+            <pre style={{ ...innerPanel, margin: 0, padding: "8px 10px", fontSize: 11, fontFamily: MONO, color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 150, overflowY: "auto" }}>
               {nodeOutput}
             </pre>
           </div>
@@ -972,7 +976,7 @@ function SessionsTab({ sessions, loading, onRefresh }: { sessions: AgentSession[
             const usage = s.contextTokens > 0 ? (s.totalTokens / s.contextTokens) * 100 : 0;
             const usageColor = usage > 80 ? "var(--error)" : usage > 50 ? "var(--warning)" : "var(--success)";
             return (
-              <div key={s.key} style={CARD}>
+              <div key={s.key} style={CARD} data-glow="#3b82f6" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
                 <div style={ROW}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <Cpu style={{ width: 14, height: 14, color: "var(--accent)", flexShrink: 0 }} />
@@ -991,14 +995,14 @@ function SessionsTab({ sessions, loading, onRefresh }: { sessions: AgentSession[
                 </div>
                 <div style={{ padding: "0 14px 10px" }}>
                   <div style={{ height: 4, borderRadius: 2, background: "var(--bg-hover)", overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${Math.min(usage, 100)}%`, background: usageColor, borderRadius: 2, transition: "width 0.3s" }} />
+                    <div style={{ height: "100%", width: `${Math.min(usage, 100)}%`, background: usageColor, borderRadius: 2, transition: `width 0.3s ${EASE}` }} />
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3, fontSize: 9, color: "var(--text-muted)" }}>
                     <span>{usage.toFixed(1)}% context used</span>
-                    <span style={{ ...MONO }}>{s.contextTokens.toLocaleString()} ctx</span>
+                    <span style={{ fontFamily: MONO }}>{s.contextTokens.toLocaleString()} ctx</span>
                   </div>
                 </div>
-                <div style={{ padding: "6px 14px 8px", borderTop: "1px solid var(--border)", fontSize: 9, color: "var(--text-muted)", ...MONO, wordBreak: "break-all" }}>
+                <div style={{ padding: "6px 14px 8px", borderTop: "1px solid var(--border)", fontSize: 9, color: "var(--text-muted)", fontFamily: MONO, wordBreak: "break-all" }}>
                   {s.key}
                 </div>
               </div>
@@ -1038,11 +1042,11 @@ function ChannelsTab({ bindings, channelStatus, showBindForm, setShowBindForm, b
         {connectedChannels.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {connectedChannels.map(ch => (
-              <div key={ch.type} style={{ ...CARD, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+              <div key={ch.type} style={{ ...CARD, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }} data-glow="#3b82f6" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: ch.connected ? "var(--success)" : "var(--text-muted)", flexShrink: 0 }} />
                 <div style={{ flex: 1 }}>
                   <span style={{ fontSize: 12, color: "var(--text)", fontWeight: 500 }}>{ch.label}</span>
-                  {ch.botName && <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 8, ...MONO }}>@{ch.botName}</span>}
+                  {ch.botName && <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 8, fontFamily: MONO }}>@{ch.botName}</span>}
                 </div>
                 <span style={{ fontSize: 10, color: ch.connected ? "var(--success)" : "var(--text-muted)" }}>{ch.connected ? "Online" : "Offline"}</span>
               </div>
@@ -1051,7 +1055,7 @@ function ChannelsTab({ bindings, channelStatus, showBindForm, setShowBindForm, b
         ) : (
           <div style={{ ...CARD, padding: "16px 14px", textAlign: "center" }}>
             <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0 }}>No channels configured</p>
-            <button onClick={onGoToChannels} style={{ ...BTN_P, margin: "8px auto 0" }}><Plus style={{ width: 10, height: 10 }} /> Connect a Channel</button>
+            <button onClick={onGoToChannels} style={{ ...BTN_P, margin: "8px auto 0" }} onMouseDown={pressDown} onMouseUp={pressUp}><Plus style={{ width: 10, height: 10 }} /> Connect a Channel</button>
           </div>
         )}
       </div>
@@ -1060,10 +1064,10 @@ function ChannelsTab({ bindings, channelStatus, showBindForm, setShowBindForm, b
         {bindings.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
             {bindings.map((b, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", borderRadius: 6, background: "var(--bg-elevated)", border: "1px solid var(--border)" }}>
+              <div key={i} style={{ ...innerPanel, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", fontWeight: 600, background: "var(--bg-hover)", padding: "2px 6px", borderRadius: 4 }}>{b.type}</span>
-                  <span style={{ fontSize: 12, color: "var(--text)", ...MONO }}>{b.value}</span>
+                  <span style={{ fontSize: 12, color: "var(--text)", fontFamily: MONO }}>{b.value}</span>
                 </div>
                 <button onClick={() => onUnbind(b.type, b.value)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}><Trash2 style={{ width: 11, height: 11 }} /></button>
               </div>
@@ -1083,7 +1087,7 @@ function ChannelsTab({ bindings, channelStatus, showBindForm, setShowBindForm, b
             <button onClick={() => { setShowBindForm(false); setBindValue(""); }} style={{ ...BTN_G, padding: "5px 8px" }}>Cancel</button>
           </div>
         ) : (
-          <button onClick={() => setShowBindForm(true)} style={BTN_P}><Plus style={{ width: 10, height: 10 }} /> Add Binding</button>
+          <button onClick={() => setShowBindForm(true)} style={BTN_P} onMouseDown={pressDown} onMouseUp={pressUp}><Plus style={{ width: 10, height: 10 }} /> Add Binding</button>
         )}
       </div>
     </div>
@@ -1104,7 +1108,7 @@ function TasksTab({ tasks, agents, taskPrompt, setTaskPrompt, dispatchAgentId, s
           </select>
           <input value={taskPrompt} onChange={e => setTaskPrompt(e.target.value)} onKeyDown={e => e.key === "Enter" && onDispatch()}
             placeholder="Describe a task..." style={{ ...INPUT, flex: 1 }} />
-          <button onClick={onDispatch} disabled={!taskPrompt.trim()}
+          <button onClick={onDispatch} disabled={!taskPrompt.trim()} onMouseDown={pressDown} onMouseUp={pressUp}
             style={{ ...BTN_P, padding: "8px 16px", background: taskPrompt.trim() ? "var(--accent)" : "var(--bg-surface)", color: taskPrompt.trim() ? "#fff" : "var(--text-muted)" }}>
             <Send style={{ width: 12, height: 12 }} /> Dispatch
           </button>
@@ -1124,8 +1128,157 @@ function TasksTab({ tasks, agents, taskPrompt, setTaskPrompt, dispatchAgentId, s
   );
 }
 
+/* ═══════════════════════════════════════════
+   Monitor Dashboard (shown when no agent selected)
+   ═══════════════════════════════════════════ */
+
+function MonitorDashboard({ agents, sessions, tasks, onSelectAgent, taskPrompt, setTaskPrompt, dispatchAgentId, setDispatchAgentId, onDispatch }: {
+  agents: Agent[]; sessions: AgentSession[]; tasks: DispatchedTask[];
+  onSelectAgent: (id: string) => void;
+  taskPrompt: string; setTaskPrompt: (v: string) => void;
+  dispatchAgentId: string; setDispatchAgentId: (v: string) => void;
+  onDispatch: () => void;
+}) {
+  const runningCount = tasks.filter(t => t.status === "running").length;
+  const totalTokens = sessions.reduce((sum, s) => sum + s.totalTokens, 0);
+  const formatTokens = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(1)}K` : String(n);
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ padding: "16px 20px 0", flexShrink: 0 }}>
+        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "var(--text)" }}>Agent Monitor</h3>
+        <p style={{ margin: "2px 0 0", fontSize: 10, color: "var(--text-muted)" }}>
+          Live agent monitoring &middot; Task dispatch &middot; Select an agent for management
+        </p>
+      </div>
+
+      <div style={{ flex: 1, overflow: "auto", padding: "14px 20px 20px" }}>
+        {/* Stats row */}
+        <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+          {[
+            { label: "Agents", value: String(agents.length), color: "#3b82f6", icon: <Bot style={{ width: 13, height: 13 }} /> },
+            { label: "Sessions", value: String(sessions.length), color: "#60a5fa", icon: <Cpu style={{ width: 13, height: 13 }} /> },
+            { label: "Active", value: String(runningCount), color: "#4ade80", icon: <Activity style={{ width: 13, height: 13 }} /> },
+            { label: "Tokens", value: formatTokens(totalTokens), color: "#a78bfa", icon: <Zap style={{ width: 13, height: 13 }} /> },
+          ].map(s => (
+            <div key={s.label} style={{ ...glowCard(s.color), padding: "10px 14px", flex: "1 1 100px", minWidth: 90 }}
+              data-glow={s.color} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={iconTile(s.color, 28)}>{s.icon}</div>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", fontFamily: MONO }}>{s.value}</div>
+                  <div style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>{s.label}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Agent grid */}
+        <div style={{ ...sectionLabel, marginBottom: 8 }}>Live Agents</div>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(Math.max(agents.length, 1), 3)}, 1fr)`, gap: 12, marginBottom: 20 }}>
+          {agents.map(agent => {
+            const agentSess = sessions.filter(s => s.agentId === agent.id);
+            const activeTasks = tasks.filter(t => t.agentId === agent.id && t.status === "running");
+            const isActive = activeTasks.length > 0;
+            const agentTokens = agentSess.reduce((sum, s) => sum + s.totalTokens, 0);
+            const color = isActive ? "#4ade80" : agent.isDefault ? "#3b82f6" : "#6b7280";
+
+            return (
+              <div key={agent.id}
+                onClick={() => onSelectAgent(agent.id)}
+                style={{ ...glowCard(color), padding: 14, cursor: "pointer", position: "relative", overflow: "hidden", transition: `all 0.18s ${EASE}` }}
+                data-glow={color} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+                {isActive && (
+                  <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: "var(--border)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: "40%", background: "#4ade80", borderRadius: 2, animation: "indeterminate-bar 1.5s ease-in-out infinite" }} />
+                  </div>
+                )}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <div style={iconTile(color, 36)}>
+                    <Bot style={{ width: 18, height: 18, color }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{agent.id}</span>
+                      {agent.isDefault && <Star style={{ width: 10, height: 10, color: "var(--warning)" }} />}
+                      <span style={{
+                        width: 7, height: 7, borderRadius: "50%", background: isActive ? "#4ade80" : "var(--text-muted)",
+                        boxShadow: isActive ? "0 0 8px #4ade80" : "none",
+                        animation: isActive ? "_pulse 1.4s ease-in-out infinite" : "none",
+                      }} />
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO, marginTop: 1 }}>{agent.model.split("/").pop()}</div>
+                  </div>
+                  <span style={{
+                    fontSize: 8, padding: "2px 6px", borderRadius: 4, fontWeight: 600, textTransform: "uppercase" as const,
+                    background: isActive ? "rgba(74,222,128,0.12)" : "rgba(255,255,255,0.04)",
+                    color: isActive ? "#4ade80" : "var(--text-muted)",
+                  }}>
+                    {isActive ? "active" : "idle"}
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: 10, fontSize: 10, color: "var(--text-muted)" }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                    <Activity style={{ width: 9, height: 9 }} /> {agentSess.length} sessions
+                  </span>
+                  {agentTokens > 0 && (
+                    <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                      <Zap style={{ width: 9, height: 9 }} /> {formatTokens(agentTokens)}
+                    </span>
+                  )}
+                  {activeTasks.length > 0 && (
+                    <span style={{ color: "#4ade80", display: "flex", alignItems: "center", gap: 3 }}>
+                      <Loader2 style={{ width: 9, height: 9, animation: "spin 1s linear infinite" }} /> {activeTasks.length} running
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Dispatch task */}
+        <div style={{ ...innerPanel, borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
+          <div style={{ ...sectionLabel, marginBottom: 8 }}>Dispatch Task</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <select value={dispatchAgentId} onChange={e => setDispatchAgentId(e.target.value)}
+              style={{ ...inputStyle, fontSize: 11, padding: "8px 10px", width: 100, flexShrink: 0 }}>
+              {agents.map(a => <option key={a.id} value={a.id}>{a.id}</option>)}
+            </select>
+            <input value={taskPrompt} onChange={e => setTaskPrompt(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && onDispatch()}
+              placeholder="Describe a task for an agent..."
+              style={{ ...inputStyle, flex: 1 }} />
+            <button onClick={onDispatch} disabled={!taskPrompt.trim()} onMouseDown={pressDown} onMouseUp={pressUp}
+              style={{
+                display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, border: "none",
+                background: taskPrompt.trim() ? "var(--accent)" : "var(--bg-surface)",
+                color: taskPrompt.trim() ? "#fff" : "var(--text-muted)",
+                fontSize: 12, fontWeight: 600, cursor: "pointer", transition: `all 0.15s ${EASE}`,
+              }}>
+              <Send style={{ width: 12, height: 12 }} /> Dispatch
+            </button>
+          </div>
+        </div>
+
+        {/* Recent tasks */}
+        {tasks.length > 0 && (
+          <div>
+            <div style={{ ...sectionLabel, marginBottom: 8 }}>Recent Tasks ({tasks.length})</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {tasks.slice(0, 10).map(task => <TaskItem key={task.id} task={task} />)}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TaskItem({ task }: { task: DispatchedTask }) {
   const [expanded, setExpanded] = useState(false);
+  const setView = useAppStore(s => s.setView);
   const statusIcon = task.status === "running"
     ? <Loader2 style={{ width: 13, height: 13, color: "var(--accent)", animation: "spin 1s linear infinite" }} />
     : task.status === "completed"
@@ -1133,8 +1286,16 @@ function TaskItem({ task }: { task: DispatchedTask }) {
     : <AlertCircle style={{ width: 13, height: 13, color: "var(--error)" }} />;
   const elapsed = task.completedAt ? ((task.completedAt - task.startedAt) / 1000).toFixed(1) : null;
 
+  const sendToChat = () => {
+    const context = `A sub-agent completed the following task:\n\n**Task:** ${task.prompt}\n\n**Result:**\n${task.result}\n\nPlease review this result and execute any actionable items.`;
+    setView("conversation");
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("crystal:send-to-chat", { detail: { context, surface: "agents" } }));
+    }, 300);
+  };
+
   return (
-    <div style={{ ...CARD }}>
+    <div style={{ ...CARD }} data-glow="#3b82f6" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
       <div style={{ ...ROW, cursor: task.result ? "pointer" : "default" }} onClick={() => task.result && setExpanded(!expanded)}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
           {statusIcon}
@@ -1142,21 +1303,38 @@ function TaskItem({ task }: { task: DispatchedTask }) {
             <div style={{ fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.prompt}</div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
               <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "var(--accent-bg)", color: "var(--accent)", fontWeight: 500 }}>{task.agentId}</span>
-              {elapsed && <span style={{ fontSize: 9, color: "var(--text-muted)", ...MONO }}>{elapsed}s</span>}
+              {elapsed && <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: MONO }}>{elapsed}s</span>}
             </div>
           </div>
         </div>
-        {task.result && (
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(task.result || ""); }}
-              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}><Copy style={{ width: 11, height: 11 }} /></button>
-            {expanded ? <ChevronUp style={{ width: 12, height: 12, color: "var(--text-muted)" }} /> : <ChevronDown style={{ width: 12, height: 12, color: "var(--text-muted)" }} />}
-          </div>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          {(task.status === "completed" || task.status === "error") && task.result && (
+            <button onClick={e => { e.stopPropagation(); sendToChat(); }}
+              title="Execute in Chat"
+              style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 6, border: "none",
+                background: "rgba(59,130,246,0.1)", color: "var(--accent)", fontSize: 9, fontWeight: 600, cursor: "pointer",
+                transition: `all 0.15s ${EASE}`, flexShrink: 0 }}>
+              <ArrowRight style={{ width: 10, height: 10 }} /> Chat
+            </button>
+          )}
+          {task.result && (
+            <>
+              <button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(task.result || ""); }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}><Copy style={{ width: 11, height: 11 }} /></button>
+              {expanded ? <ChevronUp style={{ width: 12, height: 12, color: "var(--text-muted)" }} /> : <ChevronDown style={{ width: 12, height: 12, color: "var(--text-muted)" }} />}
+            </>
+          )}
+        </div>
       </div>
       {expanded && task.result && (
         <div style={{ padding: "0 14px 12px" }}>
-          <pre style={{ margin: 0, padding: "8px 10px", borderRadius: 6, background: "var(--bg-surface)", border: "1px solid var(--border)", fontSize: 11, ...MONO, color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 300, overflowY: "auto" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, marginBottom: 4 }}>
+            <button onClick={sendToChat}
+              style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: 9, fontWeight: 600 }}>
+              <MessageSquare style={{ width: 10, height: 10 }} /> Send to Chat
+            </button>
+          </div>
+          <pre style={{ ...innerPanel, margin: 0, padding: "8px 10px", fontSize: 11, fontFamily: MONO, color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 300, overflowY: "auto" }}>
             {task.result}
           </pre>
         </div>

@@ -367,7 +367,33 @@ class TemplateService {
       }
 
       case "condition": {
-        return "Condition evaluation not implemented";
+        const expr = step.config.expression as string | undefined;
+        const field = step.config.field as string | undefined;
+        const op = step.config.operator as string | undefined;
+        const expected = step.config.value as string | undefined;
+
+        if (field && op && expected !== undefined) {
+          const actual = String(previousResults[field] ?? "");
+          let passed = false;
+          switch (op) {
+            case "equals": passed = actual === expected; break;
+            case "not_equals": passed = actual !== expected; break;
+            case "contains": passed = actual.includes(expected); break;
+            case "not_contains": passed = !actual.includes(expected); break;
+            case "gt": passed = Number(actual) > Number(expected); break;
+            case "lt": passed = Number(actual) < Number(expected); break;
+            default: passed = actual === expected;
+          }
+          return passed ? "true" : "false";
+        }
+
+        if (expr) {
+          const key = expr.trim();
+          const val = previousResults[key];
+          return val ? "true" : "false";
+        }
+
+        return "true";
       }
 
       default:

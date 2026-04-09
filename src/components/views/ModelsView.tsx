@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { cachedCommand } from "@/lib/cache";
 import { openclawClient } from "@/lib/openclaw";
 import { useAppStore } from "@/stores/appStore";
+import { EASE, MONO, innerPanel, emptyState, scrollArea, hoverLift, hoverReset, pressDown, pressUp, sectionLabel } from "@/styles/viewStyles";
 
 interface Model {
   key: string;
@@ -47,28 +48,81 @@ function formatContext(tokens: number) {
   return `${tokens}`;
 }
 
-function parseOllamaPs(stdout: string): RunningModel[] {
+function parseOllamaTable(stdout: string): { cols: string[][] } {
   const lines = stdout.trim().split("\n");
-  if (lines.length < 2) return [];
+  if (lines.length < 2) return { cols: [] };
   const headerLine = lines[0];
   const colStarts: number[] = [];
   const headers = headerLine.match(/\S+/g) || [];
   for (const h of headers) colStarts.push(headerLine.indexOf(h));
-  return lines.slice(1).filter(l => l.trim()).map(line => {
-    const cols: string[] = [];
+  const rows = lines.slice(1).filter(l => l.trim()).map(line => {
+    const cells: string[] = [];
     for (let i = 0; i < colStarts.length; i++) {
       const start = colStarts[i];
       const end = i + 1 < colStarts.length ? colStarts[i + 1] : line.length;
-      cols.push(line.substring(start, end).trim());
+      cells.push(line.substring(start, end).trim());
     }
-    const name = cols[0] || "";
-    const sizeRaw = cols[2] || "0 B";
-    const match = sizeRaw.trim().match(/^([\d.]+)\s*(GB|MB|KB|B)?$/i);
-    const val = match ? parseFloat(match[1]) : 0;
-    const unit = match ? (match[2] || "B").toUpperCase() : "B";
-    const mult: Record<string, number> = { B: 1, KB: 1024, MB: 1048576, GB: 1073741824 };
-    return { name, size: `${val} ${unit}`, sizeBytes: val * (mult[unit] || 1), processor: cols[3] || "" };
+    return cells;
   });
+  return { cols: rows };
+}
+
+function parseSizeString(sizeRaw: string): { val: number; unit: string; bytes: number } {
+  const match = sizeRaw.trim().match(/^([\d.]+)\s*(GB|MB|KB|B)?$/i);
+  const val = match ? parseFloat(match[1]) : 0;
+  const unit = match ? (match[2] || "B").toUpperCase() : "B";
+  const mult: Record<string, number> = { B: 1, KB: 1024, MB: 1048576, GB: 1073741824 };
+  return { val, unit, bytes: val * (mult[unit] || 1) };
+}
+
+function parseOllamaPs(stdout: string): RunningModel[] {
+  const { cols } = parseOllamaTable(stdout);
+  return cols.map(cells => {
+    const name = cells[0] || "";
+    const { val, unit, bytes } = parseSizeString(cells[2] || "0 B");
+    return { name, size: `${val} ${unit}`, sizeBytes: bytes, processor: cells[3] || "" };
+  });
+}
+
+function parseOllamaList(stdout: string): Model[] {
+  const { cols } = parseOllamaTable(stdout);
+  return cols.map(cells => {
+    const name = cells[0] || "";
+    return {
+      key: `ollama/${name}`,
+      name,
+      local: true,
+      available: true,
+      tags: [],
+      contextWindow: 0,
+    };
+  });
+}
+
+interface AgentDefaults {
+  model?: { primary?: string; fallbacks?: string[] };
+  models?: Record<string, { alias?: string }>;
+}
+
+async function loadModelsFromConfig(): Promise<{ models: Model[]; primary: string | null; fallbacks: string[] }> {
+  const result = await cachedCommand("openclaw config get agents.defaults --json", { ttl: 30_000 });
+  if (result.code !== 0) return { models: [], primary: null, fallbacks: [] };
+
+  const data: AgentDefaults = JSON.parse(result.stdout);
+  const primary = data.model?.primary || null;
+  const fallbackList = data.model?.fallbacks || [];
+  const modelMap = data.models || {};
+
+  const models: Model[] = Object.entries(modelMap).map(([key, cfg]) => ({
+    key,
+    name: cfg.alias || key.split("/").pop() || key,
+    local: key.startsWith("ollama/"),
+    available: true,
+    tags: key === primary ? ["default"] : [],
+    contextWindow: 0,
+  }));
+
+  return { models, primary, fallbacks: fallbackList };
 }
 
 function providerInfo(key: string): { provider: string; color: string; icon: "cloud" | "local" } {
@@ -110,14 +164,59 @@ export function ModelsView() {
 
   const loadModels = useCallback(async () => {
     setError(null);
+
+    // Try openclaw models list first (full catalog)
     try {
       const result = await cachedCommand("openclaw models list --json", { ttl: 30_000 });
-      if (result.code !== 0) {
-        setError(result.stderr || "Failed to list models");
-        setModels([]);
-      } else {
+      if (result.code === 0) {
         const data = JSON.parse(result.stdout);
-        setModels(data.models || []);
+        const list: Model[] = data.models || [];
+        if (list.length > 0) {
+          setModels(list);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch {
+      // timed out or errored — fall through to config-based approach
+    }
+
+    // Fallback: build model list from config + ollama list
+    try {
+      const [configData, ollamaResult] = await Promise.all([
+        loadModelsFromConfig().catch(() => ({ models: [] as Model[], primary: null, fallbacks: [] as string[] })),
+        cachedCommand("ollama list", { ttl: 15_000 }).catch(() => ({ stdout: "", stderr: "", code: 1 })),
+      ]);
+
+      const ollamaModels = ollamaResult.code === 0 ? parseOllamaList(ollamaResult.stdout) : [];
+
+      // Merge: config models + any ollama models not already in config
+      const merged = new Map<string, Model>();
+      for (const m of configData.models) merged.set(m.key, m);
+      for (const m of ollamaModels) {
+        if (!merged.has(m.key)) merged.set(m.key, m);
+        else {
+          const existing = merged.get(m.key)!;
+          existing.available = true;
+          existing.local = true;
+        }
+      }
+
+      // Mark the primary model as default
+      if (configData.primary) {
+        for (const m of merged.values()) {
+          if (m.key === configData.primary) {
+            if (!m.tags.includes("default")) m.tags = [...m.tags, "default"];
+          }
+        }
+      }
+
+      const list = Array.from(merged.values());
+      setModels(list);
+      setFallbacks(configData.fallbacks);
+
+      if (list.length === 0) {
+        setError("Could not discover models. Is OpenClaw gateway running?");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load models");
@@ -154,6 +253,14 @@ export function ModelsView() {
       if (result.code === 0) {
         const data = JSON.parse(result.stdout);
         setFallbacks(data.fallbacks || []);
+        return;
+      }
+    } catch { /* timed out — try config */ }
+    try {
+      const cfg = await cachedCommand("openclaw config get agents.defaults.model.fallbacks --json", { ttl: 60_000 });
+      if (cfg.code === 0) {
+        const data = JSON.parse(cfg.stdout);
+        setFallbacks(Array.isArray(data.value) ? data.value : Array.isArray(data) ? data : []);
       }
     } catch { /* ignore */ }
   }, []);
@@ -217,6 +324,21 @@ export function ModelsView() {
       if (result.code === 0) {
         const data = JSON.parse(result.stdout);
         setProviderStatuses(data.providers || []);
+        setStatusLoading(false);
+        return;
+      }
+    } catch { /* timed out */ }
+    // Fallback: derive provider status from config
+    try {
+      const cfg = await cachedCommand("openclaw config get models --json", { ttl: 60_000 });
+      if (cfg.code === 0) {
+        const data = JSON.parse(cfg.stdout);
+        const providers: Record<string, { baseUrl?: string }> = data.providers || {};
+        setProviderStatuses(Object.entries(providers).map(([name, p]) => ({
+          provider: name,
+          configured: !!p.baseUrl,
+          authenticated: !!p.baseUrl,
+        })));
       }
     } catch { /* ignore */ }
     setStatusLoading(false);
@@ -305,7 +427,8 @@ export function ModelsView() {
             </p>
           </div>
           <button onClick={() => { loadModels(); loadRunning(); }} disabled={loading}
-            style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, border: "none", fontSize: 11, cursor: "pointer", background: "var(--accent-bg)", color: "var(--accent)" }}>
+            onMouseDown={pressDown} onMouseUp={pressUp}
+            style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, border: "none", fontSize: 11, cursor: "pointer", background: "var(--accent-bg)", color: "var(--accent)", transition: `all 0.15s ${EASE}` }}>
             <RefreshCw style={{ width: 12, height: 12, ...(loading ? { animation: "spin 1s linear infinite" } : {}) }} /> Refresh
           </button>
         </div>
@@ -316,14 +439,14 @@ export function ModelsView() {
             width: "100%", display: "flex", alignItems: "center", gap: 10,
             padding: "12px 16px", borderRadius: 12,
             background: "var(--bg-elevated)", border: "1px solid var(--border)",
-            cursor: "pointer", transition: "border-color 0.15s",
+            cursor: "pointer", transition: `border-color 0.15s ${EASE}`,
           }}>
             <Star style={{ width: 16, height: 16, color: "var(--accent)", flexShrink: 0 }} />
             <div style={{ flex: 1, textAlign: "left" }}>
               <span style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5, display: "block" }}>Active Model</span>
               {defaultModel ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", fontFamily: "monospace" }}>{defaultModel.name}</span>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", fontFamily: MONO }}>{defaultModel.name}</span>
                   {(() => { const info = providerInfo(defaultModel.key); return (
                     <span style={{ fontSize: 9, padding: "2px 8px", borderRadius: 6, background: `${info.color}15`, color: info.color, fontWeight: 500 }}>{info.provider}</span>
                   ); })()}
@@ -335,7 +458,7 @@ export function ModelsView() {
             {settingDefault ? (
               <Loader2 style={{ width: 14, height: 14, color: "var(--accent)", animation: "spin 1s linear infinite", flexShrink: 0 }} />
             ) : (
-              <ChevronDown style={{ width: 16, height: 16, color: "var(--text-muted)", flexShrink: 0, transform: dropdownOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+              <ChevronDown style={{ width: 16, height: 16, color: "var(--text-muted)", flexShrink: 0, transform: dropdownOpen ? "rotate(180deg)" : "none", transition: `transform 0.15s ${EASE}` }} />
             )}
           </button>
 
@@ -358,7 +481,7 @@ export function ModelsView() {
                         padding: "10px 14px", border: "none", cursor: isActive ? "default" : "pointer",
                         background: isActive ? "var(--accent-bg)" : "transparent",
                         borderBottom: "1px solid var(--border)",
-                        transition: "background 0.1s",
+                        transition: `background 0.1s ${EASE}`,
                       }}
                       onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
                       onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
@@ -372,7 +495,7 @@ export function ModelsView() {
                         <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 8 }}>{info.provider}</span>
                       </div>
                       {m.contextWindow > 0 && (
-                        <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: "monospace" }}>{formatContext(m.contextWindow)} ctx</span>
+                        <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: MONO }}>{formatContext(m.contextWindow)} ctx</span>
                       )}
                       {isActive && <Check style={{ width: 14, height: 14, color: "var(--accent)", flexShrink: 0 }} />}
                     </button>
@@ -407,7 +530,7 @@ export function ModelsView() {
               {running.map(r => (
                 <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--success)", boxShadow: "0 0 6px rgba(74,222,128,0.5)" }} />
-                  <span style={{ fontSize: 11, color: "var(--text)", fontFamily: "monospace", fontWeight: 500 }}>{r.name}</span>
+                      <span style={{ fontSize: 11, color: "var(--text)", fontFamily: MONO, fontWeight: 500 }}>{r.name}</span>
                   <span style={{ fontSize: 9, color: "var(--text-muted)" }}>{r.size}</span>
                   {r.processor && <span style={{ fontSize: 8, padding: "1px 5px", borderRadius: 4, background: "rgba(59,130,246,0.1)", color: "var(--accent)" }}>{r.processor}</span>}
                 </div>
@@ -415,7 +538,7 @@ export function ModelsView() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
               <MemoryStick style={{ width: 10, height: 10, color: "var(--text-muted)" }} />
-              <span style={{ fontSize: 10, color: "var(--text-secondary)", fontFamily: "monospace" }}>{humanSize(totalVram)}</span>
+              <span style={{ fontSize: 10, color: "var(--text-secondary)", fontFamily: MONO }}>{humanSize(totalVram)}</span>
             </div>
           </div>
         )}
@@ -441,7 +564,7 @@ export function ModelsView() {
 
         {pullOutput && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, padding: "6px 10px", borderRadius: 8, background: "var(--bg-elevated)", border: "1px solid var(--border)" }}>
-            <span style={{ fontSize: 10, color: "var(--text-secondary)", fontFamily: "monospace", flex: 1 }}>{pullOutput}</span>
+            <span style={{ fontSize: 10, color: "var(--text-secondary)", fontFamily: MONO, flex: 1 }}>{pullOutput}</span>
             <button onClick={() => setPullOutput(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}><X style={{ width: 10, height: 10 }} /></button>
           </div>
         )}
@@ -478,7 +601,7 @@ export function ModelsView() {
               <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600 }}>Scan Results</span>
               <button onClick={() => setScanResults(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}><X style={{ width: 10, height: 10 }} /></button>
             </div>
-            <pre style={{ fontSize: 10, color: "var(--text-secondary)", fontFamily: "monospace", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{scanResults}</pre>
+            <pre style={{ fontSize: 10, color: "var(--text-secondary)", fontFamily: MONO, margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{scanResults}</pre>
           </div>
         )}
 
@@ -509,9 +632,9 @@ export function ModelsView() {
         )}
 
         {/* Fallbacks */}
-        <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 10, background: "var(--bg-elevated)", border: "1px solid var(--border)" }}>
+        <div style={{ ...innerPanel, marginTop: 10, padding: "8px 12px" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-            <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>Fallback Models</span>
+            <span style={sectionLabel}>Fallback Models</span>
           </div>
           {fallbacks.length === 0 ? (
             <p style={{ fontSize: 10, color: "var(--text-muted)", margin: "0 0 6px" }}>No fallbacks configured</p>
@@ -519,7 +642,7 @@ export function ModelsView() {
             <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
               {fallbacks.map(fb => (
                 <div key={fb} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", borderRadius: 6, background: "var(--bg-base)" }}>
-                  <span style={{ flex: 1, fontSize: 11, color: "var(--text)", fontFamily: "monospace" }}>{fb}</span>
+                  <span style={{ flex: 1, fontSize: 11, color: "var(--text)", fontFamily: MONO }}>{fb}</span>
                   <button onClick={() => removeFallback(fb)} disabled={fallbackLoading}
                     style={{ display: "flex", alignItems: "center", padding: "2px 6px", borderRadius: 4, border: "none", background: "rgba(248,113,113,0.1)", color: "#f87171", cursor: "pointer", opacity: fallbackLoading ? 0.5 : 1 }}>
                     <Minus style={{ width: 10, height: 10 }} />
@@ -541,19 +664,19 @@ export function ModelsView() {
       </div>
 
       {/* Model List */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 20px" }}>
+      <div style={{ ...scrollArea, padding: "0 24px 20px" }}>
         {loading ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
             <Loader2 style={{ width: 24, height: 24, color: "var(--accent)", animation: "spin 1s linear infinite" }} />
           </div>
         ) : error ? (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 40, gap: 8 }}>
+          <div style={emptyState}>
             <AlertTriangle style={{ width: 24, height: 24, color: "#f87171" }} />
             <p style={{ fontSize: 12, color: "#f87171", textAlign: "center" }}>{error}</p>
             <button onClick={loadModels} style={{ padding: "6px 14px", borderRadius: 8, border: "none", background: "var(--bg-elevated)", color: "var(--text-secondary)", fontSize: 11, cursor: "pointer" }}>Retry</button>
           </div>
         ) : filtered.length === 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 40, gap: 8 }}>
+          <div style={emptyState}>
             <Cpu style={{ width: 28, height: 28, color: "var(--text-muted)" }} />
             <p style={{ fontSize: 12, color: "var(--text-muted)" }}>{models.length === 0 ? "No models configured" : "No matching models"}</p>
           </div>
@@ -574,8 +697,12 @@ export function ModelsView() {
                   padding: "12px 14px", borderRadius: 12,
                   background: isDefault ? "var(--accent-bg)" : "var(--bg-elevated)",
                   border: `1px solid ${isDefault ? "rgba(59,130,246,0.2)" : "var(--border)"}`,
-                  transition: "background 0.15s",
-                }}>
+                  transition: `all 0.2s ${EASE}`,
+                }}
+                  data-glow={info.color}
+                  onMouseEnter={hoverLift}
+                  onMouseLeave={hoverReset}
+                >
                   {/* Provider Icon */}
                   <div style={{
                     width: 36, height: 36, borderRadius: 10, display: "flex",
@@ -606,7 +733,7 @@ export function ModelsView() {
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
                       <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: `${info.color}10`, color: info.color, fontWeight: 500 }}>{info.provider}</span>
-                      <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace" }}>{model.key}</span>
+                      <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO }}>{model.key}</span>
                       {model.contextWindow > 0 && (
                         <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "var(--bg-hover)", color: "var(--text-muted)" }}>{formatContext(model.contextWindow)} ctx</span>
                       )}

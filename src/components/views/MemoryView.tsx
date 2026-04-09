@@ -8,6 +8,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { openclawClient, MemoryEntry } from "@/lib/openclaw";
 import { cachedCommand } from "@/lib/cache";
+import { EASE, SPRING, glowCard, hoverLift, hoverReset, pressDown, pressUp, innerPanel, sectionLabel, mutedCaption, iconTile, inputStyle, btnPrimary, btnSecondary, viewContainer, headerRow, scrollArea, badge, emptyState, row as rowStyle, MONO } from "@/styles/viewStyles";
 
 interface MemoryStatus {
   files: number; chunks: number; dirty: boolean; provider: string;
@@ -121,13 +122,20 @@ export function MemoryView() {
   }, []);
 
   const loadMemory = async () => {
-    const [curated, daily] = await Promise.all([openclawClient.getMemory(), openclawClient.getDailyMemory()]);
-    setCuratedMemory(curated); setDailyMemory(daily); setLoading(false);
+    try {
+      const [curated, daily] = await Promise.all([openclawClient.getMemory(), openclawClient.getDailyMemory()]);
+      setCuratedMemory(curated); setDailyMemory(daily);
+    } catch (e) {
+      setFeedback({ type: "error", text: e instanceof Error ? e.message : "Failed to load memory" });
+    }
+    setLoading(false);
   };
 
   const loadStatus = async () => {
-    const raw = await openclawClient.getMemoryStatus();
-    setStatus(parseStatus(raw));
+    try {
+      const raw = await openclawClient.getMemoryStatus();
+      setStatus(parseStatus(raw));
+    } catch { /* status is supplementary */ }
   };
 
   const handleSearch = async () => {
@@ -300,42 +308,40 @@ export function MemoryView() {
   ];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+    <div style={{ ...viewContainer, padding: 0, gap: 0 }}>
       {/* Header */}
       <div style={{ padding: "14px 20px 10px", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={headerRow}>
           <h2 style={{ color: "var(--text)", fontSize: 15, fontWeight: 600, margin: 0 }}>Memory</h2>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {feedback && (
-              <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, display: "flex", alignItems: "center", gap: 4,
-                background: feedback.type === "success" ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)",
-                color: feedback.type === "success" ? "#4ade80" : "#f87171" }}>
+              <span style={{ ...badge(feedback.type === "success" ? "#4ade80" : "#f87171"), display: "flex", alignItems: "center", gap: 4 }}>
                 {feedback.type === "success" ? <CheckCircle2 style={{ width: 10, height: 10 }} /> : <XCircle style={{ width: 10, height: 10 }} />}
                 {feedback.text}
               </span>
             )}
             <button onClick={handleReindex} disabled={reindexing}
-              style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--text-muted)", fontSize: 10, background: "none", border: "none", cursor: "pointer", padding: "4px 8px", borderRadius: 6 }}>
+              style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--text-muted)", fontSize: 10, background: "none", border: "none", cursor: "pointer", padding: "4px 8px", borderRadius: 6, transition: `all 0.2s ${EASE}` }}
+              onMouseDown={pressDown} onMouseUp={pressUp}>
               {reindexing ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <Database style={{ width: 12, height: 12 }} />}
               Reindex
             </button>
             <button onClick={() => { loadMemory(); loadStatus(); if (tab === "kb") loadWsFiles(); if (tab === "tiers") loadTiers(); }} disabled={loading}
-              style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--text-muted)", fontSize: 10, background: "none", border: "none", cursor: "pointer", padding: "4px 8px", borderRadius: 6 }}>
+              style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--text-muted)", fontSize: 10, background: "none", border: "none", cursor: "pointer", padding: "4px 8px", borderRadius: 6, transition: `all 0.2s ${EASE}` }}
+              onMouseDown={pressDown} onMouseUp={pressUp}>
               <RefreshCw style={{ width: 12, height: 12, ...(loading ? { animation: "spin 1s linear infinite" } : {}) }} /> Refresh
             </button>
           </div>
         </div>
         {status && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
-            <span style={{ fontSize: 9, padding: "2px 8px", borderRadius: 6,
-              background: status.vectorReady ? "rgba(74,222,128,0.1)" : "rgba(251,191,36,0.1)",
-              color: status.vectorReady ? "#4ade80" : "#fbbf24", fontWeight: 500 }}>
+            <span style={badge(status.vectorReady ? "#4ade80" : "#fbbf24")}>
               {status.searchMode === "hybrid" ? "Hybrid Search" : status.searchMode === "fts-only" ? "Text Search Only" : "Search"}
             </span>
-            <span style={{ fontSize: 9, color: "var(--text-muted)" }}>
+            <span style={mutedCaption}>
               {status.files} file{status.files !== 1 ? "s" : ""} · {status.chunks} chunk{status.chunks !== 1 ? "s" : ""}
             </span>
-            {status.provider !== "none" && <span style={{ fontSize: 9, color: "var(--text-muted)" }}>via {status.provider}</span>}
+            {status.provider !== "none" && <span style={mutedCaption}>via {status.provider}</span>}
             {status.dirty && <span style={{ fontSize: 9, color: "#fbbf24" }}>needs reindex</span>}
           </div>
         )}
@@ -348,10 +354,11 @@ export function MemoryView() {
             <Search style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", width: 14, height: 14, color: "var(--text-muted)" }} />
             <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSearch()}
               placeholder="Semantic search across all memory..."
-              style={{ width: "100%", padding: "7px 10px 7px 32px", borderRadius: 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 12, outline: "none", boxSizing: "border-box" }} />
+              style={{ ...inputStyle, padding: "7px 10px 7px 32px", fontSize: 12, boxSizing: "border-box" }} />
           </div>
           <button onClick={handleSearch} disabled={searching || !searchQuery.trim()}
-            style={{ padding: "0 12px", borderRadius: 8, background: "var(--accent)", border: "none", color: "white", fontSize: 11, cursor: "pointer", opacity: searching || !searchQuery.trim() ? 0.5 : 1 }}>
+            style={{ ...btnPrimary, padding: "0 12px", fontSize: 11, opacity: searching || !searchQuery.trim() ? 0.5 : 1 }}
+            onMouseDown={pressDown} onMouseUp={pressUp}>
             {searching ? <Loader2 style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} /> : "Search"}
           </button>
         </div>
@@ -364,7 +371,7 @@ export function MemoryView() {
           return (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
               padding: "4px 10px", borderRadius: 6, border: "none", fontSize: 11, cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 4,
+              display: "flex", alignItems: "center", gap: 4, transition: `all 0.2s ${EASE}`,
               background: tab === t.id ? "rgba(59,130,246,0.18)" : "var(--bg-elevated)",
               color: tab === t.id ? "var(--accent)" : "var(--text-muted)" }}>
               <Icon style={{ width: 10, height: 10 }} />{t.label}
@@ -374,16 +381,16 @@ export function MemoryView() {
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 12px", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ ...scrollArea, padding: "0 20px 12px", display: "flex", flexDirection: "column" }}>
 
         {/* ─── Knowledge Base Tab ─── */}
         {tab === "kb" && (
           viewingFile ? (
             <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, minHeight: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div style={headerRow}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <button onClick={() => { setViewingFile(null); setEditingKB(false); }}
-                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: 11, padding: "4px 8px", borderRadius: 6 }}>
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: 11, padding: "4px 8px", borderRadius: 6, transition: `all 0.2s ${EASE}` }}>
                     ← Back
                   </button>
                   <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{viewingFile.name}</span>
@@ -391,23 +398,27 @@ export function MemoryView() {
                 <div style={{ display: "flex", gap: 4 }}>
                   {!editingKB ? (
                     <button onClick={() => { setEditingKB(true); setKbEditContent(viewingFile.content); }}
-                      style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 10, cursor: "pointer" }}>
+                      style={{ ...btnSecondary, display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", fontSize: 10 }}
+                      onMouseDown={pressDown} onMouseUp={pressUp}>
                       <Edit3 style={{ width: 10, height: 10 }} /> Edit
                     </button>
                   ) : (
                     <>
                       <button onClick={saveKbFile} disabled={kbSaving}
-                        style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, background: "var(--accent)", border: "none", color: "white", fontSize: 10, cursor: "pointer", opacity: kbSaving ? 0.5 : 1 }}>
+                        style={{ ...btnPrimary, display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", fontSize: 10, opacity: kbSaving ? 0.5 : 1 }}
+                        onMouseDown={pressDown} onMouseUp={pressUp}>
                         {kbSaving ? <Loader2 style={{ width: 10, height: 10, animation: "spin 1s linear infinite" }} /> : <Save style={{ width: 10, height: 10 }} />} Save
                       </button>
                       <button onClick={() => setEditingKB(false)}
-                        style={{ padding: "4px 10px", borderRadius: 6, background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text-muted)", fontSize: 10, cursor: "pointer" }}>
+                        style={{ ...btnSecondary, padding: "4px 10px", fontSize: 10 }}
+                        onMouseDown={pressDown} onMouseUp={pressUp}>
                         Cancel
                       </button>
                     </>
                   )}
                   <button onClick={() => copyEntry(viewingFile.content)}
-                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text-muted)", fontSize: 10, cursor: "pointer" }}>
+                    style={{ ...btnSecondary, display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", fontSize: 10 }}
+                    onMouseDown={pressDown} onMouseUp={pressUp}>
                     <Copy style={{ width: 10, height: 10 }} /> Copy
                   </button>
                 </div>
@@ -418,13 +429,11 @@ export function MemoryView() {
                 </div>
               ) : editingKB ? (
                 <textarea value={kbEditContent} onChange={e => setKbEditContent(e.target.value)}
-                  style={{ flex: 1, minHeight: 200, fontFamily: "monospace", fontSize: 12, padding: 12,
-                    background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 8,
-                    color: "var(--text)", resize: "none", width: "100%", outline: "none", boxSizing: "border-box" }}
+                  style={{ ...inputStyle, flex: 1, minHeight: 200, fontFamily: MONO, fontSize: 12, padding: 12,
+                    resize: "none", boxSizing: "border-box" }}
                   spellCheck={false} />
               ) : (
-                <pre style={{ flex: 1, margin: 0, fontFamily: "monospace", fontSize: 12, padding: 14,
-                  background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 8,
+                <pre style={{ ...innerPanel, flex: 1, margin: 0, fontFamily: MONO, fontSize: 12, padding: 14,
                   color: "var(--text)", overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.6 }}>
                   {viewingFile.content}
                 </pre>
@@ -435,7 +444,7 @@ export function MemoryView() {
               {/* Category filter */}
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 <button onClick={() => setKbFilter("all")}
-                  style={{ padding: "3px 10px", borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
+                  style={{ padding: "3px 10px", borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer", transition: `all 0.2s ${EASE}`,
                     background: kbFilter === "all" ? "rgba(59,130,246,0.2)" : "var(--bg-elevated)",
                     color: kbFilter === "all" ? "var(--accent)" : "var(--text-muted)" }}>
                   All ({wsFiles.length})
@@ -445,7 +454,7 @@ export function MemoryView() {
                   const count = wsFiles.filter(f => f.category === cat).length;
                   return (
                     <button key={cat} onClick={() => setKbFilter(cat)}
-                      style={{ padding: "3px 10px", borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
+                      style={{ padding: "3px 10px", borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer", transition: `all 0.2s ${EASE}`,
                         background: kbFilter === cat ? `${meta.color}22` : "var(--bg-elevated)",
                         color: kbFilter === cat ? meta.color : "var(--text-muted)" }}>
                       {meta.label} ({count})
@@ -459,20 +468,17 @@ export function MemoryView() {
                   <Loader2 style={{ width: 24, height: 24, color: "var(--accent)", animation: "spin 1s linear infinite" }} />
                 </div>
               ) : filteredFiles.length === 0 ? (
-                <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)", fontSize: 12 }}>
-                  No files found in this category.
-                </div>
+                <div style={emptyState}>No files found in this category.</div>
               ) : (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 8 }}>
                   {filteredFiles.map(file => {
                     const meta = CATEGORY_META[file.category] || { label: file.category, color: "var(--text-muted)" };
                     return (
                       <button key={file.name} onClick={() => viewFile(file)}
-                        style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 8,
-                          padding: "10px 12px", cursor: "pointer", textAlign: "left", display: "flex", flexDirection: "column", gap: 4,
-                          transition: "border-color 0.15s" }}
-                        onMouseEnter={e => { e.currentTarget.style.borderColor = meta.color; }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; }}>
+                        data-glow={meta.color}
+                        style={{ ...glowCard(meta.color), padding: "10px 12px", cursor: "pointer", textAlign: "left", display: "flex", flexDirection: "column", gap: 4 }}
+                        onMouseEnter={hoverLift} onMouseLeave={hoverReset}
+                        onMouseDown={pressDown} onMouseUp={pressUp}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <FileText style={{ width: 12, height: 12, color: meta.color }} />
@@ -481,9 +487,9 @@ export function MemoryView() {
                           <Eye style={{ width: 10, height: 10, color: "var(--text-muted)" }} />
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: `${meta.color}15`, color: meta.color }}>{meta.label}</span>
-                          <span style={{ fontSize: 9, color: "var(--text-muted)" }}>{formatBytes(file.size)}</span>
-                          <span style={{ fontSize: 9, color: "var(--text-muted)" }}>{file.modified}</span>
+                          <span style={badge(meta.color)}>{meta.label}</span>
+                          <span style={mutedCaption}>{formatBytes(file.size)}</span>
+                          <span style={mutedCaption}>{file.modified}</span>
                         </div>
                       </button>
                     );
@@ -503,21 +509,19 @@ export function MemoryView() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {/* Tier diagram */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "var(--bg-elevated)", borderRadius: 8, border: "1px solid var(--border)" }}>
-                <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Memory Flow:</span>
+              <div style={{ ...innerPanel, display: "flex", alignItems: "center", gap: 8, padding: "10px 14px" }}>
+                <span style={mutedCaption}>Memory Flow:</span>
                 {(["hot", "warm", "cold"] as const).map((tier, i) => {
                   const cfg = TIER_CATEGORIES[tier];
                   return (
                     <span key={tier} style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       {i > 0 && <ArrowRight style={{ width: 10, height: 10, color: "var(--text-muted)" }} />}
-                      <span style={{ fontSize: 10, fontWeight: 700, color: cfg.color, padding: "2px 8px", borderRadius: 4, background: `${cfg.color}15` }}>
-                        {cfg.label}
-                      </span>
+                      <span style={badge(cfg.color)}>{cfg.label}</span>
                     </span>
                   );
                 })}
                 <span style={{ flex: 1 }} />
-                <span style={{ fontSize: 9, color: "var(--text-muted)" }}>HOT updates every session • WARM on change • COLD archived</span>
+                <span style={mutedCaption}>HOT updates every session · WARM on change · COLD archived</span>
               </div>
 
               {/* Each tier */}
@@ -529,27 +533,29 @@ export function MemoryView() {
                 const fileName = tierId === "hot" ? "memory/HOT_MEMORY.md" : tierId === "warm" ? "memory/WARM_MEMORY.md" : tierId === "cold" ? "MEMORY.md" : "memory/YYYY-MM-DD.md";
 
                 return (
-                  <div key={tierId} style={{ background: "var(--bg-elevated)", border: `1px solid ${isExpanded ? cfg.color + "44" : "var(--border)"}`, borderRadius: 10, overflow: "hidden" }}>
+                  <div key={tierId} data-glow={cfg.color}
+                    style={glowCard(cfg.color, isExpanded ? { border: `1px solid ${cfg.color}44` } : undefined)}
+                    onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
                     <button onClick={() => setExpandedTier(isExpanded ? null : tierId)}
                       style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "12px 14px",
                         background: "none", border: "none", cursor: "pointer", textAlign: "left" }}>
-                      <div style={{ width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: `${cfg.color}15` }}>
+                      <div style={iconTile(cfg.color, 32)}>
                         <Icon style={{ width: 16, height: 16, color: cfg.color }} />
                       </div>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontSize: 13, fontWeight: 700, color: cfg.color }}>{cfg.label} MEMORY</div>
-                        <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{cfg.desc}</div>
+                        <div style={mutedCaption}>{cfg.desc}</div>
                       </div>
-                      <span style={{ fontSize: 9, color: "var(--text-muted)", padding: "2px 8px", borderRadius: 4, background: "var(--bg)" }}>{fileName}</span>
-                      {content !== null && <span style={{ fontSize: 9, color: "var(--text-muted)" }}>{formatBytes(content.length)}</span>}
+                      <span style={{ ...mutedCaption, padding: "2px 8px", borderRadius: 4, background: "var(--bg)" }}>{fileName}</span>
+                      {content !== null && <span style={mutedCaption}>{formatBytes(content.length)}</span>}
                       {isExpanded ? <ChevronUp style={{ width: 12, height: 12, color: "var(--text-muted)" }} /> : <ChevronDown style={{ width: 12, height: 12, color: "var(--text-muted)" }} />}
                     </button>
                     {isExpanded && tierId !== "daily" && (
                       <div style={{ borderTop: `1px solid ${cfg.color}22`, padding: "12px 14px", maxHeight: 350, overflowY: "auto" }}>
                         {content ? (
-                          <pre style={{ margin: 0, fontFamily: "monospace", fontSize: 11, color: "var(--text)", whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.55 }}>{content}</pre>
+                          <pre style={{ margin: 0, fontFamily: MONO, fontSize: 11, color: "var(--text)", whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.55 }}>{content}</pre>
                         ) : (
-                          <div style={{ textAlign: "center", padding: 20, color: "var(--text-muted)", fontSize: 11 }}>File not found. Create it to start using this memory tier.</div>
+                          <div style={emptyState}>File not found. Create it to start using this memory tier.</div>
                         )}
                       </div>
                     )}
@@ -558,14 +564,14 @@ export function MemoryView() {
                         {dailyMemory.length > 0 ? (
                           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                             {dailyMemory.slice(0, 10).map(entry => (
-                              <div key={entry.id} style={{ fontSize: 11, color: "var(--text)", padding: "6px 8px", background: "var(--bg)", borderRadius: 6 }}>
-                                <span style={{ fontSize: 9, color: "var(--text-muted)", marginRight: 8 }}>{entry.source}</span>
+                              <div key={entry.id} style={{ ...rowStyle, fontSize: 11, color: "var(--text)", padding: "6px 8px" }}>
+                                <span style={{ ...mutedCaption, marginRight: 8 }}>{entry.source}</span>
                                 {entry.content.length > 120 ? entry.content.slice(0, 120) + "…" : entry.content}
                               </div>
                             ))}
                           </div>
                         ) : (
-                          <div style={{ textAlign: "center", padding: 16, color: "var(--text-muted)", fontSize: 11 }}>No daily entries for today.</div>
+                          <div style={emptyState}>No daily entries for today.</div>
                         )}
                       </div>
                     )}
@@ -574,7 +580,7 @@ export function MemoryView() {
               })}
 
               {/* Installed memory skills */}
-              <div style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px" }}>
+              <div style={glowCard("var(--accent)", { padding: "12px 14px" })}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
                   <Brain style={{ width: 14, height: 14, color: "var(--accent)" }} />
                   <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>Memory Skills (ClawHub)</span>
@@ -586,12 +592,10 @@ export function MemoryView() {
                     { name: "memory-never-forget", desc: "Atkinson-Shiffrin 3-stage model", status: "installed" },
                     { name: "memory-lancedb", desc: "LanceDB vector embeddings", status: "active" },
                   ].map(skill => (
-                    <div key={skill.name} style={{ padding: "8px 10px", borderRadius: 6, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                    <div key={skill.name} style={{ ...innerPanel, padding: "8px 10px" }}>
                       <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>{skill.name}</div>
-                      <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 2 }}>{skill.desc}</div>
-                      <span style={{ fontSize: 8, padding: "1px 6px", borderRadius: 4, marginTop: 4, display: "inline-block",
-                        background: skill.status === "active" ? "rgba(74,222,128,0.15)" : "rgba(59,130,246,0.1)",
-                        color: skill.status === "active" ? "#4ade80" : "var(--accent)" }}>
+                      <div style={{ ...mutedCaption, marginTop: 2 }}>{skill.desc}</div>
+                      <span style={{ ...badge(skill.status === "active" ? "#4ade80" : "var(--accent)"), fontSize: 8, marginTop: 4, display: "inline-block" }}>
                         {skill.status}
                       </span>
                     </div>
@@ -615,17 +619,17 @@ export function MemoryView() {
             ) : (
               <>
                 <textarea value={editContent} onChange={e => setEditContent(e.target.value)}
-                  style={{ flex: 1, minHeight: 200, fontFamily: "monospace", fontSize: 12, padding: 12,
-                    background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 8,
-                    color: "var(--text)", resize: "none", width: "100%", outline: "none", boxSizing: "border-box" }}
+                  style={{ ...inputStyle, flex: 1, minHeight: 200, fontFamily: MONO, fontSize: 12, padding: 12,
+                    resize: "none", boxSizing: "border-box" }}
                   spellCheck={false} />
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <button onClick={handleSaveEdit} disabled={editSaving}
-                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 14px", borderRadius: 8, background: "var(--accent)", border: "none", color: "white", fontSize: 11, cursor: "pointer", opacity: editSaving ? 0.5 : 1 }}>
+                    style={{ ...btnPrimary, display: "flex", alignItems: "center", gap: 4, opacity: editSaving ? 0.5 : 1 }}
+                    onMouseDown={pressDown} onMouseUp={pressUp}>
                     {editSaving && <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />}
                     Save & Reindex
                   </button>
-                  <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Saves to ~/.openclaw/workspace/MEMORY.md</span>
+                  <span style={mutedCaption}>Saves to ~/.openclaw/workspace/MEMORY.md</span>
                 </div>
               </>
             )}
@@ -639,7 +643,7 @@ export function MemoryView() {
               <Loader2 style={{ width: 24, height: 24, color: "var(--accent)", animation: "spin 1s linear infinite" }} />
             </div>
           ) : displayEntries.length === 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 40, gap: 8 }}>
+            <div style={emptyState}>
               <Brain style={{ width: 32, height: 32, color: "var(--text-muted)" }} />
               <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
                 {tab === "search" ? "No search results" : tab === "daily" ? "No daily entries for today" : "No memory entries yet"}
@@ -651,18 +655,18 @@ export function MemoryView() {
                 const isExpanded = expandedEntries.has(entry.id);
                 const isLong = entry.content.length > 200;
                 return (
-                  <div key={entry.id} style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
+                  <div key={entry.id} data-glow="var(--accent)"
+                    style={glowCard("var(--accent)", { padding: "10px 12px" })}
+                    onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                      <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 500 }}>{entry.source}</span>
+                      <span style={{ ...mutedCaption, fontWeight: 500 }}>{entry.source}</span>
                       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4,
-                          background: entry.type === "curated" ? "rgba(59,130,246,0.15)" : "rgba(74,222,128,0.15)",
-                          color: entry.type === "curated" ? "var(--accent)" : "#4ade80" }}>{entry.type}</span>
-                        <button onClick={() => copyEntry(entry.content)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2, display: "flex" }}>
+                        <span style={badge(entry.type === "curated" ? "var(--accent)" : "#4ade80")}>{entry.type}</span>
+                        <button onClick={() => copyEntry(entry.content)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2, display: "flex", transition: `all 0.2s ${EASE}` }}>
                           <Copy style={{ width: 10, height: 10 }} />
                         </button>
                         {tab === "curated" && (
-                          <button onClick={() => handleDelete(entry.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2, display: "flex" }}>
+                          <button onClick={() => handleDelete(entry.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2, display: "flex", transition: `all 0.2s ${EASE}` }}>
                             <Trash2 style={{ width: 10, height: 10 }} />
                           </button>
                         )}
@@ -672,7 +676,7 @@ export function MemoryView() {
                       maxHeight: isLong && !isExpanded ? 80 : undefined, overflow: isLong && !isExpanded ? "hidden" : undefined }}>{entry.content}</p>
                     {isLong && (
                       <button onClick={() => toggleEntry(entry.id)}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: 10, padding: "4px 0 0", display: "flex", alignItems: "center", gap: 4 }}>
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: 10, padding: "4px 0 0", display: "flex", alignItems: "center", gap: 4, transition: `all 0.2s ${EASE}` }}>
                         {isExpanded ? <><ChevronUp style={{ width: 10, height: 10 }} /> Show less</> : <><ChevronDown style={{ width: 10, height: 10 }} /> Show more</>}
                       </button>
                     )}
@@ -690,9 +694,10 @@ export function MemoryView() {
           <div style={{ display: "flex", gap: 6 }}>
             <input value={newMemory} onChange={e => setNewMemory(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAddMemory()}
               placeholder="Add a fact, preference, or note to long-term memory..."
-              style={{ flex: 1, padding: "7px 10px", borderRadius: 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 12, outline: "none" }} />
+              style={{ ...inputStyle, flex: 1, padding: "7px 10px", fontSize: 12 }} />
             <button onClick={handleAddMemory} disabled={adding || !newMemory.trim()}
-              style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 12px", borderRadius: 8, background: "var(--accent)", border: "none", color: "white", fontSize: 11, cursor: "pointer", opacity: adding || !newMemory.trim() ? 0.5 : 1 }}>
+              style={{ ...btnPrimary, display: "flex", alignItems: "center", gap: 4, padding: "0 12px", fontSize: 11, opacity: adding || !newMemory.trim() ? 0.5 : 1 }}
+              onMouseDown={pressDown} onMouseUp={pressUp}>
               {adding ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <Plus style={{ width: 12, height: 12 }} />} Add
             </button>
           </div>
@@ -781,96 +786,120 @@ function VectorDBTab({ status, onReindex, reindexing }: { status: MemoryStatus |
   const formatBytes = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   const toggleChunk = (idx: number) => { setExpandedChunks(prev => { const next = new Set(prev); if (next.has(idx)) next.delete(idx); else next.add(idx); return next; }); };
 
-  const cardStyle: React.CSSProperties = { background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px" };
-  const labelStyle: React.CSSProperties = { fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase" as const, letterSpacing: "0.05em", fontWeight: 600, marginBottom: 6 };
-  const metricStyle: React.CSSProperties = { fontSize: 20, fontWeight: 700, color: "var(--text)", fontVariantNumeric: "tabular-nums" };
+  const vdbCard = glowCard("var(--accent)", { padding: "14px 16px" });
+  const metricStyle: React.CSSProperties = { fontSize: 20, fontWeight: 700, color: "var(--text)", fontFamily: MONO, fontVariantNumeric: "tabular-nums" };
 
   if (configLoading) return <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><Loader2 style={{ width: 24, height: 24, color: "var(--accent)", animation: "spin 1s linear infinite" }} /></div>;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-        <div style={cardStyle}><div style={labelStyle}>Table</div><div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}><HardDrive style={{ width: 14, height: 14, color: "var(--accent)" }} />memories</div><div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>{lanceInfo?.exists ? formatBytes(lanceInfo.sizeBytes) : "not found"}</div></div>
-        <div style={cardStyle}><div style={labelStyle}>Chunks</div><div style={metricStyle}>{status?.chunks ?? "—"}</div><div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>from {status?.files ?? 0} files</div></div>
-        <div style={cardStyle}><div style={labelStyle}>Vector Index</div><div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: status?.vectorReady ? "#4ade80" : "#f87171" }} /><span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{status?.vectorReady ? "Ready" : "Offline"}</span></div><div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>{status?.dirty ? "needs reindex" : "up to date"}</div></div>
-        <div style={cardStyle}><div style={labelStyle}>FTS Index</div><div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: status?.ftsReady ? "#4ade80" : "#f87171" }} /><span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{status?.ftsReady ? "Ready" : "Offline"}</span></div><div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>full-text search</div></div>
+        <div style={vdbCard} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+          <div style={sectionLabel}>Table</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
+            <HardDrive style={{ width: 14, height: 14, color: "var(--accent)" }} />memories
+          </div>
+          <div style={{ ...mutedCaption, marginTop: 4 }}>{lanceInfo?.exists ? formatBytes(lanceInfo.sizeBytes) : "not found"}</div>
+        </div>
+        <div style={vdbCard} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+          <div style={sectionLabel}>Chunks</div>
+          <div style={metricStyle}>{status?.chunks ?? "—"}</div>
+          <div style={{ ...mutedCaption, marginTop: 2 }}>from {status?.files ?? 0} files</div>
+        </div>
+        <div style={vdbCard} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+          <div style={sectionLabel}>Vector Index</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: status?.vectorReady ? "#4ade80" : "#f87171" }} />
+            <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{status?.vectorReady ? "Ready" : "Offline"}</span>
+          </div>
+          <div style={{ ...mutedCaption, marginTop: 4 }}>{status?.dirty ? "needs reindex" : "up to date"}</div>
+        </div>
+        <div style={vdbCard} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+          <div style={sectionLabel}>FTS Index</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: status?.ftsReady ? "#4ade80" : "#f87171" }} />
+            <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{status?.ftsReady ? "Ready" : "Offline"}</span>
+          </div>
+          <div style={{ ...mutedCaption, marginTop: 4 }}>full-text search</div>
+        </div>
       </div>
 
       {config && (
-        <div style={cardStyle}>
+        <div style={vdbCard} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Cpu style={{ width: 14, height: 14, color: "var(--accent)" }} /><span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>Embedding Configuration</span></div>
-            <span style={{ fontSize: 9, padding: "2px 8px", borderRadius: 6, background: config.enabled ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)", color: config.enabled ? "#4ade80" : "#f87171", fontWeight: 500 }}>{config.enabled ? "Active" : "Disabled"}</span>
+            <span style={badge(config.enabled ? "#4ade80" : "#f87171")}>{config.enabled ? "Active" : "Disabled"}</span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-            <div><div style={labelStyle}>Model</div><div style={{ fontSize: 12, color: "var(--text)", fontWeight: 500 }}>{config.embeddingModel}</div><div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>1536 dimensions</div></div>
-            <div><div style={labelStyle}>Plugin</div><div style={{ fontSize: 12, color: "var(--text)", fontWeight: 500 }}>{config.plugin}</div><div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>LanceDB backend</div></div>
-            <div><div style={labelStyle}>Sources</div><div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>{config.sources.map(s => <span key={s} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: "rgba(59,130,246,0.1)", color: "var(--accent)" }}>{s}</span>)}</div></div>
-            <div><div style={labelStyle}>Auto Capture</div><div style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: config.autoCapture ? "#4ade80" : "#f87171" }} /><span style={{ fontSize: 11, color: "var(--text)" }}>{config.autoCapture ? "On" : "Off"}</span></div></div>
-            <div><div style={labelStyle}>Auto Recall</div><div style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: config.autoRecall ? "#4ade80" : "#f87171" }} /><span style={{ fontSize: 11, color: "var(--text)" }}>{config.autoRecall ? "On" : "Off"}</span></div></div>
-            <div><div style={labelStyle}>Provider</div><div style={{ fontSize: 12, color: "var(--text)", fontWeight: 500 }}>{status?.provider ?? "openai"}</div></div>
+            <div><div style={sectionLabel}>Model</div><div style={{ fontSize: 12, color: "var(--text)", fontWeight: 500 }}>{config.embeddingModel}</div><div style={{ ...mutedCaption, marginTop: 2 }}>1536 dimensions</div></div>
+            <div><div style={sectionLabel}>Plugin</div><div style={{ fontSize: 12, color: "var(--text)", fontWeight: 500 }}>{config.plugin}</div><div style={{ ...mutedCaption, marginTop: 2 }}>LanceDB backend</div></div>
+            <div><div style={sectionLabel}>Sources</div><div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>{config.sources.map(s => <span key={s} style={badge("var(--accent)")}>{s}</span>)}</div></div>
+            <div><div style={sectionLabel}>Auto Capture</div><div style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: config.autoCapture ? "#4ade80" : "#f87171" }} /><span style={{ fontSize: 11, color: "var(--text)" }}>{config.autoCapture ? "On" : "Off"}</span></div></div>
+            <div><div style={sectionLabel}>Auto Recall</div><div style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: config.autoRecall ? "#4ade80" : "#f87171" }} /><span style={{ fontSize: 11, color: "var(--text)" }}>{config.autoRecall ? "On" : "Off"}</span></div></div>
+            <div><div style={sectionLabel}>Provider</div><div style={{ fontSize: 12, color: "var(--text)", fontWeight: 500 }}>{status?.provider ?? "openai"}</div></div>
           </div>
         </div>
       )}
 
       {config?.hybridEnabled && (
-        <div style={cardStyle}>
+        <div style={vdbCard} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}><Activity style={{ width: 14, height: 14, color: "var(--accent)" }} /><span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>Hybrid Search Pipeline</span></div>
           <div style={{ marginBottom: 16 }}>
-            <div style={labelStyle}>Search Weights</div>
+            <div style={sectionLabel}>Search Weights</div>
             <div style={{ display: "flex", height: 24, borderRadius: 6, overflow: "hidden", border: "1px solid var(--border)" }}>
               <div style={{ width: `${config.vectorWeight * 100}%`, background: "rgba(59,130,246,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 600, color: "var(--accent)" }}>Vector {(config.vectorWeight * 100).toFixed(0)}%</div>
               <div style={{ width: `${config.textWeight * 100}%`, background: "rgba(168,85,247,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 600, color: "#a855f7" }}>Text {(config.textWeight * 100).toFixed(0)}%</div>
             </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-            <div><div style={labelStyle}>MMR (Diversity)</div><div style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: config.mmrEnabled ? "#4ade80" : "#f87171" }} /><span style={{ fontSize: 11, color: "var(--text)" }}>{config.mmrEnabled ? `λ = ${config.mmrLambda}` : "Off"}</span></div></div>
-            <div><div style={labelStyle}>Temporal Decay</div><div style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: config.temporalDecayEnabled ? "#4ade80" : "#f87171" }} /><span style={{ fontSize: 11, color: "var(--text)" }}>{config.temporalDecayEnabled ? `${config.halfLifeDays}d half-life` : "Off"}</span></div></div>
-            <div><div style={labelStyle}>Search Mode</div><span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: "rgba(74,222,128,0.1)", color: "#4ade80" }}>{status?.searchMode ?? "hybrid"}</span></div>
+            <div><div style={sectionLabel}>MMR (Diversity)</div><div style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: config.mmrEnabled ? "#4ade80" : "#f87171" }} /><span style={{ fontSize: 11, color: "var(--text)" }}>{config.mmrEnabled ? `λ = ${config.mmrLambda}` : "Off"}</span></div></div>
+            <div><div style={sectionLabel}>Temporal Decay</div><div style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: config.temporalDecayEnabled ? "#4ade80" : "#f87171" }} /><span style={{ fontSize: 11, color: "var(--text)" }}>{config.temporalDecayEnabled ? `${config.halfLifeDays}d half-life` : "Off"}</span></div></div>
+            <div><div style={sectionLabel}>Search Mode</div><span style={badge("#4ade80")}>{status?.searchMode ?? "hybrid"}</span></div>
           </div>
         </div>
       )}
 
-      <div style={cardStyle}>
+      <div style={vdbCard} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}><Zap style={{ width: 14, height: 14, color: "var(--accent)" }} /><span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>Similarity Explorer</span></div>
         <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
           <div style={{ flex: 1, position: "relative" }}>
             <Search style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", width: 14, height: 14, color: "var(--text-muted)" }} />
             <input value={simQuery} onChange={e => setSimQuery(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSimilaritySearch()}
               placeholder="Enter text to find nearest neighbors in embedding space..."
-              style={{ width: "100%", padding: "8px 10px 8px 32px", borderRadius: 8, background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 12, outline: "none", boxSizing: "border-box" }} />
+              style={{ ...inputStyle, padding: "8px 10px 8px 32px", fontSize: 12, boxSizing: "border-box" }} />
           </div>
           <button onClick={handleSimilaritySearch} disabled={simLoading || !simQuery.trim()}
-            style={{ padding: "0 14px", borderRadius: 8, background: "var(--accent)", border: "none", color: "white", fontSize: 11, cursor: "pointer", opacity: simLoading || !simQuery.trim() ? 0.5 : 1, display: "flex", alignItems: "center", gap: 4 }}>
+            style={{ ...btnPrimary, padding: "0 14px", fontSize: 11, opacity: simLoading || !simQuery.trim() ? 0.5 : 1, display: "flex", alignItems: "center", gap: 4 }}
+            onMouseDown={pressDown} onMouseUp={pressUp}>
             {simLoading ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <ArrowRight style={{ width: 12, height: 12 }} />} Search
           </button>
         </div>
-        {simLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 16, justifyContent: "center" }}><Loader2 style={{ width: 16, height: 16, color: "var(--accent)", animation: "spin 1s linear infinite" }} /><span style={{ fontSize: 11, color: "var(--text-muted)" }}>Computing embeddings & searching vector space...</span></div>}
+        {simLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 16, justifyContent: "center" }}><Loader2 style={{ width: 16, height: 16, color: "var(--accent)", animation: "spin 1s linear infinite" }} /><span style={mutedCaption}>Computing embeddings & searching vector space...</span></div>}
         {simResults && !simLoading && (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{simResults.length} nearest neighbor{simResults.length !== 1 ? "s" : ""} found</span>
+              <span style={mutedCaption}>{simResults.length} nearest neighbor{simResults.length !== 1 ? "s" : ""} found</span>
             </div>
             {simResults.length === 0 ? (
-              <div style={{ textAlign: "center", padding: 20, color: "var(--text-muted)", fontSize: 12 }}>No similar embeddings found.</div>
+              <div style={emptyState}>No similar embeddings found.</div>
             ) : simResults.map((r, i) => {
               const isExpanded = expandedChunks.has(i);
               const isLong = r.snippet.length > 200;
               const barWidth = Math.max(5, r.score * 100);
               const scoreColor = r.score > 0.3 ? "#4ade80" : r.score > 0.15 ? "#fbbf24" : "#f87171";
               return (
-                <div key={i} style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
+                <div key={i} style={{ ...innerPanel, padding: "10px 12px" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: scoreColor, fontVariantNumeric: "tabular-nums", minWidth: 40 }}>{r.score.toFixed(3)}</span>
-                      <div style={{ height: 4, borderRadius: 2, background: "var(--border)", width: 80 }}><div style={{ height: "100%", borderRadius: 2, background: scoreColor, width: `${barWidth}%` }} /></div>
-                      <span style={{ fontSize: 9, color: "var(--text-muted)" }}>#{i + 1}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: scoreColor, fontFamily: MONO, fontVariantNumeric: "tabular-nums", minWidth: 40 }}>{r.score.toFixed(3)}</span>
+                      <div style={{ height: 4, borderRadius: 2, background: "var(--border)", width: 80 }}><div style={{ height: "100%", borderRadius: 2, background: scoreColor, width: `${barWidth}%`, transition: `width 0.3s ${SPRING}` }} /></div>
+                      <span style={mutedCaption}>#{i + 1}</span>
                     </div>
-                    <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: "rgba(59,130,246,0.1)", color: "var(--accent)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.path}</span>
+                    <span style={{ ...badge("var(--accent)"), maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.path}</span>
                   </div>
-                  <p style={{ margin: 0, fontSize: 11, color: "var(--text)", whiteSpace: "pre-wrap", lineHeight: 1.5, fontFamily: "monospace",
+                  <p style={{ margin: 0, fontSize: 11, color: "var(--text)", whiteSpace: "pre-wrap", lineHeight: 1.5, fontFamily: MONO,
                     maxHeight: isLong && !isExpanded ? 60 : undefined, overflow: isLong && !isExpanded ? "hidden" : undefined }}>{r.snippet}</p>
-                  {isLong && <button onClick={() => toggleChunk(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: 10, padding: "4px 0 0", display: "flex", alignItems: "center", gap: 4 }}>
+                  {isLong && <button onClick={() => toggleChunk(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: 10, padding: "4px 0 0", display: "flex", alignItems: "center", gap: 4, transition: `all 0.2s ${EASE}` }}>
                     {isExpanded ? <><ChevronUp style={{ width: 10, height: 10 }} /> Show less</> : <><ChevronDown style={{ width: 10, height: 10 }} /> Show more</>}
                   </button>}
                 </div>
@@ -879,8 +908,8 @@ function VectorDBTab({ status, onReindex, reindexing }: { status: MemoryStatus |
           </div>
         )}
         {!simResults && !simLoading && (
-          <div style={{ padding: "20px 16px", textAlign: "center", color: "var(--text-muted)", fontSize: 11 }}>
-            <BarChart3 style={{ width: 24, height: 24, margin: "0 auto 8px", opacity: 0.4 }} />
+          <div style={emptyState}>
+            <BarChart3 style={{ width: 24, height: 24, opacity: 0.4 }} />
             <p style={{ margin: 0 }}>Enter a query to explore the embedding space. Results ranked by cosine similarity with hybrid reranking.</p>
           </div>
         )}
@@ -888,18 +917,268 @@ function VectorDBTab({ status, onReindex, reindexing }: { status: MemoryStatus |
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button onClick={onReindex} disabled={reindexing}
-          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 11, cursor: "pointer", opacity: reindexing ? 0.5 : 1 }}>
+          style={{ ...btnSecondary, display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", fontSize: 11, opacity: reindexing ? 0.5 : 1 }}
+          onMouseDown={pressDown} onMouseUp={pressUp}>
           {reindexing ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <Database style={{ width: 12, height: 12 }} />} Rebuild Index
         </button>
         <button onClick={() => { loadConfig(); loadLanceInfo(); }}
-          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 11, cursor: "pointer" }}>
+          style={{ ...btnSecondary, display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", fontSize: 11 }}
+          onMouseDown={pressDown} onMouseUp={pressUp}>
           <RefreshCw style={{ width: 12, height: 12 }} /> Refresh Config
         </button>
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 9, color: "var(--text-muted)", alignSelf: "center" }}>
+        <span style={{ ...mutedCaption, alignSelf: "center" }}>
           <Layers style={{ width: 10, height: 10, display: "inline", verticalAlign: "middle", marginRight: 4 }} />
           {lanceInfo?.tablePath || "~/.openclaw/memory/lancedb/memories.lance"}
         </span>
+      </div>
+
+      <MemoryCleanup onReindex={onReindex} reindexing={reindexing} onRefreshLance={loadLanceInfo} />
+    </div>
+  );
+}
+
+function MemoryCleanup({ onReindex, reindexing, onRefreshLance }: { onReindex: () => void; reindexing: boolean; onRefreshLance: () => void }) {
+  const [dailyFiles, setDailyFiles] = useState<{ name: string; path: string; size: number }[]>([]);
+  const [dailyLoading, setDailyLoading] = useState(false);
+  const [deletingDaily, setDeletingDaily] = useState(false);
+  const [selectedDays, setSelectedDays] = useState<Set<string>>(new Set());
+  const [dailyDelProgress, setDailyDelProgress] = useState<{ done: number; total: number } | null>(null);
+  const [clearingIndex, setClearingIndex] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+
+  useEffect(() => {
+    if (feedback) { const t = setTimeout(() => setFeedback(null), 5000); return () => clearTimeout(t); }
+  }, [feedback]);
+
+  const loadDailyFiles = useCallback(async () => {
+    setDailyLoading(true);
+    try {
+      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `powershell -Command "$d = Join-Path $env:USERPROFILE '.openclaw\\workspace\\memory'; if(Test-Path $d){ Get-ChildItem $d -Filter '*.md' | Where-Object { $_.Name -match '^\\d{4}-\\d{2}-\\d{2}\\.md$' } | Sort-Object Name -Descending | ForEach-Object { Write-Output ('{0}|{1}|{2}' -f $_.Name, $_.FullName, $_.Length) } } else { Write-Output 'EMPTY' }"`,
+        cwd: null,
+      });
+      if (result.code === 0 && result.stdout.trim() !== "EMPTY") {
+        const files = result.stdout.trim().split("\n").filter(Boolean).map(line => {
+          const [name, path, size] = line.trim().split("|");
+          return { name: name || "", path: path || "", size: Number(size) || 0 };
+        }).filter(f => f.name);
+        setDailyFiles(files);
+      } else {
+        setDailyFiles([]);
+      }
+    } catch { setDailyFiles([]); }
+    setDailyLoading(false);
+  }, []);
+
+  useEffect(() => { loadDailyFiles(); }, [loadDailyFiles]);
+
+  const toggleDay = (name: string) => {
+    setSelectedDays(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+  };
+
+  const selectOlderThan = (days: number) => {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    const matching = dailyFiles.filter(f => f.name.replace(".md", "") < cutoffStr).map(f => f.name);
+    setSelectedDays(new Set(matching));
+    if (matching.length === 0) setFeedback({ type: "success", msg: `No daily logs older than ${days} days` });
+  };
+
+  const deleteSelectedDays = async () => {
+    const toDelete = dailyFiles.filter(f => selectedDays.has(f.name));
+    if (toDelete.length === 0) return;
+    setDeletingDaily(true);
+    setDailyDelProgress({ done: 0, total: toDelete.length });
+    let deleted = 0;
+    for (const file of toDelete) {
+      try {
+        await invoke("execute_command", {
+          command: `powershell -Command "Remove-Item -LiteralPath '${file.path}' -Force"`, cwd: null,
+        });
+        deleted++;
+        setDailyDelProgress({ done: deleted, total: toDelete.length });
+      } catch { /* continue */ }
+    }
+    setFeedback({ type: "success", msg: `Deleted ${deleted} daily log${deleted !== 1 ? "s" : ""}` });
+    setSelectedDays(new Set());
+    setDeletingDaily(false);
+    setDailyDelProgress(null);
+    await loadDailyFiles();
+  };
+
+  const clearVectorIndex = async () => {
+    setClearingIndex(true);
+    try {
+      await invoke("execute_command", {
+        command: `powershell -Command "$p = Join-Path $env:USERPROFILE '.openclaw\\memory\\lancedb\\memories.lance'; if(Test-Path $p){ Remove-Item $p -Recurse -Force; Write-Output 'CLEARED' } else { Write-Output 'NOT_FOUND' }"`,
+        cwd: null,
+      });
+      setFeedback({ type: "success", msg: "Vector index cleared. Rebuild to re-embed your memory files." });
+      setShowClearConfirm(false);
+      onRefreshLance();
+    } catch {
+      setFeedback({ type: "error", msg: "Failed to clear vector index" });
+    }
+    setClearingIndex(false);
+  };
+
+  const totalDailySize = dailyFiles.reduce((a, f) => a + f.size, 0);
+  const selectedSize = dailyFiles.filter(f => selectedDays.has(f.name)).reduce((a, f) => a + f.size, 0);
+  const formatBytes = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <Trash2 style={{ width: 13, height: 13, color: "#f87171" }} />
+        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>Memory Cleanup</span>
+      </div>
+
+      {feedback && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 10,
+          background: feedback.type === "success" ? "rgba(74,222,128,0.06)" : "rgba(248,113,113,0.06)",
+          border: `1px solid ${feedback.type === "success" ? "rgba(74,222,128,0.15)" : "rgba(248,113,113,0.15)"}`,
+        }}>
+          <span style={{ width: 5, height: 5, borderRadius: "50%", background: feedback.type === "success" ? "#4ade80" : "#f87171", flexShrink: 0 }} />
+          <span style={{ fontSize: 10, color: feedback.type === "success" ? "#4ade80" : "#f87171", flex: 1 }}>{feedback.msg}</span>
+        </div>
+      )}
+
+      {/* Daily log cleanup */}
+      <div style={glowCard("#fbbf24", { padding: "14px 16px" })} data-glow="#fbbf24" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Calendar style={{ width: 14, height: 14, color: "#fbbf24" }} />
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>Daily Memory Logs</span>
+            <span style={badge("#fbbf24")}>{dailyFiles.length} files</span>
+            <span style={mutedCaption}>{formatBytes(totalDailySize)}</span>
+          </div>
+          <button onClick={loadDailyFiles} disabled={dailyLoading}
+            style={{ ...btnSecondary, padding: "4px 8px", fontSize: 10, display: "flex", alignItems: "center", gap: 4 }}>
+            <RefreshCw style={{ width: 9, height: 9 }} className={dailyLoading ? "animate-spin" : ""} /> Refresh
+          </button>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+          <span style={{ fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.06em", alignSelf: "center" }}>SELECT:</span>
+          {[7, 14, 30, 90].map(d => (
+            <button key={d} onClick={() => selectOlderThan(d)}
+              style={{ ...btnSecondary, padding: "3px 8px", fontSize: 9 }}>
+              {">"}{d}d old
+            </button>
+          ))}
+          <button onClick={() => setSelectedDays(new Set(dailyFiles.map(f => f.name)))}
+            style={{ ...btnSecondary, padding: "3px 8px", fontSize: 9 }}>All</button>
+          <button onClick={() => setSelectedDays(new Set())}
+            style={{ ...btnSecondary, padding: "3px 8px", fontSize: 9 }}>None</button>
+        </div>
+
+        {dailyDelProgress && (
+          <div style={{ ...innerPanel, padding: "6px 10px", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+            <Loader2 style={{ width: 11, height: 11, color: "var(--accent)" }} className="animate-spin" />
+            <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>Deleting {dailyDelProgress.done}/{dailyDelProgress.total}…</span>
+            <div style={{ flex: 1, height: 3, borderRadius: 2, background: "rgba(255,255,255,0.04)" }}>
+              <div style={{ width: `${(dailyDelProgress.done / dailyDelProgress.total) * 100}%`, height: "100%", background: "var(--accent)", borderRadius: 2, transition: `width 0.2s ${EASE}` }} />
+            </div>
+          </div>
+        )}
+
+        {selectedDays.size > 0 && !deletingDaily && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, marginBottom: 8,
+            background: "rgba(248,113,113,0.05)", border: "1px solid rgba(248,113,113,0.1)",
+          }}>
+            <span style={{ fontSize: 10, color: "var(--text-secondary)", flex: 1 }}>
+              {selectedDays.size} file{selectedDays.size !== 1 ? "s" : ""} selected ({formatBytes(selectedSize)})
+            </span>
+            <button onClick={deleteSelectedDays} onMouseDown={pressDown} onMouseUp={pressUp}
+              style={{ ...btnPrimary, background: "#dc2626", padding: "4px 12px", fontSize: 10 }}>
+              <Trash2 style={{ width: 10, height: 10, marginRight: 4, verticalAlign: -1 }} /> Delete Selected
+            </button>
+          </div>
+        )}
+
+        {dailyLoading ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: 20 }}>
+            <Loader2 style={{ width: 16, height: 16, color: "var(--accent)", animation: "spin 1s linear infinite" }} />
+          </div>
+        ) : dailyFiles.length === 0 ? (
+          <div style={{ ...emptyState, padding: "16px 12px" }}>No daily log files found.</div>
+        ) : (
+          <div style={{ maxHeight: 200, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+            {dailyFiles.map(f => {
+              const dateStr = f.name.replace(".md", "");
+              const age = Math.floor((Date.now() - new Date(dateStr).getTime()) / (24 * 60 * 60 * 1000));
+              const isSel = selectedDays.has(f.name);
+              return (
+                <label key={f.name} style={{
+                  display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", borderRadius: 6, cursor: "pointer",
+                  background: isSel ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.01)",
+                  border: `1px solid ${isSel ? "rgba(59,130,246,0.15)" : "transparent"}`,
+                  transition: `all 0.15s ${EASE}`,
+                }}>
+                  <input type="checkbox" checked={isSel} onChange={() => toggleDay(f.name)}
+                    style={{ width: 13, height: 13, accentColor: "var(--accent)", cursor: "pointer" }} />
+                  <span style={{ fontSize: 11, color: "var(--text)", fontFamily: MONO, flex: 1 }}>{dateStr}</span>
+                  <span style={mutedCaption}>{formatBytes(f.size)}</span>
+                  <span style={{
+                    ...badge(age > 30 ? "#f87171" : age > 7 ? "#fbbf24" : "#4ade80"),
+                    fontSize: 8,
+                  }}>
+                    {age === 0 ? "today" : age === 1 ? "1d ago" : `${age}d ago`}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Vector index cleanup */}
+      <div style={glowCard("#f87171", { padding: "14px 16px" })} data-glow="#f87171" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <Database style={{ width: 14, height: 14, color: "#f87171" }} />
+          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>Vector Index Management</span>
+        </div>
+        <p style={{ fontSize: 10, color: "var(--text-muted)", margin: "0 0 10px", lineHeight: 1.5 }}>
+          Clear the LanceDB vector index to free disk space. After clearing, rebuild the index to re-embed your memory files.
+          This is safe — your source markdown files are untouched.
+        </p>
+        <div style={{ display: "flex", gap: 8 }}>
+          {!showClearConfirm ? (
+            <button onClick={() => setShowClearConfirm(true)}
+              style={{ ...btnSecondary, color: "#f87171", borderColor: "rgba(248,113,113,0.15)", fontSize: 11, display: "flex", alignItems: "center", gap: 6, padding: "7px 14px" }}
+              onMouseDown={pressDown} onMouseUp={pressUp}>
+              <Trash2 style={{ width: 12, height: 12 }} /> Clear Vector Index
+            </button>
+          ) : (
+            <>
+              <button onClick={clearVectorIndex} disabled={clearingIndex}
+                style={{ ...btnPrimary, background: "#dc2626", fontSize: 11, display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", opacity: clearingIndex ? 0.5 : 1 }}
+                onMouseDown={pressDown} onMouseUp={pressUp}>
+                {clearingIndex ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <Trash2 style={{ width: 12, height: 12 }} />}
+                Confirm Clear
+              </button>
+              <button onClick={() => setShowClearConfirm(false)}
+                style={{ ...btnSecondary, fontSize: 11, padding: "7px 14px" }}>
+                Cancel
+              </button>
+            </>
+          )}
+          <button onClick={onReindex} disabled={reindexing}
+            style={{ ...btnSecondary, fontSize: 11, display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", opacity: reindexing ? 0.5 : 1 }}
+            onMouseDown={pressDown} onMouseUp={pressUp}>
+            {reindexing ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : <Database style={{ width: 12, height: 12 }} />}
+            Rebuild Index
+          </button>
+        </div>
       </div>
     </div>
   );

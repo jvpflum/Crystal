@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Search, Loader2, CheckCircle, AlertTriangle, ExternalLink,
   RefreshCw, Package, ShieldAlert, Plug, Zap, Stethoscope,
@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { cachedCommand } from "@/lib/cache";
+import { EASE, glowCard, hoverLift, hoverReset, pressDown, pressUp, innerPanel, sectionLabel, monoValue, mutedCaption, iconTile, inputStyle, btnPrimary, btnSecondary, scrollArea, badge, emptyState, MONO } from "@/styles/viewStyles";
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -100,13 +101,15 @@ export function MarketplaceView() {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
+            onMouseDown={pressDown}
+            onMouseUp={pressUp}
             style={{
               padding: "8px 16px", border: "none", cursor: "pointer",
               fontSize: 11, fontWeight: 500, borderRadius: "6px 6px 0 0",
               background: activeTab === tab.id ? "var(--bg-elevated)" : "transparent",
               color: activeTab === tab.id ? "var(--text)" : "var(--text-muted)",
               borderBottom: activeTab === tab.id ? "2px solid var(--accent)" : "2px solid transparent",
-              transition: "all 0.15s ease",
+              transition: `all 0.15s ${EASE}`,
               display: "flex", alignItems: "center", gap: 5,
             }}
           >
@@ -138,7 +141,7 @@ function ToggleSwitch({ on, loading, onToggle }: {
       style={{
         width: 40, height: 22, borderRadius: 11, border: "none", cursor: loading ? "wait" : "pointer",
         background: on ? "var(--accent)" : "var(--bg-hover)",
-        transition: "background 0.2s",
+        transition: `background 0.2s ${EASE}`,
         position: "relative", flexShrink: 0,
         opacity: loading ? 0.5 : 1,
       }}
@@ -147,7 +150,7 @@ function ToggleSwitch({ on, loading, onToggle }: {
         width: 16, height: 16, borderRadius: "50%", background: "var(--text)",
         position: "absolute", top: 3,
         left: on ? 21 : 3,
-        transition: "left 0.2s",
+        transition: `left 0.2s ${EASE}`,
       }}>
         {loading && (
           <Loader2 style={{
@@ -167,16 +170,10 @@ function SectionHeader({ title, count, color }: { title: string; count: number; 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, marginTop: 16 }}>
       <span style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0 }} />
-      <span style={{
-        fontSize: 10, textTransform: "uppercase" as const, color: "var(--text-muted)",
-        letterSpacing: 1, fontWeight: 600,
-      }}>
+      <span style={{ ...sectionLabel, marginBottom: 0 }}>
         {title}
       </span>
-      <span style={{
-        fontSize: 9, padding: "1px 6px", borderRadius: 8,
-        background: `${color}20`, color,
-      }}>
+      <span style={badge(color)}>
         {count}
       </span>
     </div>
@@ -200,10 +197,9 @@ function SearchBar({ value, onChange, placeholder }: {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         style={{
-          width: "100%", padding: "7px 12px 7px 32px", borderRadius: 8,
-          background: "var(--bg-elevated)", border: "1px solid var(--border)",
-          color: "var(--text)", fontSize: 12, outline: "none",
-          boxSizing: "border-box",
+          ...inputStyle,
+          paddingLeft: 32,
+          boxSizing: "border-box" as const,
         }}
       />
     </div>
@@ -217,8 +213,8 @@ function StatusBadge({ label, color, icon }: {
 }) {
   return (
     <span style={{
-      fontSize: 9, padding: "1px 6px", borderRadius: 4,
-      background: `${color}20`, color,
+      ...badge(color),
+      fontSize: 9, padding: "1px 6px",
       display: "inline-flex", alignItems: "center", gap: 3,
       whiteSpace: "nowrap",
     }}>
@@ -255,8 +251,8 @@ function MissingBadges({ missing }: { missing: SkillMissing }) {
             key={`${item.label}-${v}`}
             title={DEP_TITLES[item.label] ?? ""}
             style={{
-              fontSize: 9, padding: "2px 6px", borderRadius: 4,
-              background: `${item.color}15`, color: item.color,
+              ...badge(item.color),
+              fontSize: 9, padding: "2px 6px",
               display: "inline-flex", alignItems: "center", gap: 3,
             }}
           >
@@ -392,10 +388,12 @@ function SkillsTab() {
             <button
               onClick={refreshCheck}
               disabled={loading}
+              onMouseDown={pressDown}
+              onMouseUp={pressUp}
               style={{
-                display: "flex", alignItems: "center", gap: 4, padding: "4px 10px",
-                borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
-                background: "var(--border)", color: "var(--text-muted)",
+                ...btnSecondary,
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "4px 10px", fontSize: 10,
               }}
             >
               <RefreshCw style={{ width: 10, height: 10 }} />
@@ -404,10 +402,12 @@ function SkillsTab() {
             <button
               onClick={loadSkills}
               disabled={loading}
+              onMouseDown={pressDown}
+              onMouseUp={pressUp}
               style={{
-                display: "flex", alignItems: "center", gap: 4, padding: "4px 10px",
-                borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
-                background: "var(--accent-bg)", color: "var(--accent-hover)",
+                ...btnPrimary,
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "4px 10px", fontSize: 10,
               }}
             >
               <RefreshCw style={{ width: 10, height: 10 }} />
@@ -425,11 +425,14 @@ function SkillsTab() {
             <button
               key={f.id}
               onClick={() => setFilter(f.id)}
+              onMouseDown={pressDown}
+              onMouseUp={pressUp}
               style={{
                 padding: "3px 10px", borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
                 background: filter === f.id ? "rgba(59,130,246,0.18)" : "var(--border)",
                 color: filter === f.id ? "var(--accent)" : "var(--text-muted)",
                 fontWeight: filter === f.id ? 600 : 400,
+                transition: `all 0.2s ${EASE}`,
               }}
             >
               {f.label}
@@ -438,7 +441,7 @@ function SkillsTab() {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "0 20px 16px" }}>
+      <div style={{ ...scrollArea, padding: "0 20px 16px" }}>
         {loading ? (
           <LoadingSpinner />
         ) : error ? (
@@ -493,16 +496,16 @@ function SkillCard({ skill, toggling, onToggle, expanded, onExpand }: {
   expanded: boolean; onExpand: () => void;
 }) {
   return (
-    <div style={{
-      background: "var(--bg-elevated)",
-      border: "1px solid var(--border)",
-      borderRadius: 10, overflow: "hidden",
-    }}>
+    <div
+      style={{ ...glowCard("var(--accent)"), overflow: "hidden" }}
+      data-glow="var(--accent)"
+      onMouseEnter={hoverLift}
+      onMouseLeave={hoverReset}
+    >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px" }}>
         <div style={{
-          width: 36, height: 36, borderRadius: 8, background: "var(--border)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 18, flexShrink: 0,
+          ...iconTile("var(--accent)", 36),
+          fontSize: 18,
         }}>
           {skill.emoji}
         </div>
@@ -522,10 +525,7 @@ function SkillCard({ skill, toggling, onToggle, expanded, onExpand }: {
             {API_KEY_SKILLS.has(skill.name) && (
               <StatusBadge label="API key required" color="#fb923c" icon={<span style={{ fontSize: 7 }}>🔑</span>} />
             )}
-            <span style={{
-              fontSize: 9, padding: "1px 6px", borderRadius: 4,
-              background: "var(--border)", color: "var(--text-muted)",
-            }}>
+            <span style={{ ...badge("var(--text-muted)"), fontSize: 9, padding: "1px 6px" }}>
               {skill.source}
             </span>
           </div>
@@ -553,7 +553,9 @@ function SkillCard({ skill, toggling, onToggle, expanded, onExpand }: {
 
       {expanded && (
         <div style={{
-          padding: "8px 12px 10px", borderTop: "1px solid var(--border)",
+          ...innerPanel, borderRadius: 0, border: "none",
+          borderTop: "1px solid rgba(255,255,255,0.04)",
+          padding: "8px 12px 10px",
         }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <DetailRow label="Source" value={skill.source} />
@@ -680,9 +682,12 @@ function PluginsTab() {
             <button
               onClick={runDoctor}
               disabled={doctorRunning}
+              onMouseDown={pressDown}
+              onMouseUp={pressUp}
               style={{
-                display: "flex", alignItems: "center", gap: 4, padding: "4px 10px",
-                borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
+                ...btnSecondary,
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "4px 10px", fontSize: 10,
                 background: "rgba(251,191,36,0.12)", color: "var(--warning)",
                 opacity: doctorRunning ? 0.6 : 1,
               }}
@@ -693,10 +698,12 @@ function PluginsTab() {
             <button
               onClick={loadPlugins}
               disabled={loading}
+              onMouseDown={pressDown}
+              onMouseUp={pressUp}
               style={{
-                display: "flex", alignItems: "center", gap: 4, padding: "4px 10px",
-                borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
-                background: "var(--accent-bg)", color: "var(--accent-hover)",
+                ...btnPrimary,
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "4px 10px", fontSize: 10,
               }}
             >
               <RefreshCw style={{ width: 10, height: 10 }} />
@@ -707,14 +714,15 @@ function PluginsTab() {
         <SearchBar value={search} onChange={setSearch} placeholder="Search plugins..." />
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "0 20px 16px" }}>
+      <div style={{ ...scrollArea, padding: "0 20px 16px" }}>
         {doctorOutput && (
           <div style={{
+            ...innerPanel,
             background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.15)",
-            borderRadius: 8, padding: "10px 12px", marginBottom: 12, marginTop: 4,
+            padding: "10px 12px", marginBottom: 12, marginTop: 4,
           }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--warning)", textTransform: "uppercase", letterSpacing: 1 }}>
+              <span style={{ ...sectionLabel, color: "var(--warning)", marginBottom: 0 }}>
                 Doctor Results
               </span>
               <button
@@ -726,7 +734,7 @@ function PluginsTab() {
             </div>
             <pre style={{
               fontSize: 10, color: "var(--text-secondary)", margin: 0,
-              whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "monospace",
+              whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: MONO,
               maxHeight: 200, overflowY: "auto",
             }}>
               {doctorOutput}
@@ -746,26 +754,21 @@ function PluginsTab() {
               <div
                 key={plugin.id}
                 style={{
-                  background: "var(--bg-elevated)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 10, padding: "10px 12px",
+                  ...glowCard("var(--accent)"), padding: "10px 12px",
                   display: "flex", alignItems: "flex-start", gap: 10,
                 }}
+                data-glow="var(--accent)"
+                onMouseEnter={hoverLift}
+                onMouseLeave={hoverReset}
               >
-                <div style={{
-                  width: 36, height: 36, borderRadius: 8, background: "var(--border)",
-                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                }}>
+                <div style={iconTile(plugin.enabled ? "var(--accent-hover)" : "var(--text-muted)", 36)}>
                   <Plug style={{ width: 16, height: 16, color: plugin.enabled ? "var(--accent-hover)" : "var(--text-muted)" }} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                     <span style={{ fontSize: 13, color: "var(--text)", fontWeight: 500 }}>{plugin.name}</span>
                     <StatusBadge label={plugin.status} color={statusColor(plugin.status)} />
-                    <span style={{
-                      fontSize: 9, padding: "1px 6px", borderRadius: 4,
-                      background: "var(--border)", color: "var(--text-muted)",
-                    }}>
+                    <span style={{ ...badge("var(--text-muted)"), fontSize: 9, padding: "1px 6px" }}>
                       {plugin.origin}
                     </span>
                   </div>
@@ -927,11 +930,14 @@ function PowerUpTab() {
             <button
               onClick={runPowerUp}
               disabled={loading}
+              onMouseDown={pressDown}
+              onMouseUp={pressUp}
               style={{
+                ...btnPrimary,
                 display: "flex", alignItems: "center", gap: 6, padding: "6px 16px",
-                borderRadius: 8, border: "none", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                fontSize: 11,
                 background: "linear-gradient(135deg, var(--accent), #8B5CF6)",
-                color: "var(--text)", transition: "opacity 0.2s",
+                color: "var(--text)", transition: `opacity 0.2s ${EASE}`,
                 opacity: loading ? 0.5 : 1,
               }}
             >
@@ -950,7 +956,7 @@ function PowerUpTab() {
         </div>
       </div>
 
-      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "0 20px 16px" }}>
+      <div ref={scrollRef} style={{ ...scrollArea, padding: "0 20px 16px" }}>
         {loading ? (
           <LoadingSpinner />
         ) : steps.length === 0 ? (
@@ -961,11 +967,12 @@ function PowerUpTab() {
                 <div
                   key={step.id}
                   style={{
-                    background: "var(--bg-elevated)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 10, padding: "10px 12px",
+                    ...glowCard("var(--accent)"), padding: "10px 12px",
                     display: "flex", alignItems: "center", gap: 10,
                   }}
+                  data-glow="var(--accent)"
+                  onMouseEnter={hoverLift}
+                  onMouseLeave={hoverReset}
                 >
                   <div style={{
                     width: 20, height: 20, borderRadius: 4,
@@ -976,7 +983,7 @@ function PowerUpTab() {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{step.label}</span>
-                    <p style={{ margin: "2px 0 0", fontSize: 9, color: "var(--text-muted)", fontFamily: "monospace" }}>
+                    <p style={{ margin: "2px 0 0", fontSize: 9, color: "var(--text-muted)", fontFamily: MONO }}>
                       {step.command}
                     </p>
                   </div>
@@ -1065,9 +1072,10 @@ function PowerUpStepCard({ step }: { step: PowerUpStep }) {
 
   return (
     <div style={{
+      ...glowCard("var(--accent)"),
       background: bgColor(),
       border: `1px solid ${borderColor()}`,
-      borderRadius: 10, overflow: "hidden",
+      overflow: "hidden",
     }}>
       <div
         style={{
@@ -1104,10 +1112,14 @@ function PowerUpStepCard({ step }: { step: PowerUpStep }) {
         )}
       </div>
       {showOutput && step.output && (
-        <div style={{ borderTop: "1px solid var(--border)", padding: "8px 12px" }}>
+        <div style={{
+          ...innerPanel, borderRadius: 0, border: "none",
+          borderTop: "1px solid rgba(255,255,255,0.04)",
+          padding: "8px 12px",
+        }}>
           <pre style={{
             fontSize: 10, color: "var(--text-secondary)", margin: 0,
-            whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "monospace",
+            whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: MONO,
             maxHeight: 150, overflowY: "auto",
           }}>
             {step.output}
@@ -1271,23 +1283,16 @@ function ClawHubTab() {
     setSyncing(false);
   };
 
-  const inputStyle: React.CSSProperties = {
-    width: "100%", padding: "7px 12px", borderRadius: 8,
-    background: "var(--bg-elevated)", border: "1px solid var(--border)",
-    color: "var(--text)", fontSize: 12, outline: "none",
-    boxSizing: "border-box",
+  const chBtnPrimary: React.CSSProperties = {
+    ...btnPrimary,
+    display: "flex", alignItems: "center", gap: 4,
+    padding: "5px 12px", fontSize: 10,
   };
 
-  const btnPrimary: React.CSSProperties = {
-    display: "flex", alignItems: "center", gap: 4, padding: "5px 12px",
-    borderRadius: 6, border: "none", fontSize: 10, fontWeight: 500, cursor: "pointer",
-    background: "var(--accent-bg)", color: "var(--accent-hover)",
-  };
-
-  const btnGhost: React.CSSProperties = {
-    display: "flex", alignItems: "center", gap: 4, padding: "5px 12px",
-    borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
-    background: "var(--border)", color: "var(--text-muted)",
+  const chBtnGhost: React.CSSProperties = {
+    ...btnSecondary,
+    display: "flex", alignItems: "center", gap: 4,
+    padding: "5px 12px", fontSize: 10,
   };
 
   return (
@@ -1310,12 +1315,15 @@ function ClawHubTab() {
             <button
               key={t.id}
               onClick={() => setSubTab(t.id)}
+              onMouseDown={pressDown}
+              onMouseUp={pressUp}
               style={{
                 padding: "4px 12px", borderRadius: 6, border: "none", fontSize: 10, cursor: "pointer",
                 background: subTab === t.id ? "rgba(59,130,246,0.18)" : "var(--border)",
                 color: subTab === t.id ? "var(--accent)" : "var(--text-muted)",
                 fontWeight: subTab === t.id ? 600 : 400,
                 display: "flex", alignItems: "center", gap: 4,
+                transition: `all 0.2s ${EASE}`,
               }}
             >
               {t.icon} {t.label}
@@ -1324,20 +1332,20 @@ function ClawHubTab() {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "0 20px 16px" }}>
+      <div style={{ ...scrollArea, padding: "0 20px 16px" }}>
         {/* Action output */}
         {actionOutput && (
           <div style={{
-            background: "var(--bg-elevated)", border: "1px solid var(--border)",
-            borderRadius: 8, padding: "8px 12px", marginBottom: 10, marginTop: 4,
+            ...innerPanel,
+            padding: "8px 12px", marginBottom: 10, marginTop: 4,
           }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-              <span style={{ fontSize: 9, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1 }}>Output</span>
+              <span style={{ ...sectionLabel, marginBottom: 0 }}>Output</span>
               <button onClick={() => setActionOutput(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}>
                 <X style={{ width: 12, height: 12 }} />
               </button>
             </div>
-            <pre style={{ fontSize: 10, color: "var(--text-secondary)", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "monospace", maxHeight: 150, overflowY: "auto" }}>
+            <pre style={{ fontSize: 10, color: "var(--text-secondary)", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: MONO, maxHeight: 150, overflowY: "auto" }}>
               {actionOutput}
             </pre>
           </div>
@@ -1353,10 +1361,10 @@ function ClawHubTab() {
                   type="text" placeholder="Search ClawHub skills..."
                   value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                   onKeyDown={e => { if (e.key === "Enter") doSearch(); }}
-                  style={{ ...inputStyle, paddingLeft: 32 }}
+                  style={{ ...inputStyle, paddingLeft: 32, boxSizing: "border-box" as const }}
                 />
               </div>
-              <button onClick={doSearch} disabled={searching} style={btnPrimary}>
+              <button onClick={doSearch} disabled={searching} onMouseDown={pressDown} onMouseUp={pressUp} style={chBtnPrimary}>
                 {searching ? <Loader2 style={{ width: 10, height: 10, animation: "mpSpin 1s linear infinite" }} /> : <Search style={{ width: 10, height: 10 }} />}
                 Search
               </button>
@@ -1368,24 +1376,27 @@ function ClawHubTab() {
                 <SectionHeader title="Search Results" count={searchResults.length} color="var(--accent)" />
                 {searchResults.map((skill, i) => (
                   <div key={`${skill.slug}-${i}`} style={{
-                    background: "var(--bg-elevated)", border: "1px solid var(--border)",
-                    borderRadius: 10, padding: "10px 12px",
+                    ...glowCard("var(--accent)"), padding: "10px 12px",
                     display: "flex", alignItems: "flex-start", gap: 10,
-                  }}>
-                    <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--border)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  }}
+                    data-glow="var(--accent)"
+                    onMouseEnter={hoverLift}
+                    onMouseLeave={hoverReset}
+                  >
+                    <div style={iconTile("var(--accent)", 36)}>
                       <Globe style={{ width: 16, height: 16, color: "var(--accent)" }} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 13, color: "var(--text)", fontWeight: 500 }}>{skill.name}</span>
-                        {skill.slug && <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "var(--border)", color: "var(--text-muted)", fontFamily: "monospace" }}>{skill.slug}</span>}
+                        {skill.slug && <span style={{ ...badge("var(--text-muted)"), fontSize: 9, padding: "1px 6px", fontFamily: MONO }}>{skill.slug}</span>}
                         {skill.version && <span style={{ fontSize: 9, color: "var(--text-muted)" }}>v{skill.version}</span>}
                       </div>
                       <p style={{ margin: "3px 0 0", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.4 }}>{skill.description}</p>
                       {skill.tags.length > 0 && (
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 4 }}>
                           {skill.tags.map(tag => (
-                            <span key={tag} style={{ fontSize: 8, padding: "1px 5px", borderRadius: 4, background: "rgba(59,130,246,0.08)", color: "var(--accent)" }}>
+                            <span key={tag} style={{ ...badge("var(--accent)"), fontSize: 8, padding: "1px 5px" }}>
                               <Tag style={{ width: 7, height: 7, display: "inline", verticalAlign: "middle", marginRight: 2 }} />{tag}
                             </span>
                           ))}
@@ -1396,7 +1407,9 @@ function ClawHubTab() {
                       <button
                         onClick={() => installSkill(skill.slug)}
                         disabled={actionInProgress.has(skill.slug)}
-                        style={{ ...btnPrimary, flexShrink: 0, opacity: actionInProgress.has(skill.slug) ? 0.5 : 1 }}
+                        onMouseDown={pressDown}
+                        onMouseUp={pressUp}
+                        style={{ ...chBtnPrimary, flexShrink: 0, opacity: actionInProgress.has(skill.slug) ? 0.5 : 1 }}
                       >
                         {actionInProgress.has(skill.slug) ? <Loader2 style={{ width: 10, height: 10, animation: "mpSpin 1s linear infinite" }} /> : <Download style={{ width: 10, height: 10 }} />}
                         Install
@@ -1415,11 +1428,11 @@ function ClawHubTab() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4, marginBottom: 8 }}>
               <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{installedSkills.length} installed</span>
               <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={updateAll} disabled={actionInProgress.has("__all__")} style={btnPrimary}>
+                <button onClick={updateAll} disabled={actionInProgress.has("__all__")} onMouseDown={pressDown} onMouseUp={pressUp} style={chBtnPrimary}>
                   {actionInProgress.has("__all__") ? <Loader2 style={{ width: 10, height: 10, animation: "mpSpin 1s linear infinite" }} /> : <RotateCw style={{ width: 10, height: 10 }} />}
                   Update All
                 </button>
-                <button onClick={loadInstalled} disabled={loadingInstalled} style={btnGhost}>
+                <button onClick={loadInstalled} disabled={loadingInstalled} onMouseDown={pressDown} onMouseUp={pressUp} style={chBtnGhost}>
                   <RefreshCw style={{ width: 10, height: 10 }} /> Refresh
                 </button>
               </div>
@@ -1430,11 +1443,14 @@ function ClawHubTab() {
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {installedSkills.map((skill, i) => (
                   <div key={`${skill.slug}-${i}`} style={{
-                    background: "var(--bg-elevated)", border: "1px solid var(--border)",
-                    borderRadius: 10, padding: "10px 12px",
+                    ...glowCard("var(--success)"), padding: "10px 12px",
                     display: "flex", alignItems: "center", gap: 10,
-                  }}>
-                    <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--border)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  }}
+                    data-glow="var(--success)"
+                    onMouseEnter={hoverLift}
+                    onMouseLeave={hoverReset}
+                  >
+                    <div style={iconTile("var(--success)", 36)}>
                       <Package style={{ width: 16, height: 16, color: "var(--success)" }} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -1448,7 +1464,9 @@ function ClawHubTab() {
                       <button
                         onClick={() => updateSkill(skill.slug)}
                         disabled={actionInProgress.has(skill.slug)}
-                        style={{ ...btnPrimary, opacity: actionInProgress.has(skill.slug) ? 0.5 : 1 }}
+                        onMouseDown={pressDown}
+                        onMouseUp={pressUp}
+                        style={{ ...chBtnPrimary, opacity: actionInProgress.has(skill.slug) ? 0.5 : 1 }}
                       >
                         {actionInProgress.has(skill.slug) ? <Loader2 style={{ width: 10, height: 10, animation: "mpSpin 1s linear infinite" }} /> : <RotateCw style={{ width: 10, height: 10 }} />}
                         Update
@@ -1465,8 +1483,7 @@ function ClawHubTab() {
         {subTab === "publish" && (
           <div style={{ marginTop: 4 }}>
             <div style={{
-              background: "var(--bg-elevated)", border: "1px solid var(--border)",
-              borderRadius: 10, overflow: "hidden",
+              ...glowCard("var(--accent)"), overflow: "hidden",
             }}>
               <button onClick={() => setPublishExpanded(!publishExpanded)} style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -1480,38 +1497,38 @@ function ClawHubTab() {
                 {publishExpanded ? <ChevronUp style={{ width: 14, height: 14, color: "var(--text-muted)" }} /> : <ChevronDown style={{ width: 14, height: 14, color: "var(--text-muted)" }} />}
               </button>
               {publishExpanded && (
-                <div style={{ padding: "0 14px 14px", display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+                <div style={{ ...innerPanel, borderRadius: 0, border: "none", borderTop: "1px solid rgba(255,255,255,0.04)", padding: "10px 14px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
                   <div style={{ display: "flex", gap: 6 }}>
                     <div style={{ flex: 1 }}>
-                      <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Slug *</label>
-                      <input type="text" value={pubSlug} onChange={e => setPubSlug(e.target.value)} placeholder="my-skill" style={inputStyle} />
+                      <label style={mutedCaption}>Slug *</label>
+                      <input type="text" value={pubSlug} onChange={e => setPubSlug(e.target.value)} placeholder="my-skill" style={{ ...inputStyle, boxSizing: "border-box" as const }} />
                     </div>
                     <div style={{ flex: 1 }}>
-                      <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Name</label>
-                      <input type="text" value={pubName} onChange={e => setPubName(e.target.value)} placeholder="My Skill" style={inputStyle} />
+                      <label style={mutedCaption}>Name</label>
+                      <input type="text" value={pubName} onChange={e => setPubName(e.target.value)} placeholder="My Skill" style={{ ...inputStyle, boxSizing: "border-box" as const }} />
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
                     <div style={{ flex: 1 }}>
-                      <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Version</label>
-                      <input type="text" value={pubVersion} onChange={e => setPubVersion(e.target.value)} placeholder="1.0.0" style={inputStyle} />
+                      <label style={mutedCaption}>Version</label>
+                      <input type="text" value={pubVersion} onChange={e => setPubVersion(e.target.value)} placeholder="1.0.0" style={{ ...inputStyle, boxSizing: "border-box" as const }} />
                     </div>
                     <div style={{ flex: 1 }}>
-                      <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Tags (comma sep)</label>
-                      <input type="text" value={pubTags} onChange={e => setPubTags(e.target.value)} placeholder="util,automation" style={inputStyle} />
+                      <label style={mutedCaption}>Tags (comma sep)</label>
+                      <input type="text" value={pubTags} onChange={e => setPubTags(e.target.value)} placeholder="util,automation" style={{ ...inputStyle, boxSizing: "border-box" as const }} />
                     </div>
                   </div>
                   <div>
-                    <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Path</label>
-                    <input type="text" value={pubPath} onChange={e => setPubPath(e.target.value)} placeholder="." style={inputStyle} />
+                    <label style={mutedCaption}>Path</label>
+                    <input type="text" value={pubPath} onChange={e => setPubPath(e.target.value)} placeholder="." style={{ ...inputStyle, boxSizing: "border-box" as const }} />
                   </div>
                   <div>
-                    <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Changelog</label>
+                    <label style={mutedCaption}>Changelog</label>
                     <textarea value={pubChangelog} onChange={e => setPubChangelog(e.target.value)} placeholder="What changed..." rows={3}
-                      style={{ ...inputStyle, resize: "vertical", fontFamily: "monospace", fontSize: 11, lineHeight: 1.5 }}
+                      style={{ ...inputStyle, resize: "vertical" as const, fontFamily: MONO, fontSize: 11, lineHeight: 1.5, boxSizing: "border-box" as const }}
                     />
                   </div>
-                  <button onClick={doPublish} disabled={publishing || !pubSlug.trim()} style={{ ...btnPrimary, alignSelf: "flex-start", padding: "6px 16px", opacity: publishing ? 0.5 : 1 }}>
+                  <button onClick={doPublish} disabled={publishing || !pubSlug.trim()} onMouseDown={pressDown} onMouseUp={pressUp} style={{ ...chBtnPrimary, alignSelf: "flex-start", padding: "6px 16px", opacity: publishing ? 0.5 : 1 }}>
                     {publishing ? <Loader2 style={{ width: 10, height: 10, animation: "mpSpin 1s linear infinite" }} /> : <Upload style={{ width: 10, height: 10 }} />}
                     Publish
                   </button>
@@ -1525,8 +1542,7 @@ function ClawHubTab() {
         {subTab === "sync" && (
           <div style={{ marginTop: 4 }}>
             <div style={{
-              background: "var(--bg-elevated)", border: "1px solid var(--border)",
-              borderRadius: 10, padding: "14px",
+              ...glowCard("var(--accent)"), padding: "14px",
             }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <RotateCw style={{ width: 14, height: 14, color: "var(--accent)" }} />
@@ -1536,12 +1552,12 @@ function ClawHubTab() {
                 Synchronize all ClawHub skills with the registry. Preview changes first, then confirm.
               </p>
               <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={doSyncPreview} disabled={syncing} style={btnPrimary}>
+                <button onClick={doSyncPreview} disabled={syncing} onMouseDown={pressDown} onMouseUp={pressUp} style={chBtnPrimary}>
                   {syncing && !syncPreview ? <Loader2 style={{ width: 10, height: 10, animation: "mpSpin 1s linear infinite" }} /> : <Search style={{ width: 10, height: 10 }} />}
                   Preview (Dry Run)
                 </button>
                 {syncPreview && (
-                  <button onClick={doSyncConfirm} disabled={syncing} style={{ ...btnPrimary, background: "rgba(74,222,128,0.15)", color: "var(--success)" }}>
+                  <button onClick={doSyncConfirm} disabled={syncing} onMouseDown={pressDown} onMouseUp={pressUp} style={{ ...chBtnPrimary, background: "rgba(74,222,128,0.15)", color: "var(--success)" }}>
                     {syncing ? <Loader2 style={{ width: 10, height: 10, animation: "mpSpin 1s linear infinite" }} /> : <Check style={{ width: 10, height: 10 }} />}
                     Confirm Sync
                   </button>
@@ -1549,10 +1565,10 @@ function ClawHubTab() {
               </div>
               {syncPreview && (
                 <pre style={{
-                  marginTop: 10, padding: "10px 12px", borderRadius: 8,
-                  background: "var(--bg-surface)", border: "1px solid var(--border)",
+                  ...innerPanel,
+                  marginTop: 10, padding: "10px 12px",
                   fontSize: 10, color: "var(--text-secondary)", margin: "10px 0 0",
-                  whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "monospace",
+                  whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: MONO,
                   maxHeight: 200, overflowY: "auto",
                 }}>
                   {syncPreview}
@@ -1578,15 +1594,16 @@ function LoadingSpinner() {
 
 function ErrorMessage({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 40, gap: 8 }}>
+    <div style={emptyState}>
       <AlertTriangle style={{ width: 24, height: 24, color: "var(--error)" }} />
-      <p style={{ fontSize: 12, color: "var(--error)", textAlign: "center", maxWidth: 300 }}>{message}</p>
+      <p style={{ fontSize: 12, color: "var(--error)", textAlign: "center", maxWidth: 300, margin: 0 }}>{message}</p>
       <button
         onClick={onRetry}
+        onMouseDown={pressDown}
+        onMouseUp={pressUp}
         style={{
-          padding: "4px 12px", borderRadius: 6, border: "none",
-          background: "var(--bg-hover)", color: "var(--text-secondary)",
-          fontSize: 11, cursor: "pointer", marginTop: 4,
+          ...btnSecondary,
+          padding: "4px 12px", fontSize: 11, marginTop: 4,
         }}
       >
         Retry
@@ -1597,9 +1614,9 @@ function ErrorMessage({ message, onRetry }: { message: string; onRetry: () => vo
 
 function EmptyState({ icon, message }: { icon: React.ReactNode; message: string }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 40, gap: 8 }}>
+    <div style={emptyState}>
       {icon}
-      <p style={{ fontSize: 12, color: "var(--text-muted)" }}>{message}</p>
+      <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>{message}</p>
     </div>
   );
 }
@@ -1607,8 +1624,8 @@ function EmptyState({ icon, message }: { icon: React.ReactNode; message: string 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "3px 0" }}>
-      <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{label}</span>
-      <span style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace" }}>{value}</span>
+      <span style={mutedCaption}>{label}</span>
+      <span style={{ ...monoValue, fontSize: 11, fontWeight: 500, color: "var(--text-secondary)" }}>{value}</span>
     </div>
   );
 }

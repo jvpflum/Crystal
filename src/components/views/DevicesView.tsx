@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Smartphone, Shield, CheckCircle2, XCircle, RefreshCw, Trash2,
   Key, Loader2, QrCode, UserPlus, AlertTriangle,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { EASE, glowCard, hoverLift, hoverReset, pressDown, pressUp, innerPanel, sectionLabel, btnPrimary, btnSecondary, MONO } from "@/styles/viewStyles";
 
 interface Device {
   id: string;
@@ -21,35 +22,12 @@ interface QrResult {
   qr?: string;
 }
 
-const CARD: React.CSSProperties = {
-  background: "var(--bg-elevated)", border: "1px solid var(--border)",
-  borderRadius: 10, overflow: "hidden",
-};
-const ROW: React.CSSProperties = {
-  display: "flex", alignItems: "center", justifyContent: "space-between",
-  padding: "10px 14px", borderBottom: "1px solid var(--border)",
-};
-const SECT: React.CSSProperties = {
-  fontSize: 10, fontWeight: 600, textTransform: "uppercase",
-  letterSpacing: 0.5, color: "var(--text-muted)", marginBottom: 8,
-};
-const BTN_P: React.CSSProperties = {
-  display: "flex", alignItems: "center", gap: 5, padding: "6px 12px",
-  borderRadius: 6, border: "none", background: "var(--accent-bg)",
-  color: "var(--accent)", fontSize: 11, fontWeight: 500, cursor: "pointer",
-};
-const BTN_G: React.CSSProperties = {
-  display: "flex", alignItems: "center", gap: 4, padding: "5px 10px",
-  borderRadius: 6, border: "1px solid var(--border)", background: "transparent",
-  color: "var(--text-muted)", fontSize: 11, cursor: "pointer",
-};
 const BTN_DANGER: React.CSSProperties = {
   display: "flex", alignItems: "center", gap: 4, padding: "5px 10px",
   borderRadius: 6, border: "1px solid rgba(248,113,113,0.3)",
   background: "rgba(248,113,113,0.08)", color: "#f87171",
-  fontSize: 11, cursor: "pointer",
+  fontSize: 11, cursor: "pointer", transition: `all 0.2s ${EASE}`,
 };
-const MONO: React.CSSProperties = { fontFamily: "'JetBrains Mono', 'Fira Code', monospace" };
 
 export function DevicesView() {
   const [devices, setDevices] = useState<Device[]>([]);
@@ -148,7 +126,9 @@ export function DevicesView() {
               </p>
             </div>
           </div>
-          <button onClick={loadDevices} disabled={loading} style={BTN_P}>
+          <button onClick={loadDevices} disabled={loading}
+            onMouseDown={pressDown} onMouseUp={pressUp}
+            style={{ ...btnPrimary, display: "flex", alignItems: "center", gap: 5 }}>
             <RefreshCw style={{ width: 12, height: 12, ...(loading ? { animation: "spin 1s linear infinite" } : {}) }} /> Refresh
           </button>
         </div>
@@ -177,19 +157,22 @@ export function DevicesView() {
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 40, gap: 8 }}>
             <AlertTriangle style={{ width: 24, height: 24, color: "#f87171" }} />
             <p style={{ fontSize: 12, color: "#f87171", textAlign: "center" }}>{error}</p>
-            <button onClick={loadDevices} style={{ padding: "6px 14px", borderRadius: 8, border: "none", background: "var(--bg-elevated)", color: "var(--text-secondary)", fontSize: 11, cursor: "pointer" }}>Retry</button>
+            <button onClick={loadDevices}
+              onMouseDown={pressDown} onMouseUp={pressUp}
+              style={{ padding: "6px 14px", borderRadius: 8, border: "none", background: "var(--bg-elevated)", color: "var(--text-secondary)", fontSize: 11, cursor: "pointer", transition: `all 0.2s ${EASE}` }}>Retry</button>
           </div>
         ) : (
           <>
             {/* Pending Requests */}
             <div style={{ marginBottom: 20 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={SECT}>Pending Requests ({pending.length})</span>
+                <span style={sectionLabel}>Pending Requests ({pending.length})</span>
                 {pending.length > 0 && (
                   <button
                     onClick={() => exec("Approve Latest", "openclaw devices approve --latest")}
                     disabled={isLoading("Approve Latest")}
-                    style={{ ...BTN_P, padding: "4px 10px", fontSize: 10 }}
+                    onMouseDown={pressDown} onMouseUp={pressUp}
+                    style={{ ...btnPrimary, display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", fontSize: 10 }}
                   >
                     {isLoading("Approve Latest")
                       ? <Loader2 style={{ width: 10, height: 10, animation: "spin 1s linear infinite" }} />
@@ -199,7 +182,7 @@ export function DevicesView() {
                 )}
               </div>
               {pending.length === 0 ? (
-                <div style={{ ...CARD, padding: "20px 14px", textAlign: "center" }}>
+                <div style={{ ...innerPanel, padding: "20px 14px", textAlign: "center" }}>
                   <Shield style={{ width: 24, height: 24, color: "var(--text-muted)", opacity: 0.3, margin: "0 auto 6px" }} />
                   <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0 }}>No pending pairing requests</p>
                 </div>
@@ -208,8 +191,8 @@ export function DevicesView() {
                   {pending.map(device => {
                     const reqId = device.requestId || device.id;
                     return (
-                      <div key={device.id} style={CARD}>
-                        <div style={{ ...ROW, borderBottom: "none" }}>
+                      <div key={device.id} data-glow="#fbbf24" onMouseEnter={hoverLift} onMouseLeave={hoverReset} style={glowCard("#fbbf24")}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                             <div style={{
                               width: 36, height: 36, borderRadius: 10, display: "flex",
@@ -224,7 +207,7 @@ export function DevicesView() {
                                 <span style={{ fontSize: 8, padding: "2px 6px", borderRadius: 4, background: "rgba(251,191,36,0.15)", color: "#fbbf24", fontWeight: 600 }}>PENDING</span>
                               </div>
                               <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3 }}>
-                                <span style={{ fontSize: 10, color: "var(--text-muted)", ...MONO }}>{device.id}</span>
+                                <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO }}>{device.id}</span>
                                 {device.role && <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "var(--bg-hover)", color: "var(--text-muted)" }}>{device.role}</span>}
                                 {device.scopes && device.scopes.length > 0 && (
                                   <span style={{ fontSize: 9, color: "var(--text-muted)" }}>{device.scopes.join(", ")}</span>
@@ -236,7 +219,8 @@ export function DevicesView() {
                             <button
                               onClick={() => exec(`Approve-${reqId}`, `openclaw devices approve ${reqId}`)}
                               disabled={isLoading(`Approve-${reqId}`)}
-                              style={{ ...BTN_P, background: "rgba(74,222,128,0.15)", color: "#4ade80" }}
+                              onMouseDown={pressDown} onMouseUp={pressUp}
+                              style={{ ...btnPrimary, display: "flex", alignItems: "center", gap: 5, background: "rgba(74,222,128,0.15)", color: "#4ade80" }}
                             >
                               {isLoading(`Approve-${reqId}`)
                                 ? <Loader2 style={{ width: 10, height: 10, animation: "spin 1s linear infinite" }} />
@@ -246,6 +230,7 @@ export function DevicesView() {
                             <button
                               onClick={() => exec(`Reject-${reqId}`, `openclaw devices reject ${reqId}`)}
                               disabled={isLoading(`Reject-${reqId}`)}
+                              onMouseDown={pressDown} onMouseUp={pressUp}
                               style={BTN_DANGER}
                             >
                               {isLoading(`Reject-${reqId}`)
@@ -264,17 +249,17 @@ export function DevicesView() {
 
             {/* Paired Devices */}
             <div style={{ marginBottom: 20 }}>
-              <span style={SECT}>Paired Devices ({paired.length})</span>
+              <span style={sectionLabel}>Paired Devices ({paired.length})</span>
               {paired.length === 0 ? (
-                <div style={{ ...CARD, padding: "20px 14px", textAlign: "center" }}>
+                <div style={{ ...innerPanel, padding: "20px 14px", textAlign: "center" }}>
                   <Smartphone style={{ width: 24, height: 24, color: "var(--text-muted)", opacity: 0.3, margin: "0 auto 6px" }} />
                   <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0 }}>No paired devices</p>
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {paired.map(device => (
-                    <div key={device.id} style={CARD}>
-                      <div style={ROW}>
+                    <div key={device.id} data-glow="#4ade80" onMouseEnter={hoverLift} onMouseLeave={hoverReset} style={glowCard("#4ade80")}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           <div style={{
                             width: 36, height: 36, borderRadius: 10, display: "flex",
@@ -289,7 +274,7 @@ export function DevicesView() {
                               <span style={{ fontSize: 8, padding: "2px 6px", borderRadius: 4, background: "rgba(74,222,128,0.15)", color: "#4ade80", fontWeight: 600 }}>PAIRED</span>
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3 }}>
-                              <span style={{ fontSize: 10, color: "var(--text-muted)", ...MONO }}>{device.id}</span>
+                              <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO }}>{device.id}</span>
                               {device.role && <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "var(--bg-hover)", color: "var(--text-muted)" }}>{device.role}</span>}
                               {device.scopes && device.scopes.length > 0 && (
                                 <span style={{ fontSize: 9, color: "var(--text-muted)" }}>{device.scopes.join(", ")}</span>
@@ -300,6 +285,7 @@ export function DevicesView() {
                         <button
                           onClick={() => exec(`Remove-${device.id}`, `openclaw devices remove ${device.id}`)}
                           disabled={isLoading(`Remove-${device.id}`)}
+                          onMouseDown={pressDown} onMouseUp={pressUp}
                           style={BTN_DANGER}
                         >
                           {isLoading(`Remove-${device.id}`)
@@ -318,12 +304,13 @@ export function DevicesView() {
                           <input
                             type="text" placeholder="role" value={rotateRole[device.id] || ""}
                             onChange={e => setRotateRole(prev => ({ ...prev, [device.id]: e.target.value }))}
-                            style={{ width: 80, padding: "4px 8px", borderRadius: 4, background: "var(--bg-base)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 10, outline: "none", ...MONO }}
+                            style={{ width: 80, padding: "4px 8px", borderRadius: 4, background: "var(--bg-base)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 10, outline: "none", fontFamily: MONO }}
                           />
                           <button
                             onClick={() => exec(`Rotate-${device.id}`, `openclaw devices rotate --device ${device.id} --role ${rotateRole[device.id] || "default"}`)}
                             disabled={isLoading(`Rotate-${device.id}`)}
-                            style={{ ...BTN_G, padding: "4px 8px", fontSize: 10, borderColor: "rgba(59,130,246,0.3)", color: "var(--accent)" }}
+                            onMouseDown={pressDown} onMouseUp={pressUp}
+                            style={{ ...btnSecondary, display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", fontSize: 10, borderColor: "rgba(59,130,246,0.3)", color: "var(--accent)" }}
                           >
                             {isLoading(`Rotate-${device.id}`)
                               ? <Loader2 style={{ width: 9, height: 9, animation: "spin 1s linear infinite" }} />
@@ -335,11 +322,12 @@ export function DevicesView() {
                           <input
                             type="text" placeholder="role" value={revokeRole[device.id] || ""}
                             onChange={e => setRevokeRole(prev => ({ ...prev, [device.id]: e.target.value }))}
-                            style={{ width: 80, padding: "4px 8px", borderRadius: 4, background: "var(--bg-base)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 10, outline: "none", ...MONO }}
+                            style={{ width: 80, padding: "4px 8px", borderRadius: 4, background: "var(--bg-base)", border: "1px solid var(--border)", color: "var(--text)", fontSize: 10, outline: "none", fontFamily: MONO }}
                           />
                           <button
                             onClick={() => exec(`Revoke-${device.id}`, `openclaw devices revoke --device ${device.id} --role ${revokeRole[device.id] || "default"}`)}
                             disabled={isLoading(`Revoke-${device.id}`)}
+                            onMouseDown={pressDown} onMouseUp={pressUp}
                             style={{ ...BTN_DANGER, padding: "4px 8px", fontSize: 10 }}
                           >
                             {isLoading(`Revoke-${device.id}`)
@@ -357,10 +345,12 @@ export function DevicesView() {
 
             {/* Pairing Section */}
             <div style={{ marginBottom: 20 }}>
-              <span style={SECT}>Pairing</span>
-              <div style={CARD}>
+              <span style={sectionLabel}>Pairing</span>
+              <div data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset} style={glowCard("var(--accent)")}>
                 <div style={{ padding: "12px 14px", display: "flex", gap: 8 }}>
-                  <button onClick={generateQr} disabled={isLoading("qr")} style={BTN_P}>
+                  <button onClick={generateQr} disabled={isLoading("qr")}
+                    onMouseDown={pressDown} onMouseUp={pressUp}
+                    style={{ ...btnPrimary, display: "flex", alignItems: "center", gap: 5 }}>
                     {isLoading("qr")
                       ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />
                       : <QrCode style={{ width: 12, height: 12 }} />}
@@ -369,7 +359,8 @@ export function DevicesView() {
                   <button
                     onClick={() => exec("Start Pairing", "openclaw pairing start --json")}
                     disabled={isLoading("Start Pairing")}
-                    style={BTN_P}
+                    onMouseDown={pressDown} onMouseUp={pressUp}
+                    style={{ ...btnPrimary, display: "flex", alignItems: "center", gap: 5 }}
                   >
                     {isLoading("Start Pairing")
                       ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />
@@ -382,7 +373,7 @@ export function DevicesView() {
                     <pre style={{
                       margin: 0, padding: "8px 10px", borderRadius: 6,
                       background: "var(--bg-base)", border: "1px solid var(--border)",
-                      fontSize: 11, ...MONO, color: "var(--text-secondary)",
+                      fontSize: 11, fontFamily: MONO, color: "var(--text-secondary)",
                       whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 200, overflowY: "auto",
                     }}>
                       {JSON.stringify(qrData, null, 2)}
@@ -394,8 +385,8 @@ export function DevicesView() {
 
             {/* Bulk Actions */}
             <div>
-              <span style={SECT}>Bulk Actions</span>
-              <div style={CARD}>
+              <span style={sectionLabel}>Bulk Actions</span>
+              <div data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset} style={glowCard("var(--accent)")}>
                 <div style={{ padding: "12px 14px", display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {confirmClear === "all" ? (
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -405,11 +396,14 @@ export function DevicesView() {
                       <button
                         onClick={() => { exec("Clear All", "openclaw devices clear --yes"); setConfirmClear(null); }}
                         disabled={isLoading("Clear All")}
+                        onMouseDown={pressDown} onMouseUp={pressUp}
                         style={{ ...BTN_DANGER, padding: "4px 10px" }}
                       >
                         {isLoading("Clear All") ? <Loader2 style={{ width: 10, height: 10, animation: "spin 1s linear infinite" }} /> : "Confirm"}
                       </button>
-                      <button onClick={() => setConfirmClear(null)} style={{ ...BTN_G, padding: "4px 10px" }}>Cancel</button>
+                      <button onClick={() => setConfirmClear(null)}
+                        onMouseDown={pressDown} onMouseUp={pressUp}
+                        style={{ ...btnSecondary, display: "flex", alignItems: "center", gap: 4, padding: "4px 10px" }}>Cancel</button>
                     </div>
                   ) : confirmClear === "pending" ? (
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -419,18 +413,24 @@ export function DevicesView() {
                       <button
                         onClick={() => { exec("Clear Pending", "openclaw devices clear --yes --pending"); setConfirmClear(null); }}
                         disabled={isLoading("Clear Pending")}
+                        onMouseDown={pressDown} onMouseUp={pressUp}
                         style={{ ...BTN_DANGER, padding: "4px 10px", borderColor: "rgba(251,191,36,0.3)", color: "#fbbf24", background: "rgba(251,191,36,0.08)" }}
                       >
                         {isLoading("Clear Pending") ? <Loader2 style={{ width: 10, height: 10, animation: "spin 1s linear infinite" }} /> : "Confirm"}
                       </button>
-                      <button onClick={() => setConfirmClear(null)} style={{ ...BTN_G, padding: "4px 10px" }}>Cancel</button>
+                      <button onClick={() => setConfirmClear(null)}
+                        onMouseDown={pressDown} onMouseUp={pressUp}
+                        style={{ ...btnSecondary, display: "flex", alignItems: "center", gap: 4, padding: "4px 10px" }}>Cancel</button>
                     </div>
                   ) : (
                     <>
-                      <button onClick={() => setConfirmClear("all")} style={BTN_DANGER}>
+                      <button onClick={() => setConfirmClear("all")}
+                        onMouseDown={pressDown} onMouseUp={pressUp}
+                        style={BTN_DANGER}>
                         <Trash2 style={{ width: 11, height: 11 }} /> Clear All Devices
                       </button>
                       <button onClick={() => setConfirmClear("pending")}
+                        onMouseDown={pressDown} onMouseUp={pressUp}
                         style={{ ...BTN_DANGER, borderColor: "rgba(251,191,36,0.3)", color: "#fbbf24", background: "rgba(251,191,36,0.08)" }}
                       >
                         <Trash2 style={{ width: 11, height: 11 }} /> Clear Pending Only
