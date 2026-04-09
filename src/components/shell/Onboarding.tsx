@@ -129,15 +129,14 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
 
     setPrereqs((prev) => {
       const next = [...prev];
-      for (const r of results) {
+      for (let ri = 0; ri < results.length; ri++) {
+        const r = results[ri];
+        const { idx } = cmds[ri];
         if (r.status === "fulfilled") {
-          const { idx, out } = r.value;
-          next[idx] = {
-            ...next[idx],
-            ok: out.length > 0,
-            detail: out || "Not found",
-            loading: false,
-          };
+          const { out } = r.value;
+          next[idx] = { ...next[idx], ok: out.length > 0, detail: out || "Not found", loading: false };
+        } else {
+          next[idx] = { ...next[idx], ok: false, detail: "Check failed", loading: false };
         }
       }
       return next;

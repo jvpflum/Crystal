@@ -198,7 +198,7 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setSelectedIndex((i) => Math.min(i + 1, flatItems.length - 1));
+      setSelectedIndex((i) => flatItems.length > 0 ? Math.min(i + 1, flatItems.length - 1) : 0);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setSelectedIndex((i) => Math.max(i - 1, 0));

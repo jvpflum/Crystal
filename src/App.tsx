@@ -261,6 +261,7 @@ function FloatingOrb() {
       <div className="app-atmosphere" aria-hidden />
       <button
         className="glass"
+        aria-label={voiceState === "idle" ? "Start listening" : "Restore Crystal window"}
         onClick={() => voiceState === "idle" ? setVoiceState("listening") : setMinimized(false)}
         onDoubleClick={() => setMinimized(false)}
         style={{

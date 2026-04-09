@@ -51,14 +51,14 @@ const N = {
 // ─── Buildings ─────────────────────────────────────────────────
 
 const BUILDINGS: BuildingDef[] = [
-  { id: "clock",    name: "CHRONO SPIRE",    ox:    0, oy: -135, w: 22, d: 16, h: 88,  top: "#1a1a2e", left: "#0d0d1a", right: "#141428", accent: N.amber,   linkedView: "command-center", linkedCenterTab: "scheduled", icon: "⏱", sign: ["24HR", "CRON"] },
-  { id: "barracks", name: "AGENT BARRACKS",  ox: -100, oy:  -68, w: 26, d: 18, h: 50,  top: "#1a2e1a", left: "#0d1a0d", right: "#142814", accent: N.lime,    linkedView: "agents",       icon: "⬡", sign: ["FIGHTER", "SELECT"] },
-  { id: "memory",   name: "MEMORY CORE",     ox: -195, oy:   20, w: 28, d: 22, h: 55,  top: "#1a102e", left: "#0d0818", right: "#140e24", accent: N.purple,  linkedView: "memory",       icon: "◈", sign: ["NEON", "DATA"] },
-  { id: "office",   name: "COMMAND HQ",      ox:  195, oy:   20, w: 30, d: 22, h: 68,  top: "#101a2e", left: "#080d1a", right: "#0e1428", accent: N.blue,    linkedView: "office",       icon: "◉", sign: ["BOSS", "ROOM"] },
-  { id: "factory",  name: "THE FORGE",       ox: -195, oy:  140, w: 35, d: 25, h: 48,  top: "#2e1a10", left: "#1a0d08", right: "#28140e", accent: N.orange,  linkedView: "factory",      icon: "⚙", sign: ["TECH", "NOIR"] },
-  { id: "comms",    name: "COMM ARRAY",      ox:  195, oy:  140, w: 20, d: 15, h: 92,  top: "#102e2e", left: "#081a1a", right: "#0e2828", accent: N.cyan,    linkedView: "channels",     icon: "◇", sign: ["LINK", "UP"] },
-  { id: "vault",    name: "TOOL VAULT",      ox:  100, oy:  -68, w: 24, d: 16, h: 42,  top: "#2e2e1a", left: "#1a1a0d", right: "#282814", accent: N.pink,    linkedView: "tools",        icon: "⚒", sign: ["POWER", "UP"] },
-  { id: "terminal", name: "THE TERMINAL",    ox:    0, oy:  215, w: 32, d: 20, h: 38,  top: "#102e10", left: "#081a08", right: "#0e280e", accent: N.green,   linkedView: "conversation", icon: "▣", sign: ["VERSUS", "MODE"] },
+  { id: "clock",    name: "CHRONO SPIRE",    ox:    0, oy: -135, w: 22, d: 16, h: 88,  top: "#2a2a48", left: "#181830", right: "#20203c", accent: N.amber,   linkedView: "command-center", linkedCenterTab: "scheduled", icon: "⏱", sign: ["24HR", "CRON"] },
+  { id: "barracks", name: "AGENT BARRACKS",  ox: -100, oy:  -68, w: 26, d: 18, h: 50,  top: "#2a3e2a", left: "#162a16", right: "#1e361e", accent: N.lime,    linkedView: "agents",       icon: "⬡", sign: ["FIGHTER", "SELECT"] },
+  { id: "memory",   name: "MEMORY CORE",     ox: -195, oy:   20, w: 28, d: 22, h: 55,  top: "#2a1a42", left: "#181028", right: "#201636", accent: N.purple,  linkedView: "memory",       icon: "◈", sign: ["NEON", "DATA"] },
+  { id: "office",   name: "COMMAND HQ",      ox:  195, oy:   20, w: 30, d: 22, h: 68,  top: "#1a2a48", left: "#101a30", right: "#16223c", accent: N.blue,    linkedView: "office",       icon: "◉", sign: ["BOSS", "ROOM"] },
+  { id: "factory",  name: "THE FORGE",       ox: -195, oy:  140, w: 35, d: 25, h: 48,  top: "#3e2a18", left: "#281a10", right: "#342216", accent: N.orange,  linkedView: "factory",      icon: "⚙", sign: ["TECH", "NOIR"] },
+  { id: "comms",    name: "COMM ARRAY",      ox:  195, oy:  140, w: 20, d: 15, h: 92,  top: "#1a3e3e", left: "#102828", right: "#163434", accent: N.cyan,    linkedView: "channels",     icon: "◇", sign: ["LINK", "UP"] },
+  { id: "vault",    name: "TOOL VAULT",      ox:  100, oy:  -68, w: 24, d: 16, h: 42,  top: "#3e3a22", left: "#28261a", right: "#343020", accent: N.pink,    linkedView: "tools",        icon: "⚒", sign: ["POWER", "UP"] },
+  { id: "terminal", name: "THE TERMINAL",    ox:    0, oy:  215, w: 32, d: 20, h: 38,  top: "#1a3e1a", left: "#102810", right: "#163416", accent: N.green,   linkedView: "conversation", icon: "▣", sign: ["VERSUS", "MODE"] },
 ];
 
 const AGENT_HOMES: Record<string, string> = { main: "office", research: "memory", home: "terminal", finance: "factory", default: "barracks" };
@@ -164,6 +164,250 @@ function lighten(hex: string): string {
 function darken(hex: string): string {
   const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
   return `rgb(${Math.max(0, r - 80)},${Math.max(0, g - 80)},${Math.max(0, b - 80)})`;
+}
+
+// ─── SimCity-Quality Enhancements ───────────────────────────────
+
+function drawBuildingWindows(
+  ctx: CanvasRenderingContext2D, x: number, y: number,
+  w: number, d: number, h: number, accent: string,
+  frame: number, active: boolean,
+) {
+  const ph = lightPhase(frame);
+  const cols = Math.max(2, Math.floor(w / 6));
+  const rows = Math.max(3, Math.floor(h / 9));
+  for (let face = 0; face < 2; face++) {
+    const sign = face === 0 ? 1 : -1;
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const u = (col + 0.5) / cols * 0.78 + 0.11;
+        const v = (row + 0.5) / rows * 0.82 + 0.09;
+        const wx = x + sign * u * w;
+        const wy = y - u * d - v * h;
+        const seed = row * 7.3 + col * 3.1 + face * 11 + w;
+        const lit = Math.sin(seed + ph * 0.25) > (active ? -0.35 : 0.25);
+        if (lit) {
+          const warmth = Math.sin(ph * 0.7 + seed) * 0.06;
+          ctx.fillStyle = row % 3 === 0 ? "#ffe8a0" : "#ffd680";
+          ctx.globalAlpha = 0.38 + warmth;
+          ctx.fillRect(wx - 1.5, wy - 2, 2.5, 2.8);
+          ctx.globalAlpha = 0.07 + warmth * 0.3;
+          ctx.fillRect(wx - 2.5, wy - 3, 4.5, 4.8);
+        } else {
+          ctx.fillStyle = face === 0 ? "#06060e" : "#080812";
+          ctx.globalAlpha = 0.55;
+          ctx.fillRect(wx - 1.5, wy - 2, 2.5, 2.8);
+        }
+      }
+    }
+  }
+  void accent;
+  ctx.globalAlpha = 1;
+}
+
+function drawBuildingShadow(
+  ctx: CanvasRenderingContext2D, x: number, y: number,
+  w: number, d: number, h: number,
+) {
+  const shx = h * 0.38;
+  const shy = h * 0.19;
+  ctx.fillStyle = "rgba(0,0,0,0.16)";
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + w, y - d);
+  ctx.lineTo(x + w + shx, y - d + shy);
+  ctx.lineTo(x + shx, y + shy);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "rgba(0,0,0,0.06)";
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x - w, y - d);
+  ctx.lineTo(x - w + shx * 0.4, y - d + shy * 0.4);
+  ctx.lineTo(x + shx * 0.4, y + shy * 0.4);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawGradientFace(
+  ctx: CanvasRenderingContext2D,
+  pts: [number, number][],
+  topColor: string, bottomColor: string,
+) {
+  if (pts.length < 3) return;
+  const minY = Math.min(...pts.map(p => p[1]));
+  const maxY = Math.max(...pts.map(p => p[1]));
+  const grd = ctx.createLinearGradient(0, minY, 0, maxY);
+  grd.addColorStop(0, topColor);
+  grd.addColorStop(1, bottomColor);
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawIsoBoxGradient(
+  ctx: CanvasRenderingContext2D, x: number, y: number,
+  w: number, d: number, h: number,
+  topC: string, leftC: string, rightC: string,
+) {
+  drawGradientFace(ctx,
+    [[x, y], [x + w, y - d], [x + w, y - d - h], [x, y - h]],
+    lighten(rightC), rightC,
+  );
+  drawGradientFace(ctx,
+    [[x, y], [x - w, y - d], [x - w, y - d - h], [x, y - h]],
+    lighten(leftC), leftC,
+  );
+  ctx.fillStyle = topC;
+  ctx.beginPath();
+  ctx.moveTo(x, y - h); ctx.lineTo(x + w, y - d - h);
+  ctx.lineTo(x, y - 2 * d - h); ctx.lineTo(x - w, y - d - h);
+  ctx.closePath(); ctx.fill();
+}
+
+interface TreeDef { x: number; y: number; size: number; type: "round" | "pine" | "bush" }
+
+const TREE_POSITIONS: TreeDef[] = [
+  { x: -250, y: -50, size: 17, type: "round" },
+  { x: -270, y: 0, size: 14, type: "pine" },
+  { x: -230, y: -80, size: 12, type: "bush" },
+  { x: 250, y: -50, size: 16, type: "round" },
+  { x: 270, y: 0, size: 13, type: "pine" },
+  { x: 230, y: -80, size: 11, type: "bush" },
+  { x: -160, y: -110, size: 15, type: "round" },
+  { x: 160, y: -110, size: 14, type: "pine" },
+  { x: -280, y: 100, size: 16, type: "round" },
+  { x: 280, y: 100, size: 15, type: "pine" },
+  { x: -260, y: 180, size: 13, type: "round" },
+  { x: 260, y: 180, size: 14, type: "bush" },
+  { x: -50, y: 260, size: 12, type: "pine" },
+  { x: 50, y: 260, size: 13, type: "round" },
+  { x: -150, y: 200, size: 11, type: "bush" },
+  { x: 150, y: 200, size: 12, type: "bush" },
+  { x: -40, y: -170, size: 10, type: "bush" },
+  { x: 40, y: -170, size: 11, type: "bush" },
+  { x: -300, y: -20, size: 16, type: "pine" },
+  { x: 300, y: -20, size: 15, type: "pine" },
+  { x: -120, y: 250, size: 14, type: "round" },
+  { x: 120, y: 250, size: 13, type: "round" },
+];
+
+function drawIsometricTree(ctx: CanvasRenderingContext2D, cx: number, cy: number, tree: TreeDef, frame: number) {
+  const x = cx + tree.x, y = cy + tree.y;
+  const sway = Math.sin(frame * 0.006 + tree.x * 0.08) * 1.0;
+
+  ctx.fillStyle = "rgba(0,0,0,0.12)";
+  ctx.beginPath();
+  ctx.ellipse(x + 2, y + 2, tree.size * 0.3, tree.size * 0.12, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (tree.type === "bush") {
+    ctx.fillStyle = "#1a5530";
+    ctx.beginPath();
+    ctx.ellipse(x + sway * 0.5, y - tree.size * 0.25, tree.size * 0.35, tree.size * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#227040";
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.ellipse(x + sway * 0.5 - 1, y - tree.size * 0.3, tree.size * 0.25, tree.size * 0.16, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    return;
+  }
+
+  ctx.fillStyle = "#4a3020";
+  ctx.fillRect(x - 1.5, y - tree.size * 0.38, 3, tree.size * 0.38);
+
+  if (tree.type === "pine") {
+    for (let i = 0; i < 3; i++) {
+      const ly = y - tree.size * (0.32 + i * 0.22);
+      const lw = tree.size * (0.38 - i * 0.07);
+      ctx.fillStyle = ["#185828", "#1e6830", "#247538"][i];
+      ctx.beginPath();
+      ctx.moveTo(x + sway * (i + 1) * 0.25, ly - tree.size * 0.22);
+      ctx.lineTo(x - lw + sway * i * 0.15, ly);
+      ctx.lineTo(x + lw + sway * i * 0.15, ly);
+      ctx.closePath();
+      ctx.fill();
+    }
+  } else {
+    const canopyY = y - tree.size * 0.55;
+    const r = tree.size * 0.36;
+    ctx.fillStyle = "#1a5830";
+    ctx.beginPath(); ctx.arc(x + sway, canopyY, r + 2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#228542";
+    ctx.beginPath(); ctx.arc(x + sway, canopyY - 1, r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#2c9a50";
+    ctx.globalAlpha = 0.55;
+    ctx.beginPath(); ctx.arc(x + sway - r * 0.2, canopyY - r * 0.3, r * 0.45, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawRooftopDetail(ctx: CanvasRenderingContext2D, b: BuildingDef, bx: number, by: number) {
+  const roofY = by - b.h - b.d * 2;
+  switch (b.id) {
+    case "office": {
+      ctx.fillStyle = "#1a2640";
+      ctx.fillRect(bx - 8, roofY - 1, 16, 2);
+      ctx.fillRect(bx - 6, roofY - 3, 12, 2);
+      ctx.fillStyle = "#ffd700";
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(bx - 2, roofY - 3, 4, 1);
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case "barracks": {
+      ctx.fillStyle = "#2a3a2a";
+      ctx.fillRect(bx + 6, roofY, 3, 3);
+      ctx.fillRect(bx + 7, roofY - 4, 1, 4);
+      ctx.fillStyle = "#66aa66";
+      ctx.globalAlpha = 0.4;
+      ctx.beginPath(); ctx.arc(bx + 7.5, roofY - 5, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case "terminal": {
+      ctx.fillStyle = "#1a2a1a";
+      ctx.fillRect(bx - 10, roofY, 6, 3);
+      ctx.fillRect(bx + 4, roofY, 6, 3);
+      ctx.strokeStyle = "#4a7a4a";
+      ctx.lineWidth = 0.5;
+      ctx.globalAlpha = 0.4;
+      ctx.strokeRect(bx - 10, roofY, 6, 3);
+      ctx.strokeRect(bx + 4, roofY, 6, 3);
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case "vault": {
+      ctx.fillStyle = "#2a281a";
+      ctx.beginPath();
+      ctx.moveTo(bx, roofY - 6);
+      ctx.lineTo(bx - 4, roofY);
+      ctx.lineTo(bx + 4, roofY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = N.pink;
+      ctx.globalAlpha = 0.35;
+      ctx.beginPath(); ctx.arc(bx, roofY - 3, 1.5, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case "memory": {
+      ctx.fillStyle = "#1a1428";
+      ctx.fillRect(bx - 5, roofY - 2, 10, 3);
+      ctx.fillStyle = N.purple;
+      ctx.globalAlpha = 0.25;
+      ctx.fillRect(bx - 4, roofY - 1, 2, 1);
+      ctx.fillRect(bx + 2, roofY - 1, 2, 1);
+      ctx.globalAlpha = 1;
+      break;
+    }
+    default: break;
+  }
 }
 
 // ─── Sky + Atmosphere ──────────────────────────────────────────
@@ -275,25 +519,68 @@ function drawGround(ctx: CanvasRenderingContext2D, cx: number, cy: number, frame
       const sx = cx + (gx - gy) * TW / 2;
       const sy = oy - GROUND_N * TH / 2 + (gx + gy) * TH / 2;
       const dist = Math.abs(gx - mid) + Math.abs(gy - mid);
-      const base = dist <= 2 ? N.asphalt : (gx + gy) % 2 === 0 ? "#10081f" : "#0a0614";
+      const isRoad = Math.abs(gx - mid) <= 1 || Math.abs(gy - mid) <= 1;
+      const isSidewalk = !isRoad && (Math.abs(gx - mid) === 2 || Math.abs(gy - mid) === 2) && dist < 8;
+      const isIntersection = Math.abs(gx - mid) <= 1 && Math.abs(gy - mid) <= 1;
+
+      let base: string;
+      if (isIntersection) {
+        base = "#181822";
+      } else if (isRoad) {
+        base = (gx + gy) % 2 === 0 ? "#141420" : "#12121c";
+      } else if (isSidewalk) {
+        base = "#1a1a28";
+      } else {
+        const grassVar = Math.sin(gx * 2.1 + gy * 1.7) * 0.5 + 0.5;
+        base = grassVar > 0.6 ? "#0e1e12" : grassVar > 0.3 ? "#0c1a10" : "#0a160e";
+      }
       drawDiamond(ctx, sx, sy, TW, TH, base);
-      const zebra = Math.abs(gx - mid) <= 1 && gy >= mid - 1 && gy <= mid + 2 && (gx + gy) % 2 === 0;
-      if (zebra) {
-        ctx.fillStyle = "rgba(180,100,255,0.12)";
+
+      if (isRoad) {
+        const centerLine = (gx === mid || gy === mid) && dist > 0;
+        if (centerLine && (gx + gy) % 2 === 0) {
+          ctx.fillStyle = "rgba(255,200,50,0.12)";
+          ctx.beginPath();
+          if (gx === mid) {
+            ctx.moveTo(sx, sy - 2); ctx.lineTo(sx + 3, sy); ctx.lineTo(sx, sy + 2); ctx.lineTo(sx - 3, sy);
+          } else {
+            ctx.moveTo(sx, sy - 2); ctx.lineTo(sx + 3, sy); ctx.lineTo(sx, sy + 2); ctx.lineTo(sx - 3, sy);
+          }
+          ctx.closePath(); ctx.fill();
+        }
+      }
+
+      if (isIntersection && (gx + gy) % 2 === 0) {
+        ctx.fillStyle = "rgba(255,255,255,0.06)";
         ctx.beginPath();
-        ctx.moveTo(sx, sy - TH / 2); ctx.lineTo(sx + TW / 2, sy); ctx.lineTo(sx, sy + TH / 2); ctx.lineTo(sx - TW / 2, sy);
+        ctx.moveTo(sx, sy - TH / 2 + 3); ctx.lineTo(sx + TW / 2 - 6, sy);
+        ctx.lineTo(sx, sy + TH / 2 - 3); ctx.lineTo(sx - TW / 2 + 6, sy);
         ctx.closePath(); ctx.fill();
       }
-      const edgeAlpha = 0.14 + Math.sin(frame * 0.006 + gx * 0.5 + gy * 0.3) * 0.08;
-      ctx.strokeStyle = zebra ? `rgba(255,62,184,${edgeAlpha})` : `rgba(0,255,242,${edgeAlpha})`;
-      ctx.lineWidth = zebra ? 0.85 : 0.55;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy - TH / 2); ctx.lineTo(sx + TW / 2, sy); ctx.lineTo(sx, sy + TH / 2); ctx.lineTo(sx - TW / 2, sy);
-      ctx.closePath(); ctx.stroke();
+
+      if (!isRoad && !isSidewalk) {
+        const edgeAlpha = 0.05 + Math.sin(frame * 0.004 + gx * 0.4 + gy * 0.3) * 0.02;
+        ctx.strokeStyle = `rgba(40,80,50,${edgeAlpha})`;
+        ctx.lineWidth = 0.4;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - TH / 2); ctx.lineTo(sx + TW / 2, sy);
+        ctx.lineTo(sx, sy + TH / 2); ctx.lineTo(sx - TW / 2, sy);
+        ctx.closePath(); ctx.stroke();
+      } else {
+        const edgeAlpha = isRoad ? 0.04 : 0.06;
+        ctx.strokeStyle = `rgba(60,60,80,${edgeAlpha})`;
+        ctx.lineWidth = 0.3;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - TH / 2); ctx.lineTo(sx + TW / 2, sy);
+        ctx.lineTo(sx, sy + TH / 2); ctx.lineTo(sx - TW / 2, sy);
+        ctx.closePath(); ctx.stroke();
+      }
     }
   }
+
   const fog = ctx.createRadialGradient(cx, oy, 0, cx, oy, GROUND_N * TW * 0.48);
-  fog.addColorStop(0, "rgba(255,62,184,0.04)"); fog.addColorStop(0.35, "rgba(0,255,242,0.03)"); fog.addColorStop(0.65, "rgba(183,68,255,0.02)"); fog.addColorStop(1, "rgba(0,0,0,0)");
+  fog.addColorStop(0, "rgba(80,60,120,0.04)"); fog.addColorStop(0.35, "rgba(40,80,60,0.03)");
+  fog.addColorStop(0.65, "rgba(60,50,90,0.02)"); fog.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = fog; ctx.fillRect(cx - 450, oy - 250, 900, 500);
 }
 
@@ -1047,27 +1334,24 @@ function drawHUD(ctx: CanvasRenderingContext2D, w: number, h: number, agents: Ag
 }
 
 function drawScanlines(ctx: CanvasRenderingContext2D, w: number, h: number, frame: number) {
-  ctx.fillStyle = "rgba(0,0,0,0.055)";
-  for (let y = 0; y < h; y += 2) ctx.fillRect(0, y, w, 1);
-  ctx.fillStyle = "rgba(255,255,255,0.012)";
-  for (let y = 1; y < h; y += 4) ctx.fillRect(0, y, w, 1);
-  const scanY = (frame * 1.35) % (h + 50) - 25;
-  const scanG = ctx.createLinearGradient(0, scanY - 18, 0, scanY + 18);
-  scanG.addColorStop(0, "rgba(255,62,184,0)"); scanG.addColorStop(0.45, "rgba(0,255,242,0.028)"); scanG.addColorStop(1, "rgba(255,62,184,0)");
-  ctx.fillStyle = scanG; ctx.fillRect(0, scanY - 18, w, 36);
+  ctx.fillStyle = "rgba(0,0,0,0.022)";
+  for (let y = 0; y < h; y += 3) ctx.fillRect(0, y, w, 1);
+  const scanY = (frame * 0.8) % (h + 80) - 40;
+  const scanG = ctx.createLinearGradient(0, scanY - 24, 0, scanY + 24);
+  scanG.addColorStop(0, "rgba(180,140,255,0)"); scanG.addColorStop(0.45, "rgba(120,180,255,0.012)"); scanG.addColorStop(1, "rgba(180,140,255,0)");
+  ctx.fillStyle = scanG; ctx.fillRect(0, scanY - 24, w, 48);
 }
 
-/** CRT / arcade cabinet vignette. */
 function drawVignette(ctx: CanvasRenderingContext2D, w: number, h: number) {
-  const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.28, w / 2, h / 2, Math.max(w, h) * 0.72);
-  vg.addColorStop(0, "rgba(20,0,40,0)");
-  vg.addColorStop(0.55, "rgba(10,0,24,0.12)");
-  vg.addColorStop(1, "rgba(0,0,0,0.62)");
+  const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.78);
+  vg.addColorStop(0, "rgba(15,5,30,0)");
+  vg.addColorStop(0.6, "rgba(8,2,18,0.08)");
+  vg.addColorStop(1, "rgba(0,0,0,0.42)");
   ctx.fillStyle = vg;
   ctx.fillRect(0, 0, w, h);
-  const corner = ctx.createLinearGradient(0, 0, w * 0.35, h * 0.35);
-  corner.addColorStop(0, "rgba(255,45,149,0.06)"); corner.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = corner; ctx.fillRect(0, 0, w * 0.5, h * 0.5);
+  const corner = ctx.createLinearGradient(0, 0, w * 0.3, h * 0.3);
+  corner.addColorStop(0, "rgba(200,120,255,0.03)"); corner.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = corner; ctx.fillRect(0, 0, w * 0.45, h * 0.45);
 }
 
 // ─── Main Component ────────────────────────────────────────────
@@ -1303,21 +1587,32 @@ export function CityView() {
       drawPaths(ctx, cx, cy, w.frame, w.pulses);
       drawHoloCore(ctx, cx, cy + 20, w.frame);
 
-      const drawables: { type: "pylon" | "building" | "agent" | "drone"; y: number; idx: number }[] = [];
+      // Shadow pass — draw all building shadows before any buildings
+      for (const b of BUILDINGS) {
+        drawBuildingShadow(ctx, cx + b.ox, cy + b.oy, b.w, b.d, b.h);
+      }
+
+      const drawables: { type: "pylon" | "building" | "agent" | "drone" | "tree"; y: number; idx: number }[] = [];
       PYLON_POS.forEach((_, i) => drawables.push({ type: "pylon", y: PYLON_POS[i][1], idx: i }));
       BUILDINGS.forEach((b, i) => drawables.push({ type: "building", y: b.oy, idx: i }));
+      TREE_POSITIONS.forEach((t, i) => drawables.push({ type: "tree", y: t.y, idx: i }));
       w.agents.forEach((a, i) => drawables.push({ type: "agent", y: a.y, idx: i }));
       w.drones.forEach((d, i) => drawables.push({ type: "drone", y: d.y, idx: i }));
       drawables.sort((a, b) => a.y - b.y);
 
       for (const d of drawables) {
         if (d.type === "pylon") { const [tx, ty] = PYLON_POS[d.idx]; drawHoloPylon(ctx, cx + tx, cy + ty, w.frame, d.idx); }
+        else if (d.type === "tree") {
+          drawIsometricTree(ctx, cx, cy, TREE_POSITIONS[d.idx], w.frame);
+        }
         else if (d.type === "building") {
           const b = BUILDINGS[d.idx]; const bx = cx + b.ox, by = cy + b.oy; const hovered = w.hoveredBuilding === b.id;
           if (hovered) { ctx.save(); ctx.shadowColor = b.accent; ctx.shadowBlur = 25; }
-          drawIsoBox(ctx, bx, by, b.w, b.d, b.h, b.top, b.left, b.right);
+          drawIsoBoxGradient(ctx, bx, by, b.w, b.d, b.h, b.top, b.left, b.right);
+          drawBuildingWindows(ctx, bx, by, b.w, b.d, b.h, b.accent, w.frame, w.activeBuildings.has(b.id));
           strokeIsoBlack(ctx, bx, by, b.w, b.d, b.h, hovered ? 2.35 : 1.85);
           if (hovered) ctx.restore();
+          drawRooftopDetail(ctx, b, bx, by);
           drawBuildingExtras(ctx, b, bx, by, w.frame, w.activeBuildings.has(b.id), w.agents, w.buildingStats);
           drawBuildingLabel(ctx, b, bx, by, hovered, w.buildingStats[b.id]);
         } else if (d.type === "agent") {
@@ -1392,7 +1687,7 @@ export function CityView() {
         height: "100%",
         overflow: "hidden",
         background: "#050010",
-        filter: "contrast(1.07) saturate(1.18)",
+        filter: "contrast(1.04) saturate(1.12) brightness(1.02)",
       }}
     >
       <canvas ref={canvasRef} onMouseMove={handleMouseMove} onClick={handleClick} style={{ display: "block" }} />

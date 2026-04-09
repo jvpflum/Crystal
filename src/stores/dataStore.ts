@@ -159,8 +159,10 @@ function makeGetter<T>(
 async function fetchCronJobs(): Promise<Record<string, unknown>[]> {
   const r = await cachedCommand(CRON_LIST_JSON_ALL_CMD, { ttl: 120_000 });
   if (r.code === 0 && r.stdout.trim()) {
-    const p = JSON.parse(r.stdout);
-    return Array.isArray(p) ? p : p.jobs ?? [];
+    try {
+      const p = JSON.parse(r.stdout);
+      return Array.isArray(p) ? p : p.jobs ?? [];
+    } catch { /* malformed JSON */ }
   }
   return [];
 }
@@ -168,33 +170,31 @@ async function fetchCronJobs(): Promise<Record<string, unknown>[]> {
 async function fetchAgents(): Promise<Record<string, unknown>[]> {
   const r = await cachedCommand("openclaw agents list --json", { ttl: 60_000 });
   if (r.code === 0 && r.stdout.trim()) {
-    const d = JSON.parse(r.stdout);
-    return Array.isArray(d) ? d : (d.agents ?? d.items ?? []);
+    try {
+      const d = JSON.parse(r.stdout);
+      return Array.isArray(d) ? d : (d.agents ?? d.items ?? []);
+    } catch { /* malformed JSON */ }
   }
   return [];
 }
 
 async function fetchMemoryStatus(): Promise<Record<string, unknown>> {
-  const r = await cachedCommand("openclaw memory status --json", { ttl: 60_000 });
-  if (r.code !== 0 || !r.stdout.trim()) return {};
-  try {
-    const parsed = JSON.parse(r.stdout.trim()) as unknown;
-    const base = (Array.isArray(parsed) ? parsed[0] : parsed) as Record<string, unknown> | null;
-    if (!base || typeof base !== "object") return {};
-    const st = base.status as Record<string, unknown> | undefined;
-    let chunks = NaN;
-    if (st && typeof st === "object") {
-      const n = Number(st.chunks ?? st.totalChunks ?? 0);
-      if (Number.isFinite(n)) chunks = n;
-    }
-    if (!Number.isFinite(chunks)) {
-      const top = Number(base.chunks ?? base.totalChunks ?? base.count ?? 0);
-      chunks = Number.isFinite(top) ? top : 0;
-    }
-    return { ...base, chunks, totalChunks: chunks };
-  } catch {
-    return {};
+  const r = await cachedCommand("openclaw ltm stats", { ttl: 60_000 });
+  const out = (r.stdout ?? "") + (r.stderr ?? "");
+  const match = out.match(/Total memories:\s*(\d+)/i);
+  const chunks = match ? parseInt(match[1], 10) : 0;
+  if (chunks > 0) return { chunks, totalChunks: chunks };
+
+  const jsonR = await cachedCommand("openclaw ltm list --json", { ttl: 120_000 });
+  if (jsonR.code === 0 && jsonR.stdout.trim()) {
+    try {
+      const parsed = JSON.parse(jsonR.stdout.trim()) as unknown;
+      const arr = Array.isArray(parsed) ? parsed : (parsed as Record<string, unknown>)?.memories;
+      const n = Array.isArray(arr) ? arr.length : 0;
+      return { chunks: n, totalChunks: n };
+    } catch { /* ignore */ }
   }
+  return { chunks: 0, totalChunks: 0 };
 }
 
 async function fetchSystemStatus(): Promise<Record<string, unknown>> {
@@ -205,15 +205,19 @@ async function fetchSystemStatus(): Promise<Record<string, unknown>> {
 async function fetchTasks(): Promise<Record<string, unknown>[]> {
   const r = await cachedCommand("openclaw tasks list --json", { ttl: 30_000 });
   if (r.code === 0 && r.stdout.trim()) {
-    const p = JSON.parse(r.stdout);
-    return Array.isArray(p) ? p : p.tasks ?? p.runs ?? [];
+    try {
+      const p = JSON.parse(r.stdout);
+      return Array.isArray(p) ? p : p.tasks ?? p.runs ?? [];
+    } catch { /* malformed JSON */ }
   }
   return [];
 }
 
 async function fetchChannelStatus(): Promise<Record<string, unknown>> {
   const r = await cachedCommand("openclaw channels status --json", { ttl: 60_000 });
-  if (r.code === 0 && r.stdout.trim()) return JSON.parse(r.stdout);
+  if (r.code === 0 && r.stdout.trim()) {
+    try { return JSON.parse(r.stdout); } catch { /* malformed JSON */ }
+  }
   return {};
 }
 
@@ -277,8 +281,10 @@ const getSkillsBase = makeGetter("skills", fetchSkills);
 async function fetchSessions(): Promise<Record<string, unknown>[]> {
   const r = await cachedCommand("openclaw sessions --json", { ttl: 30_000 });
   if (r.code === 0 && r.stdout.trim()) {
-    const p = JSON.parse(r.stdout);
-    return p.sessions ?? (Array.isArray(p) ? p : []);
+    try {
+      const p = JSON.parse(r.stdout);
+      return p.sessions ?? (Array.isArray(p) ? p : []);
+    } catch { /* malformed JSON */ }
   }
   return [];
 }

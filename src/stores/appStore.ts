@@ -73,6 +73,14 @@ interface AppState {
 
 const PERSISTED_VIEW_KEY = "crystal_current_view";
 
+const VALID_VIEWS = new Set<string>([
+  "home", "conversation", "command-center", "agents", "office", "factory",
+  "marketplace", "models", "sessions", "templates", "channels", "memory",
+  "tools", "activity", "settings", "security", "hooks", "doctor", "nodes",
+  "browser", "workspace", "messaging", "directory", "devices", "subagents",
+  "webhooks", "voicecall", "tasks", "approvals", "city",
+]);
+
 function loadPersistedNavigation(): { view: AppView; centerTab: CommandCenterTabId | null } {
   try {
     const saved = localStorage.getItem(PERSISTED_VIEW_KEY);
@@ -80,7 +88,7 @@ function loadPersistedNavigation(): { view: AppView; centerTab: CommandCenterTab
       localStorage.setItem(PERSISTED_VIEW_KEY, "command-center");
       return { view: "command-center", centerTab: "scheduled" };
     }
-    if (saved) return { view: saved as AppView, centerTab: null };
+    if (saved && VALID_VIEWS.has(saved)) return { view: saved as AppView, centerTab: null };
   } catch { /* ignore */ }
   return { view: "home", centerTab: null };
 }

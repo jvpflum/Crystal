@@ -105,7 +105,10 @@ export function AgentsView() {
       const data = await openclawClient.listAgents();
       setAgents(data);
     } catch (e) {
-      if (agents.length === 0) setError(e instanceof Error ? e.message : "Failed to load agents");
+      setAgents(prev => {
+        if (prev.length === 0) setError(e instanceof Error ? e.message : "Failed to load agents");
+        return prev;
+      });
     }
     setLoading(false);
   }, []);

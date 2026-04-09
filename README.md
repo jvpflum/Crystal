@@ -28,6 +28,25 @@
 
 ## What's New
 
+### April 2026 — v0.6.0.1 Dashboard Polish, Audit & Bug Fixes
+
+- **Dashboard Redesign** — Complete visual overhaul with SVG data visualizations: ring gauges (CPU, RAM, Storage), radial burst (lifetime tokens), smooth bezier sparklines (CPU/RAM trends), mini bar charts (cron jobs), dot matrix (memory), and glow progress bars — all theme-aware.
+- **Apple-Meets-Futuristic UX** — Every card lifts, scales, and glows on hover with spring-eased micro-interactions. Press-down feedback on clickable elements. Smooth cubic-bezier transitions throughout. Status dots pulse when disconnected.
+- **Dual LLM Model Display** — Dashboard LLM card now shows both hosted (OpenAI with official logo) and local (Ollama) models side by side with independent status indicators and live model name from `ollama ps`.
+- **GPU Monitor Redesign** — Rebuilt with ring gauge, glow bars, metric chips, NVIDIA-green branding, hover interactions, and theme-aware colors to match the new dashboard aesthetic.
+- **Quick Actions Relocated** — Moved from dashboard to Command Center Workflows tab for a cleaner home screen.
+- **Voice Button Cleanup** — Removed duplicate voice orb from dashboard (kept in chat).
+- **8 Bug Fixes from Full Audit:**
+  - CommandPalette: `selectedIndex` could go to -1 on empty lists
+  - Onboarding: rejected `Promise.allSettled` branches left prereq rows stuck loading
+  - AgentsView: stale closure in `loadAgents` callback
+  - DataStore: five unguarded `JSON.parse` calls wrapped in try/catch
+  - AppStore: invalid persisted view validated against `VALID_VIEWS` set
+  - HomeView: `RingGauge` positioning fix, `RadialBurst` deterministic rendering
+  - App.tsx: `FloatingOrb` accessibility — added contextual `aria-label`
+- **Version Sync** — `Cargo.toml` and `tauri.conf.json` both aligned to v0.6.0.
+- **CSS Animations** — Added `pulse-dot` keyframe for disconnected status indicators.
+
 ### April 2026 — v0.6.0 Sandbox, City, Memory & Performance
 
 - **NVIDIA OpenShell Sandbox** — One-toggle sandbox mode in Settings. Agents execute inside isolated [OpenShell](https://github.com/NVIDIA/OpenShell) containers with filesystem, network, and process isolation. Auto-detects Docker, creates sandboxes from the `openclaw` community image, and reverts cleanly if anything fails. Requires Docker Desktop.
@@ -126,18 +145,21 @@ Full-featured conversation interface with multi-conversation sidebar, Markdown r
 
 ### Dashboard
 
-Bird's-eye view of your entire system on one screen:
+Futuristic bird's-eye view of your entire system with Apple-level polish and micro-interactions:
 
-- **Status Cards** — Gateway, LLM model, Telegram connection, OS info
-- **Stats Row** — Sessions, agents, cron jobs, skills, memory chunks, heartbeat interval
-- **Telegram Topics** — Live panel showing Finance (#16), Home (#17), System (#38), Neighborhood (#89), Factory (#1195) with cron delivery counts per topic
-- **Cron Health** — Enabled/total ratio, failure count, health bar, next firing time
-- **System Presence** — Connected agents and services
-- **Quick Actions** — Morning Briefing, Heartbeat, Security Scan, Health Check, Backup, Check Updates
-- **Security Summary** — Critical and warning counts from the latest audit
-- **System Monitor** — Live CPU, RAM, storage, uptime (polled every 30s)
-- **GPU Monitor** — Real-time NVIDIA GPU stats: utilization gauge, VRAM bar, temperature, power draw
-- **PC Optimizer** — 12 one-click system optimizations (power plans, DNS flush, temp cleanup, memory cleanup, etc.)
+- **System Performance** — Animated SVG ring gauges for CPU, RAM, and Storage with color-coded thresholds and hover scale animations
+- **Lifetime Tokens** — Radial burst visualization aggregating session token usage with hover rotation effect
+- **CPU & Memory Trends** — Smooth bezier sparkline charts with gradient fills, glowing endpoints, and live percentage readouts
+- **Cron Jobs** — Mini bar chart (active/disabled/failed) with one-click navigation to the scheduler
+- **Stats Tiles** — Sessions, Agents, Skills, Heartbeat — each with hover lift, glow, and press feedback
+- **Memory Dot Matrix** — Visual grid of stored memory chunks
+- **Dual LLM Display** — Shows both hosted model (OpenAI logo + model name) and local model (Ollama logo + running model) with independent connection status dots
+- **Uptime & Version** — System uptime with OpenClaw version badge
+- **Telegram Topics** — Topic tags with cron delivery counts and hover highlights
+- **Security** — Audit status card with glow progress bar and navigation chevron
+- **PC Optimizer** — 12 one-click system optimizations with per-button hover/press animations and result indicators
+- **GPU Monitor** — NVIDIA-branded card with ring gauge utilization, VRAM glow bar, temperature/power metric chips, and status indicator
+- **Status Pills** — Gateway and Telegram connection indicators with pulsing dots when disconnected
 
 ---
 
@@ -266,16 +288,18 @@ Per-channel: add/remove, login/logout, view capabilities, configure tokens, reso
 
 ### GPU & System Monitoring
 
-**GPU Monitor** (via `nvidia-smi`, polled every 5s):
-- GPU name (auto-formatted, e.g. "RTX 5090")
-- Utilization — circular progress gauge
-- VRAM — used/total GB with color-coded bar (blue → yellow → red)
-- Temperature — color-coded (green < 60°C, yellow < 80°C, red above)
-- Power draw — watts vs. power limit
-- Health indicator
+**GPU Monitor** (via `nvidia-smi`, polled every 30s):
+- NVIDIA-branded card with green accent, hover lift, and glow shadow
+- GPU utilization — animated ring gauge with spring-eased hover scale
+- VRAM — used/total GB with gradient glow bar (blue → yellow → red thresholds)
+- Temperature — metric chip with color-coded value (green < 60°C, yellow < 80°C, red above)
+- Power draw — metric chip with watts/limit and gradient progress bar
+- Active/Error status indicator with pulse animation
 
-**System Monitor** (polled every 15s):
-- CPU usage, RAM usage, disk usage, uptime
+**System Monitor** (polled every 30s):
+- CPU, RAM, Storage — SVG ring gauges with animated stroke transitions
+- CPU & Memory trend sparklines with bezier curves and gradient fills
+- Uptime display with OpenClaw version
 
 ---
 

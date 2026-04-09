@@ -11,7 +11,7 @@ import {
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Copy,
   Shield, Save, Layers, Heart, HeartPulse,
   Sun, Mail, HardDrive, Activity, XCircle, X,
-  History, Send,
+  History, Send, Zap, Stethoscope, ShieldAlert, Database,
 } from "lucide-react";
 
 /* ── Shared Types ── */
@@ -545,7 +545,14 @@ function CalendarTab() {
    TAB 2 — Workflows
    ══════════════════════════════════════════════════════════════ */
 
+function safeParse(stdout: string) {
+  const start = stdout.indexOf("{");
+  if (start === -1) return null;
+  try { return JSON.parse(stdout.slice(start)); } catch { return null; }
+}
+
 function WorkflowsTab() {
+  const setView = useAppStore(s => s.setView);
   const [customWorkflows, setCustomWorkflows] = useState<WorkflowDef[]>(() => loadCustomWorkflows());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
@@ -558,6 +565,60 @@ function WorkflowsTab() {
   const [scheduleCron, setScheduleCron] = useState("0 8 * * *");
   const [scheduling, setScheduling] = useState(false);
   const resultsRef = useRef<HTMLDivElement>(null);
+
+  const [qaRunning, setQaRunning] = useState<string | null>(null);
+  const [qaResult, setQaResult] = useState<string | null>(null);
+
+  const runQa = async (id: string, fn: () => Promise<string>) => {
+    setQaRunning(id); setQaResult(null);
+    try { setQaResult(await fn()); } catch (e) { setQaResult(`Error: ${e instanceof Error ? e.message : "Unknown"}`); } finally { setQaRunning(null); }
+  };
+
+  const quickActions: { id: string; icon: React.ElementType; label: string; desc: string; color: string; action: () => void }[] = [
+    {
+      id: "briefing", icon: Sun, label: "Morning Briefing", desc: "Get today's summary", color: "#fbbf24",
+      action: () => runQa("briefing", async () => {
+        const r = await invoke<{ stdout: string }>("execute_command", {
+          command: 'openclaw agent --agent main --message "Give me a morning briefing: today\'s date, top priorities, and any alerts." --json', cwd: null,
+        });
+        return safeParse(r.stdout)?.response ?? r.stdout;
+      }),
+    },
+    {
+      id: "heartbeat", icon: Zap, label: "Heartbeat", desc: "Trigger heartbeat", color: "#a855f7",
+      action: () => runQa("heartbeat", async () => {
+        if (!openclawClient.isGatewayConnected()) return "Gateway not connected";
+        const r = await openclawClient.triggerHeartbeat();
+        return JSON.stringify(r.payload, null, 2);
+      }),
+    },
+    {
+      id: "security", icon: ShieldAlert, label: "Security Scan", desc: "Run full audit", color: "#f87171",
+      action: () => setView("security"),
+    },
+    {
+      id: "doctor", icon: Stethoscope, label: "Health Check", desc: "Diagnose issues", color: "#4ade80",
+      action: () => setView("doctor"),
+    },
+    {
+      id: "backup", icon: Database, label: "Backup", desc: "Create state backup", color: "#06b6d4",
+      action: () => runQa("backup", async () => {
+        const r = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+          command: "openclaw backup create", cwd: null,
+        });
+        return r.stdout?.trim() || r.stderr?.trim() || "Backup complete";
+      }),
+    },
+    {
+      id: "update", icon: RefreshCw, label: "Check Updates", desc: "Check for new version", color: "#8b5cf6",
+      action: () => runQa("update", async () => {
+        const r = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+          command: "openclaw update status", cwd: null,
+        });
+        return r.stdout?.trim() || r.stderr?.trim() || "Up to date";
+      }),
+    },
+  ];
 
   const [newName, setNewName] = useState(""); const [newDesc, setNewDesc] = useState("");
   const [newCategory, setNewCategory] = useState<WorkflowDef["category"]>("Productivity");
@@ -858,10 +919,68 @@ function WorkflowsTab() {
             )}
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12 }}>
-            <Layers style={{ width: 40, height: 40, color: "var(--text-muted)" }} />
-            <p style={{ fontSize: 13, color: "var(--text-muted)", margin: 0 }}>Select a workflow to run</p>
-            <p style={{ fontSize: 11, color: "var(--text-muted)", maxWidth: 260, textAlign: "center", margin: 0, lineHeight: 1.5 }}>Chain agent commands into automated workflows. Pick a template or create your own.</p>
+          <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "auto" }}>
+            <div style={{ padding: "0 0 24px" }}>
+              <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", margin: "0 0 4px" }}>Quick Actions</p>
+              <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "0 0 14px", lineHeight: 1.5 }}>One-tap shortcuts for common operations.</p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                {quickActions.map(a => {
+                  const Icon = a.icon;
+                  const busy = qaRunning === a.id;
+                  return (
+                    <button key={a.id} onClick={a.action} disabled={busy}
+                      style={{
+                        padding: "14px 12px", borderRadius: 10, border: "1px solid var(--border)", cursor: busy ? "wait" : "pointer",
+                        background: "var(--bg-elevated)", display: "flex", alignItems: "center", gap: 10,
+                        opacity: busy ? 0.6 : 1, textAlign: "left" as const, transition: "background 0.15s, border-color 0.15s",
+                      }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = a.color; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--border)"; }}
+                    >
+                      <div style={{
+                        width: 32, height: 32, borderRadius: 8, flexShrink: 0, display: "flex",
+                        alignItems: "center", justifyContent: "center",
+                        background: `color-mix(in srgb, ${a.color} 12%, transparent)`,
+                      }}>
+                        {busy
+                          ? <Loader2 style={{ width: 14, height: 14, color: a.color, animation: "spin 1s linear infinite" }} />
+                          : <Icon style={{ width: 14, height: 14, color: a.color }} />}
+                      </div>
+                      <div>
+                        <p style={{ margin: 0, fontSize: 11, color: "var(--text)", fontWeight: 600 }}>{a.label}</p>
+                        <p style={{ margin: "2px 0 0", fontSize: 9, color: "var(--text-muted)" }}>{a.desc}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {qaResult && (
+                <div style={{
+                  marginTop: 12, padding: "10px 14px", borderRadius: 10,
+                  background: "var(--bg-elevated)", border: "1px solid var(--border)",
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Result</span>
+                    <button onClick={() => setQaResult(null)}
+                      style={{ fontSize: 10, color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer" }}>
+                      Dismiss
+                    </button>
+                  </div>
+                  <p style={{
+                    fontSize: 11, color: "var(--text-secondary)", whiteSpace: "pre-wrap",
+                    maxHeight: 200, overflow: "auto", margin: 0, lineHeight: 1.5,
+                  }}>
+                    {qaResult}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              <Layers style={{ width: 28, height: 28, color: "var(--text-muted)", opacity: 0.5 }} />
+              <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0, textAlign: "center", maxWidth: 240, lineHeight: 1.5 }}>Select a workflow from the sidebar to run multi-step agent automations.</p>
+            </div>
           </div>
         )}
       </div>
