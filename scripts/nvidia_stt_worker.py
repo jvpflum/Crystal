@@ -1,46 +1,47 @@
 """
-Crystal NVIDIA STT Worker
-WebSocket server for streaming speech-to-text using NVIDIA Nemotron/Parakeet ASR.
+Crystal NVIDIA STT Worker — FastAPI server for streaming speech-to-text.
 
-Target model: nvidia/nemotron-speech-streaming-en-0.6b
-Framework: NVIDIA NeMo
+Model:  nvidia/parakeet-ctc-0.6b (Nemotron/Parakeet-family ASR)
+Method: NeMo ASR — streaming via WebSocket, batch via POST /transcribe
 
-This worker runs on the local NVIDIA GPU and provides streaming transcription
-to the Crystal TypeScript app via WebSocket on port 8090.
+Endpoints:
+  WS   /ws             — streaming STT (push PCM chunks, receive partial/final transcripts)
+  POST /transcribe      — batch STT (upload WAV/audio file, receive transcript)
+  GET  /health          — health check (model status, backend info)
 
-Protocol:
-  1. Client opens WS connection
-  2. Client sends JSON: { "type": "start", "config": { "sample_rate": 16000, ... } }
-  3. Client sends binary frames (raw PCM int16 audio)
-  4. Server sends JSON partials: { "type": "partial", "text": "..." }
-  5. Client sends JSON: { "type": "end" }
-  6. Server sends JSON final: { "type": "final", "text": "...", "confidence": 0.95 }
-  7. Client sends JSON: { "type": "cancel" } to abort
+WebSocket Protocol:
+  1. Client sends JSON: { "type": "start", "config": { "sample_rate": 16000, ... } }
+  2. Client sends binary frames (raw PCM int16 audio)
+  3. Server sends JSON partials: { "type": "partial", "text": "..." }
+  4. Client sends JSON: { "type": "end" }
+  5. Server sends JSON final: { "type": "final", "text": "...", "confidence": 0.95 }
+  6. Client sends JSON: { "type": "cancel" } to abort
 
-Also exposes HTTP /health and /transcribe endpoints for health checks and batch mode.
+Usage:
+  python nvidia_stt_worker.py
+  # or with env overrides:
+  NVIDIA_STT_PORT=8090 NVIDIA_STT_MODEL=nvidia/parakeet-ctc-0.6b python nvidia_stt_worker.py
 """
 
 import os
-import sys
 import json
 import asyncio
-import signal
-import struct
-import logging
 import tempfile
+import logging
 import numpy as np
-from pathlib import Path
-from aiohttp import web
+from typing import Optional
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO, format="[NvidiaStt] %(levelname)s %(message)s")
 log = logging.getLogger("nvidia_stt")
 
 PORT = int(os.environ.get("NVIDIA_STT_PORT", "8090"))
-MODEL_NAME = os.environ.get(
-    "NVIDIA_STT_MODEL", "nvidia/parakeet-ctc-0.6b"
-)
+MODEL_NAME = os.environ.get("NVIDIA_STT_MODEL", "nvidia/parakeet-ctc-0.6b")
 
-# ── Model Loading ───────────────────────────────────────────────
+# ── Model State ──────────────────────────────────────────────────
 
 asr_model = None
 model_ready = False
@@ -48,30 +49,6 @@ model_loading = False
 
 
 def load_model():
-    """
-    Load the NVIDIA Nemotron/Parakeet ASR model using NeMo.
-
-    TODO: Replace this scaffolding with actual model loading once NeMo is installed.
-    The target workflow is:
-
-        import nemo.collections.asr as nemo_asr
-        model = nemo_asr.models.ASRModel.from_pretrained(MODEL_NAME)
-        model.eval()
-        model.cuda()
-
-    For streaming inference, use the model's streaming/buffered transcription API:
-
-        from nemo.collections.asr.parts.utils.streaming_utils import FrameBatchASR
-        streaming_asr = FrameBatchASR(
-            asr_model=model,
-            frame_len=1.6,     # seconds per frame
-            total_buffer=4.0,  # total buffer in seconds
-            batch_size=1,
-        )
-
-    Alternative: If running via Triton Inference Server, connect as a gRPC client
-    instead of loading the model directly.
-    """
     global asr_model, model_ready, model_loading
     model_loading = True
 
@@ -103,27 +80,11 @@ def load_model():
 
 
 def transcribe_audio(audio_np: np.ndarray, sample_rate: int = 16000) -> dict:
-    """
-    Transcribe a numpy audio array using the loaded ASR model.
-
-    TODO: Wire actual NeMo inference here:
-
-        with torch.no_grad():
-            hypotheses = asr_model.transcribe([audio_np])
-            text = hypotheses[0] if hypotheses else ""
-
-    For streaming partial results, use FrameBatchASR:
-
-        streaming_asr.reset()
-        streaming_asr.read_audio_buffer(audio_np, delay=0)
-        text = streaming_asr.transcribe(tokens_per_chunk=..., delay=...)
-    """
+    """Transcribe a float32 numpy array. Returns { text, confidence }."""
     if asr_model is not None and model_ready:
         try:
             import torch
-
             with torch.no_grad():
-                # NeMo expects a list of numpy arrays or file paths
                 hypotheses = asr_model.transcribe([audio_np])
                 text = hypotheses[0] if hypotheses else ""
                 return {"text": text.strip(), "confidence": 0.9}
@@ -131,32 +92,143 @@ def transcribe_audio(audio_np: np.ndarray, sample_rate: int = 16000) -> dict:
             log.error(f"Transcription error: {e}")
             return {"text": "", "confidence": 0.0, "error": str(e)}
 
-    # Scaffold mode: return placeholder
     log.debug("Scaffold mode: returning placeholder transcription")
+    return {"text": "[NeMo model not loaded — scaffold mode]", "confidence": 0.0}
+
+
+# ── FastAPI Application ──────────────────────────────────────────
+
+app = FastAPI(
+    title="Crystal NVIDIA STT Worker",
+    description="Streaming and batch speech-to-text using NVIDIA Nemotron/Parakeet ASR on local GPU.",
+    version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class TranscribeResponse(BaseModel):
+    text: str
+    confidence: float = 0.0
+    duration: Optional[float] = None
+    error: Optional[str] = None
+
+
+@app.on_event("startup")
+async def startup():
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, load_model)
+
+
+@app.get("/health")
+def health():
     return {
-        "text": "[NeMo model not loaded — scaffold mode]",
-        "confidence": 0.0,
+        "status": "ok",
+        "ready": model_ready,
+        "loading": model_loading,
+        "model": MODEL_NAME,
+        "backend": "nemo" if asr_model is not None else ("loading" if model_loading else "scaffold"),
+        "endpoints": {
+            "websocket": f"ws://127.0.0.1:{PORT}/ws",
+            "transcribe": f"http://127.0.0.1:{PORT}/transcribe",
+            "health": f"http://127.0.0.1:{PORT}/health",
+        },
     }
 
 
-# ── WebSocket Server ────────────────────────────────────────────
+@app.post("/transcribe", response_model=TranscribeResponse)
+async def transcribe(file: UploadFile = File(...)):
+    """
+    Batch transcription: upload a WAV/audio file, receive the transcript.
 
-async def handle_stt_session(websocket):
-    """Handle one STT WebSocket session."""
+    Accepts any audio format that soundfile can read (WAV, FLAC, OGG, etc.).
+    Audio is automatically resampled to 16kHz mono for the ASR model.
+    """
+    audio_data = await file.read()
+    if not audio_data:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    suffix = ".wav"
+    if file.filename:
+        ext = os.path.splitext(file.filename)[1]
+        if ext:
+            suffix = ext
+
+    try:
+        import soundfile as sf
+
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(audio_data)
+            tmp_path = tmp.name
+
+        data, sr = sf.read(tmp_path, dtype="float32")
+        os.unlink(tmp_path)
+
+        # Resample to 16kHz if needed
+        if sr != 16000:
+            ratio = 16000 / sr
+            new_len = int(len(data) * ratio)
+            indices = np.linspace(0, len(data) - 1, new_len)
+            data = np.interp(indices, np.arange(len(data)), data)
+            sr = 16000
+
+        duration = len(data) / sr
+        result = transcribe_audio(data, sr)
+
+        return TranscribeResponse(
+            text=result["text"],
+            confidence=result.get("confidence", 0.0),
+            duration=round(duration, 2),
+            error=result.get("error"),
+        )
+
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="soundfile not installed. Install with: pip install soundfile",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.websocket("/ws")
+async def websocket_stt(ws: WebSocket):
+    """
+    Streaming STT via WebSocket.
+
+    Protocol:
+      1. Send JSON: { "type": "start", "config": { "sample_rate": 16000 } }
+      2. Send binary PCM int16 audio chunks
+      3. Receive JSON: { "type": "partial", "text": "..." }
+      4. Send JSON: { "type": "end" } to finalize
+      5. Receive JSON: { "type": "final", "text": "...", "confidence": 0.95 }
+    """
+    await ws.accept()
+    log.info("New STT WebSocket session")
+
     audio_buffer = bytearray()
     sample_rate = 16000
     streaming = False
 
-    log.info(f"New STT session from {websocket.remote_address}")
-
     try:
-        async for message in websocket:
-            if isinstance(message, bytes):
+        while True:
+            message = await ws.receive()
+
+            if message["type"] == "websocket.disconnect":
+                break
+
+            if "bytes" in message and message["bytes"]:
+                raw = message["bytes"]
                 if not streaming:
                     continue
-                audio_buffer.extend(message)
+                audio_buffer.extend(raw)
 
-                # Send partial transcription every ~0.5s of audio (16000 samples * 2 bytes)
+                # Emit partial transcript every ~1s of audio
                 chunk_threshold = sample_rate * 2  # 1 second of int16 audio
                 if len(audio_buffer) >= chunk_threshold:
                     audio_np = np.frombuffer(
@@ -164,26 +236,26 @@ async def handle_stt_session(websocket):
                     ).astype(np.float32) / 32768.0
 
                     result = transcribe_audio(audio_np, sample_rate)
-                    await websocket.send(json.dumps({
+                    await ws.send_json({
                         "type": "partial",
                         "text": result["text"],
                         "confidence": result.get("confidence", 0.0),
-                    }))
+                    })
 
-            elif isinstance(message, str):
+            elif "text" in message and message["text"]:
                 try:
-                    msg = json.loads(message)
+                    data = json.loads(message["text"])
                 except json.JSONDecodeError:
                     continue
 
-                msg_type = msg.get("type", "")
+                msg_type = data.get("type", "")
 
                 if msg_type == "start":
-                    config = msg.get("config", {})
+                    config = data.get("config", {})
                     sample_rate = config.get("sample_rate", 16000)
                     streaming = True
                     audio_buffer = bytearray()
-                    await websocket.send(json.dumps({"type": "ready"}))
+                    await ws.send_json({"type": "ready"})
                     log.info(f"Stream started (sample_rate={sample_rate})")
 
                 elif msg_type == "end":
@@ -196,20 +268,19 @@ async def handle_stt_session(websocket):
                         result = transcribe_audio(audio_np, sample_rate)
                         duration = len(audio_np) / sample_rate
 
-                        await websocket.send(json.dumps({
+                        await ws.send_json({
                             "type": "final",
                             "text": result["text"],
                             "confidence": result.get("confidence", 0.0),
                             "duration": round(duration, 2),
-                        }))
+                        })
                     else:
-                        await websocket.send(json.dumps({
+                        await ws.send_json({
                             "type": "final",
                             "text": "",
                             "confidence": 0.0,
                             "duration": 0.0,
-                        }))
-
+                        })
                     audio_buffer = bytearray()
                     log.info("Stream ended")
 
@@ -219,214 +290,34 @@ async def handle_stt_session(websocket):
                     log.info("Stream cancelled")
                     break
 
+    except WebSocketDisconnect:
+        log.info("STT WebSocket client disconnected")
     except Exception as e:
-        log.error(f"Session error: {e}")
+        log.error(f"STT WebSocket error: {e}")
         try:
-            await websocket.send(json.dumps({
-                "type": "error",
-                "message": str(e),
-            }))
+            await ws.send_json({"type": "error", "message": str(e)})
         except Exception:
             pass
 
     log.info("STT session closed")
 
 
-# ── CORS Middleware ──────────────────────────────────────────────
+# ── Root redirect to docs ────────────────────────────────────────
 
-CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-}
-
-
-@web.middleware
-async def cors_middleware(request, handler):
-    if request.method == "OPTIONS":
-        return web.Response(status=204, headers=CORS_HEADERS)
-    resp = await handler(request)
-    resp.headers.update(CORS_HEADERS)
-    return resp
-
-
-# ── HTTP Endpoints (via aiohttp for health + batch) ─────────────
-
-async def handle_http(request):
-    """Simple HTTP router for /health and /transcribe."""
-    path = request.path
-
-    if path == "/health":
-        return web.json_response({
-            "status": "ok",
-            "ready": model_ready,
-            "loading": model_loading,
-            "model": MODEL_NAME,
-            "backend": "nemo" if asr_model is not None else ("loading" if model_loading else "scaffold"),
-        })
-
-    elif path == "/transcribe" and request.method == "POST":
-        reader = await request.multipart()
-        field = await reader.next()
-        if field is None:
-            return web.json_response({"error": "No file uploaded"}, status=400)
-
-        audio_data = await field.read()
-        try:
-            import soundfile as sf
-
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                tmp.write(audio_data)
-                tmp_path = tmp.name
-
-            data, sr = sf.read(tmp_path, dtype="float32")
-            os.unlink(tmp_path)
-
-            if sr != 16000:
-                ratio = 16000 / sr
-                new_len = int(len(data) * ratio)
-                indices = np.linspace(0, len(data) - 1, new_len)
-                data = np.interp(indices, np.arange(len(data)), data)
-
-            result = transcribe_audio(data, 16000)
-            return web.json_response(result)
-
-        except Exception as e:
-            return web.json_response({"error": str(e)}, status=500)
-
-    return web.json_response({"error": "Not found"}, status=404)
-
-
-# ── Main ────────────────────────────────────────────────────────
-
-async def main():
-    # Unified handler: WebSocket upgrades + normal HTTP
-    async def unified_handler(request):
-        if request.headers.get("Upgrade", "").lower() == "websocket":
-            ws = web.WebSocketResponse()
-            await ws.prepare(request)
-            await handle_aiohttp_ws(ws)
-            return ws
-        return await handle_http(request)
-
-    app = web.Application(middlewares=[cors_middleware])
-    app.router.add_get("/health", handle_http)
-    app.router.add_post("/transcribe", handle_http)
-    app.router.add_get("/ws", unified_handler)
-    app.router.add_get("/", unified_handler)
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", PORT)
-    await site.start()
-
-    log.info(f"NVIDIA STT Worker listening on port {PORT}")
-    log.info(f"  WebSocket: ws://127.0.0.1:{PORT}/")
-    log.info(f"  HTTP:      http://127.0.0.1:{PORT}/health")
-
-    # Load model in background so health endpoint is available immediately
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, load_model)
-
-    log.info("Model loading complete, ready for inference")
-
-    # Keep running until interrupted
-    stop_event = asyncio.Event()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, stop_event.set)
-        except NotImplementedError:
-            pass
-
-    try:
-        await stop_event.wait()
-    except (KeyboardInterrupt, SystemExit):
-        pass
-
-    await runner.cleanup()
-    log.info("STT Worker shut down")
-
-
-async def handle_aiohttp_ws(ws):
-    """Handle a WebSocket session via aiohttp WebSocketResponse."""
-    from aiohttp import WSMsgType
-
-    audio_buffer = bytearray()
-    sample_rate = 16000
-    streaming = False
-
-    log.info("New STT session (aiohttp WS)")
-
-    async for msg in ws:
-        if msg.type == WSMsgType.BINARY:
-            if not streaming:
-                continue
-            audio_buffer.extend(msg.data)
-
-            chunk_threshold = sample_rate * 2
-            if len(audio_buffer) >= chunk_threshold:
-                audio_np = np.frombuffer(
-                    bytes(audio_buffer), dtype=np.int16
-                ).astype(np.float32) / 32768.0
-
-                result = transcribe_audio(audio_np, sample_rate)
-                await ws.send_json({
-                    "type": "partial",
-                    "text": result["text"],
-                    "confidence": result.get("confidence", 0.0),
-                })
-
-        elif msg.type == WSMsgType.TEXT:
-            try:
-                data = json.loads(msg.data)
-            except json.JSONDecodeError:
-                continue
-
-            msg_type = data.get("type", "")
-
-            if msg_type == "start":
-                config = data.get("config", {})
-                sample_rate = config.get("sample_rate", 16000)
-                streaming = True
-                audio_buffer = bytearray()
-                await ws.send_json({"type": "ready"})
-
-            elif msg_type == "end":
-                streaming = False
-                if len(audio_buffer) > 0:
-                    audio_np = np.frombuffer(
-                        bytes(audio_buffer), dtype=np.int16
-                    ).astype(np.float32) / 32768.0
-
-                    result = transcribe_audio(audio_np, sample_rate)
-                    duration = len(audio_np) / sample_rate
-
-                    await ws.send_json({
-                        "type": "final",
-                        "text": result["text"],
-                        "confidence": result.get("confidence", 0.0),
-                        "duration": round(duration, 2),
-                    })
-                else:
-                    await ws.send_json({
-                        "type": "final",
-                        "text": "",
-                        "confidence": 0.0,
-                        "duration": 0.0,
-                    })
-                audio_buffer = bytearray()
-
-            elif msg_type == "cancel":
-                streaming = False
-                audio_buffer = bytearray()
-                break
-
-        elif msg.type in (WSMsgType.ERROR, WSMsgType.CLOSE):
-            break
-
-    log.info("STT session closed")
+@app.get("/")
+def root():
+    return {
+        "service": "Crystal NVIDIA STT Worker",
+        "model": MODEL_NAME,
+        "docs": f"http://127.0.0.1:{PORT}/docs",
+        "endpoints": {
+            "POST /transcribe": "Upload audio file for batch transcription",
+            "WS /ws": "WebSocket endpoint for streaming STT",
+            "GET /health": "Health check and model status",
+        },
+    }
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=PORT)

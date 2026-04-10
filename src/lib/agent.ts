@@ -105,8 +105,17 @@ class AgentService {
     return `Image generated in the workspace images folder.`;
   }
 
-  async *streamChat(userMessage: string, sessionId?: string, thinking?: string): AsyncGenerator<string> {
+  async *streamChat(
+    userMessage: string,
+    sessionId?: string,
+    thinking?: string,
+    overrides?: { temperature?: number; maxTokens?: number; topP?: number },
+  ): AsyncGenerator<string> {
     this.emitStep({ action: { type: "thinking" }, timestamp: new Date() });
+
+    if (overrides) {
+      await openclawClient.applySessionOverrides(overrides).catch(() => {});
+    }
 
     const imagePrompt = this.isImageRequest(userMessage);
 

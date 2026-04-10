@@ -29,9 +29,11 @@ struct ServerStatus {
     whisper_running: bool,
     tts_running: bool,
     ollama_running: bool,
+    vllm_running: bool,
     openclaw_running: bool,
     nvidia_stt_running: bool,
     nvidia_tts_running: bool,
+    voice_gateway_running: bool,
 }
 
 struct ServerProcesses {
@@ -41,6 +43,7 @@ struct ServerProcesses {
     openclaw: Option<Child>,
     nvidia_stt: Option<Child>,
     nvidia_tts: Option<Child>,
+    voice_gateway: Option<Child>,
     http_client: reqwest::Client,
 }
 
@@ -85,6 +88,7 @@ impl Default for AppState {
                 openclaw: None,
                 nvidia_stt: None,
                 nvidia_tts: None,
+                voice_gateway: None,
                 http_client: reqwest::Client::new(),
             }),
             scripts_dir: Mutex::new(None),
@@ -707,9 +711,11 @@ fn get_server_status() -> ServerStatus {
         whisper_running: check_port_in_use(8080),
         tts_running: check_port_in_use(8081),
         ollama_running: check_port_in_use(11434),
+        vllm_running: check_port_in_use(8000),
         openclaw_running: check_port_in_use(18789),
         nvidia_stt_running: check_port_in_use(8090),
         nvidia_tts_running: check_port_in_use(8091),
+        voice_gateway_running: check_port_in_use(6500),
     }
 }
 
@@ -998,6 +1004,7 @@ fn sanitize_openclaw_config() {
 
     // Provider defaults for missing baseUrl
     let provider_defaults: HashMap<&str, &str> = [
+        ("vllm", "http://127.0.0.1:8000/v1"),
         ("ollama", "http://127.0.0.1:11434"),
         ("anthropic", "https://api.anthropic.com"),
         ("xai", "https://api.x.ai/v1"),
@@ -1179,21 +1186,24 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
     
     start_gateway_resilient(app);
 
-    // Start Ollama if not already running
-    if !check_port_in_use(11434) {
-        println!("Starting Ollama...");
+    // LLM backend detection: prefer vLLM (:8000), fall back to Ollama (:11434)
+    if check_port_in_use(8000) {
+        println!("vLLM detected on port 8000 (OpenAI-compatible API)");
+    } else if check_port_in_use(11434) {
+        println!("Ollama detected on port 11434 (fallback LLM)");
+    } else {
+        // Try starting Ollama as fallback if no LLM server is running
+        println!("No LLM server detected. Attempting to start Ollama as fallback...");
         match spawn_hidden("ollama", &["serve"]) {
             Ok(child) => {
                 if let Some(state) = app.try_state::<AppState>() {
                     let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
                     servers.llm = Some(child);
                 }
-                println!("Ollama started on port 11434");
+                println!("Ollama started on port 11434 (fallback LLM)");
             }
-            Err(e) => eprintln!("Failed to start Ollama: {} - make sure Ollama is installed", e),
+            Err(e) => eprintln!("No LLM server available. Start vLLM or Ollama manually. ({})", e),
         }
-    } else {
-        println!("Ollama already running on port 11434");
     }
 
     if let Some(ref scripts_path) = scripts_dir {
@@ -1219,7 +1229,7 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
                     // Kill orphaned voice servers from previous sessions
                     #[cfg(target_os = "windows")]
                     {
-                        for port in [8080u16, 8081, 8090, 8091] {
+                        for port in [8080u16, 8081, 8090, 8091, 6500] {
                             if check_port_in_use(port) {
                                 let kill_cmd = format!("Get-NetTCPConnection -LocalPort {} -ErrorAction SilentlyContinue | ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}", port);
                                 let mut cmd = Command::new("powershell");
@@ -1283,6 +1293,22 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
                             }
                             Err(e) => eprintln!("Failed to start TTS: {}", e),
                         }
+                    }
+
+                    // Start Voice Gateway (unified STT/TTS API on port 6500)
+                    let gateway_script = scripts_path.join("voice_gateway.py");
+                    if gateway_script.exists() && !check_port_in_use(6500) {
+                        println!("Starting Voice Gateway...");
+                        let script_str = gateway_script.to_string_lossy().to_string();
+                        match spawn_hidden(python, &[&script_str]) {
+                            Ok(child) => {
+                                servers.voice_gateway = Some(child);
+                                println!("Voice Gateway started on port 6500");
+                            }
+                            Err(e) => eprintln!("Failed to start Voice Gateway: {}", e),
+                        }
+                    } else if check_port_in_use(6500) {
+                        println!("Voice Gateway already running on port 6500");
                     }
                 }
             } else {

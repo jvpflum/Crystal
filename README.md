@@ -6,14 +6,14 @@
 
 <p align="center">
   <strong>The most complete desktop frontend for <a href="https://github.com/nichochar/open-claw">OpenClaw</a>.</strong><br/>
-  A native AI command center with 30 views, AI-powered search, 70+ slash commands, NVIDIA-accelerated voice, multi-provider LLM support, token cost analytics, and a full agent workspace — all in a single desktop app.
+  A native AI command center with 30 views, AI-powered search, 70+ slash commands, NVIDIA-accelerated voice, 8-provider LLM support with offline mode, token cost analytics, a unified voice gateway, and a full agent workspace — all in a single desktop app.
 </p>
 
 <p align="center">
   <a href="#-features"><img src="https://img.shields.io/badge/30-Views-6366f1?style=flat-square" /></a>
   <a href="#-ai-chat"><img src="https://img.shields.io/badge/70+-Slash%20Commands-3b82f6?style=flat-square" /></a>
   <a href="#-voice-engine"><img src="https://img.shields.io/badge/6-Voice%20Providers-10b981?style=flat-square" /></a>
-  <a href="#-multi-provider-llm"><img src="https://img.shields.io/badge/7-LLM%20Providers-f59e0b?style=flat-square" /></a>
+  <a href="#-multi-provider-llm"><img src="https://img.shields.io/badge/8-LLM%20Providers-f59e0b?style=flat-square" /></a>
   <a href="#-tech-stack"><img src="https://img.shields.io/badge/Tauri-2.0-24c8db?style=flat-square&logo=tauri" /></a>
   <a href="#-voice-engine"><img src="https://img.shields.io/badge/NVIDIA-RTX%20Voice-76b900?style=flat-square&logo=nvidia" /></a>
   <a href="#-themes"><img src="https://img.shields.io/badge/6-Themes-ec4899?style=flat-square" /></a>
@@ -27,6 +27,40 @@
 ---
 
 ## What's New
+
+### April 2026 — v0.8.0 Chat Settings, GPU HUD, Voice Gateway, Forge Pipeline
+
+#### World-Class Chat Experience
+- **In-Chat Settings Drawer** — Gear icon in the chat header opens a 300px slide-out panel with model selector, temperature/max tokens/top-p sliders, thinking level picker, response style presets (Concise/Balanced/Detailed), and streaming toggle. All settings persisted to localStorage via new `chatSettingsStore`.
+- **Offline Mode Toggle** — One-click switch to local models. Auto-detects vLLM on port 8000 and Ollama on port 11434, stores/restores cloud model on toggle. Green "LOCAL" badge in header when active.
+- **Regenerate Response** — RefreshCw button on the latest assistant message to re-run the prompt with current settings.
+- **Edit & Resend** — Pencil icon on user messages opens inline edit mode. Truncates history at that point and resends with the edited content.
+- **Message Feedback** — ThumbsUp/ThumbsDown on every assistant message, persisted in conversation data. Filled icon when selected.
+- **Conversation Export** — Download icon + `Ctrl+Shift+E` exports the full conversation as a formatted Markdown file with metadata header.
+- **In-Chat Search** — Search icon + `Ctrl+F` opens a search bar that filters messages and highlights matches with an amber border glow.
+- **Keyboard Shortcuts** — `Ctrl+Shift+N` (new chat), `Ctrl+F` (search), `Ctrl+Shift+E` (export), `Escape` (close settings/search).
+- **Parameters Wired to Pipeline** — Temperature, max tokens, and top-p are now written to `agents.defaults` in `openclaw.json` via `applySessionOverrides()` before each chat, with deduplication to avoid redundant config writes.
+- **Message Count** — Live message count shown in header.
+
+#### GPU Monitor HUD Redesign
+- **HUD-Inspired Design** — Complete rewrite of `GpuMonitor.tsx` with cyberpunk HUD styling: corner brackets, scan-line overlay, decorative tick marks on ring gauges.
+- **Large GPU Core Ring** — 100px ring gauge with 12 cyan tick marks, pulsing center glow above 80% utilization.
+- **Secondary Metric Rings** — Three 58px rings for VRAM, Temperature, and Power draw with color-coded thresholds.
+- **Segmented Bars** — 20-segment notched progress bars for VRAM and Power replacing smooth gradients. Filled segments glow, empty segments show dim outlines.
+- **Stats Grid** — Four-column grid showing Core%, VRAM%, Temp, and Power with glowing monospace values.
+- **Utilization History Chart** — Vertical bar chart showing last 20 GPU utilization samples with HUD grid lines and color gradient (green to amber).
+- **HUD Section Label** — "01//GPU MONITOR" numbering style with cyan monospace font replaces generic section label in HomeView.
+
+#### Unified Voice Gateway
+- **Voice Gateway Service** — New `voice_gateway.py` FastAPI service on port 6500 that unifies STT and TTS backends. Normalizes HTTP (`/stt/transcribe`, `/tts/speak`) and WebSocket (`/stt/realtime`, `/tts/realtime`) endpoints. Auto-discovers and routes to the best available backend (NVIDIA, Whisper, Kokoro).
+- **vLLM Integration** — vLLM added as the preferred local LLM backend (port 8000). Rust backend prioritizes vLLM over Ollama for auto-start. New provider in Settings, token usage store, and secrets management.
+- **STT Worker FastAPI Rewrite** — `nvidia_stt_worker.py` rewritten from aiohttp to FastAPI with `/transcribe`, `/ws`, `/health`, and auto-generated `/docs` endpoints.
+- **Voice Pipeline Optimization** — 20ms audio chunking, Web Audio API playback (replacing HTMLAudioElement), parallel provider initialization, warm-mic pause/resume, health check caching (5s TTL), and pre-connection audio buffering.
+
+#### Forge Software Factory Overhaul
+- **Automatic 4-Stage Pipeline** — Plan → Code → Test → Review stages with specialized agent prompts. Each stage streams live output via Rust `start_streaming_command`.
+- **Tabbed Interface** — Pipeline, Workspace, History, and Deploy tabs replacing the old two-tab layout.
+- **Build Model** — New `Build` data structure with pipeline stages, per-stage status/output, and build metadata.
 
 ### April 2026 — v0.7.0 Major Feature Release
 
@@ -169,7 +203,7 @@ Crystal wraps [OpenClaw](https://github.com/nichochar/open-claw) — an open-sou
 
 ### AI Chat
 
-Full-featured conversation interface with multi-conversation sidebar, Markdown rendering, syntax-highlighted code blocks, streaming typewriter responses, live TPS counter, and thinking level control.
+Full-featured conversation interface with multi-conversation sidebar, Markdown rendering, syntax-highlighted code blocks, streaming typewriter responses, live TPS counter, thinking level control, in-chat settings drawer, offline mode toggle, message feedback, regenerate, edit-and-resend, conversation export, and in-chat search.
 
 **6 Built-In Tools:**
 
@@ -241,11 +275,12 @@ Crystal ships with a multi-provider voice architecture that automatically select
 
 ### Multi-Provider LLM
 
-Crystal supports 7 LLM providers. Manage API keys visually in Settings and switch models on the fly.
+Crystal supports 8 LLM providers. Manage API keys visually in Settings and switch models on the fly — or toggle offline mode in the chat settings drawer to auto-switch to local inference.
 
 | Provider | Type |
 |----------|------|
-| **Ollama** | Local (default) |
+| **vLLM** | Local (preferred, OpenAI-compatible on port 8000) |
+| **Ollama** | Local (fallback) |
 | **OpenAI** | Cloud API |
 | **Anthropic** | Cloud API |
 | **Google** | Cloud API |
@@ -253,22 +288,26 @@ Crystal supports 7 LLM providers. Manage API keys visually in Settings and switc
 | **Groq** | Cloud API (fast inference) |
 | **Mistral** | Cloud API |
 
-AI configuration includes temperature (0–2), max tokens, context window, system prompt editing, and thinking level control (auto, minimal, medium, high).
+AI configuration includes temperature (0–2), max tokens, top-p, response style presets, context window, system prompt editing, and thinking level control (auto, minimal, medium, high). All parameters can be adjusted in the chat settings drawer and are wired directly to the OpenClaw agent pipeline.
 
 ---
 
-### Software Factory
+### Software Factory (Forge)
 
-Two-tab view for skills and autonomous builds:
+Four-tab automated software factory with a 4-stage build pipeline:
 
-**Skills Tab** — Browse and launch all OpenClaw workspace and bundled skills:
-- Searchable grid with eligibility indicators and missing dependency details
-- One-click launch with custom prompts, dispatched via OpenClaw agents
-- Skill detail panel with full description, dependencies, and documentation links
+**Pipeline Tab** — Automatic Plan → Code → Test → Review pipeline:
+- Specialized agent prompts per stage
+- Live streaming output via Rust `start_streaming_command`
+- Per-stage status tracking (pending, running, success, failure)
 
-**Projects Tab** — Create projects and dispatch coding agents:
-- Supports any agent ID (claude-code, cortex, main, research, etc.)
-- Stream live logs, cancel active runs, browse run workspace files
+**Workspace Tab** — Browse and manage build workspace files:
+- Directory browser with file tree and inline file viewer
+- Run workspace exploration for active builds
+
+**History Tab** — Complete build history with logs and metadata
+
+**Deploy Tab** — Deployment management for completed builds
 
 ---
 
@@ -358,12 +397,13 @@ Per-channel: add/remove, login/logout, view capabilities, configure tokens, reso
 ### GPU & System Monitoring
 
 **GPU Monitor** (via `nvidia-smi`, polled every 30s):
-- NVIDIA-branded card with green accent, hover lift, and glow shadow
-- GPU utilization — animated ring gauge with spring-eased hover scale
-- VRAM — used/total GB with gradient glow bar (blue → yellow → red thresholds)
-- Temperature — metric chip with color-coded value (green < 60°C, yellow < 80°C, red above)
-- Power draw — metric chip with watts/limit and gradient progress bar
-- Active/Error status indicator with pulse animation
+- HUD-themed card with scan-line overlay and decorative corner brackets
+- GPU Core — Large 100px ring gauge with 12 cyan tick marks and pulsing center glow (>80%)
+- Secondary metrics — Three 58px ring gauges for VRAM, Temperature, and Power
+- VRAM & Power — 20-segment notched progress bars with glowing filled segments
+- Stats grid — Monospace key-value display for Core%, VRAM%, Temp, Power
+- Utilization history — 20-sample vertical bar chart with HUD grid lines and green-to-amber gradient
+- HUD section label — "01//GPU MONITOR" numbering style in cyan monospace
 
 **System Monitor** (polled every 30s):
 - CPU, RAM, Storage — SVG ring gauges with animated stroke transitions
@@ -531,10 +571,14 @@ Terminal-style output with color-coded results and summary cards (Passed / Warni
 | `Ctrl + Space` | Toggle Crystal window (global) |
 | `Ctrl + K` | Command palette (with AI-powered search) |
 | `Ctrl + N` | New conversation |
+| `Ctrl + F` | Search in conversation (in chat) |
+| `Ctrl + Shift + N` | New chat (in chat) |
+| `Ctrl + Shift + E` | Export conversation (in chat) |
 | `Ctrl + ,` | Settings |
 | `Ctrl + Shift + D` | Doctor |
 | `Ctrl + Shift + S` | Security |
 | `Ctrl + 1–9` | Switch between views |
+| `Escape` | Close settings drawer / search bar |
 | `/` | Slash command menu (in chat) |
 | `Enter` | Send message |
 | `Shift + Enter` | New line in message |
@@ -573,7 +617,7 @@ Crystal is engineered to feel instant:
 | Frontend | React 19, TypeScript, Tailwind CSS 4, Zustand |
 | Backend | Rust (Tokio, Reqwest, Serde) |
 | AI Agent | [OpenClaw](https://github.com/nichochar/open-claw) |
-| LLM (Local) | [Ollama](https://ollama.com/) |
+| LLM (Local) | [vLLM](https://github.com/vllm-project/vllm) (preferred), [Ollama](https://ollama.com/) (fallback) |
 | LLM (Cloud) | OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral |
 | Voice STT | NVIDIA Nemotron, Whisper, Web Speech API |
 | Voice TTS | NVIDIA Magpie, Kokoro, Web Speech API |
@@ -654,8 +698,9 @@ Crystal/
 │   │   ├── shell/                    # TitleBar, Navigation, CommandPalette (AI-powered), Onboarding, Toast
 │   │   ├── views/                    # 30 feature views
 │   │   ├── voice/                    # VoiceOrb, TranscriptPanel, ConfirmationCard, EventLog
+│   │   ├── chat/                     # ChatSettingsDrawer (model, offline mode, params, presets)
 │   │   ├── factory/                  # DirectoryBrowser, FileTree, FileViewer, RunWorkspace
-│   │   └── widgets/                  # GpuMonitor
+│   │   └── widgets/                  # GpuMonitor (HUD-themed)
 │   ├── hooks/                        # useOpenClaw, useVoice, useStorage, useKeyboardShortcuts
 │   ├── lib/
 │   │   ├── agent.ts                  # AI agent (system prompt, tool loop, action buttons, image gen)
@@ -684,14 +729,18 @@ Crystal/
 │       ├── themeStore.ts             # 6 themes with CSS variable mapping
 │       ├── dataStore.ts              # Data caching layer (8 cache entries: cron, agents, memory, system, tasks, channels, skills, sessions)
 │       ├── tokenUsageStore.ts        # Per-provider token tracking with cost estimation
-│       └── factoryStore.ts           # Factory project/run state (dynamic agent types)
+│       ├── chatSettingsStore.ts      # Chat settings (offline mode, temperature, maxTokens, topP, responseStyle)
+│       └── factoryStore.ts           # Factory build pipeline state (4-stage pipeline)
 ├── src-tauri/                        # Rust backend
 │   ├── src/
 │   │   ├── lib.rs                    # 13 Tauri commands, server lifecycle, system tray
 │   │   └── main.rs                   # Entry point
 │   ├── icons/                        # App icons (all sizes + .ico + .icns)
 │   └── tauri.conf.json               # Tauri configuration
-├── scripts/                          # Voice server scripts
+├── scripts/                          # Voice & inference server scripts
+│   ├── voice_gateway.py              # Unified voice gateway (FastAPI, port 6500)
+│   ├── nvidia_stt_worker.py          # NVIDIA STT worker (FastAPI, port 8090)
+│   ├── start_voice_servers.py        # Voice server launcher
 │   ├── whisper_server.py             # Whisper STT server
 │   ├── tts_server.py                 # Kokoro TTS server
 │   ├── requirements.txt              # Python dependencies
@@ -710,7 +759,7 @@ Crystal/
 | Views | 30 |
 | Slash commands | 70+ |
 | Voice providers | 6 (3 STT + 3 TTS) |
-| LLM providers | 7 |
+| LLM providers | 8 (incl. vLLM) |
 | Themes | 6 |
 | Tools | 6 |
 | Channel integrations | 11 |
@@ -720,13 +769,14 @@ Crystal/
 | Cron templates | 6 |
 | Telegram topics | 5 |
 | Diagnostic commands | 6 |
-| Keyboard shortcuts | 10 |
+| Keyboard shortcuts | 14 |
 | Tauri commands | 13 |
 | OpenClaw skills | 51+ |
 | Data cache entries | 8 |
 | AI search view mappings | 80+ |
 | Nav sections | 3 (Mission / Claw / System) |
-| Token cost providers | 8 |
+| Token cost providers | 9 |
+| Chat settings controls | 7 |
 
 ---
 

@@ -1,10 +1,14 @@
 /**
- * AudioOutputManager — handles audio playback with queue and barge-in support.
+ * AudioOutputManager — low-latency audio playback with queue and barge-in support.
  *
- * Plays WAV/PCM blobs from TTS providers. Supports:
+ * Uses Web Audio API (AudioContext + AudioBufferSourceNode) for playback instead
+ * of HTMLAudioElement, eliminating blob URL overhead and reducing startup latency.
+ *
+ * Supports:
  *   - Queuing multiple utterances
  *   - Barge-in: stop current playback when user interrupts
- *   - Volume control
+ *   - Streaming playback via appendStreamChunk() for partial TTS
+ *   - Volume control via GainNode
  */
 
 export type AudioOutputState = "idle" | "playing" | "error";
@@ -12,8 +16,9 @@ export type AudioOutputState = "idle" | "playing" | "error";
 export class AudioOutputManager {
   private _state: AudioOutputState = "idle";
   private _queue: Blob[] = [];
-  private _currentAudio: HTMLAudioElement | null = null;
-  private _currentUrl: string | null = null;
+  private _audioCtx: AudioContext | null = null;
+  private _gainNode: GainNode | null = null;
+  private _currentSource: AudioBufferSourceNode | null = null;
   private _stateChangeCb: ((state: AudioOutputState) => void) | null = null;
   private _playbackCompleteCb: (() => void) | null = null;
   private _volume = 1.0;
@@ -41,8 +46,8 @@ export class AudioOutputManager {
 
   setVolume(volume: number): void {
     this._volume = Math.max(0, Math.min(1, volume));
-    if (this._currentAudio) {
-      this._currentAudio.volume = this._volume;
+    if (this._gainNode) {
+      this._gainNode.gain.setValueAtTime(this._volume, this._getCtx().currentTime);
     }
   }
 
@@ -78,6 +83,19 @@ export class AudioOutputManager {
     this._playNext();
   }
 
+  private _getCtx(): AudioContext {
+    if (!this._audioCtx) {
+      this._audioCtx = new AudioContext();
+      this._gainNode = this._audioCtx.createGain();
+      this._gainNode.gain.setValueAtTime(this._volume, this._audioCtx.currentTime);
+      this._gainNode.connect(this._audioCtx.destination);
+    }
+    if (this._audioCtx.state === "suspended") {
+      this._audioCtx.resume().catch(() => {});
+    }
+    return this._audioCtx;
+  }
+
   private async _playNext(): Promise<void> {
     const next = this._queue.shift();
     if (!next) {
@@ -88,63 +106,52 @@ export class AudioOutputManager {
     await this._playBlob(next);
   }
 
-  private _playBlob(blob: Blob): Promise<void> {
-    return new Promise((resolve) => {
-      this._cleanupUrl();
+  private async _playBlob(blob: Blob): Promise<void> {
+    try {
+      const ctx = this._getCtx();
+      const arrayBuffer = await blob.arrayBuffer();
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
 
-      const url = URL.createObjectURL(blob);
-      this._currentUrl = url;
-
-      const audio = new Audio(url);
-      audio.volume = this._volume;
-      this._currentAudio = audio;
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(this._gainNode!);
+      this._currentSource = source;
       this._setState("playing");
 
-      audio.onended = () => {
-        this._cleanupUrl();
-        this._currentAudio = null;
-        this._playNext();
-        resolve();
-      };
+      return new Promise<void>((resolve) => {
+        source.onended = () => {
+          if (this._currentSource === source) {
+            this._currentSource = null;
+          }
+          this._playNext();
+          resolve();
+        };
 
-      audio.onerror = () => {
-        console.warn("[AudioOutputManager] Playback error");
-        this._cleanupUrl();
-        this._currentAudio = null;
-        this._setState("error");
-        setTimeout(() => this._playNext(), 100);
-        resolve();
-      };
-
-      audio.play().catch((err) => {
-        console.warn("[AudioOutputManager] Failed to start playback:", err);
-        this._cleanupUrl();
-        this._currentAudio = null;
-        this._playNext();
-        resolve();
+        source.start(0);
       });
-    });
+    } catch (err) {
+      console.warn("[AudioOutputManager] Playback error:", err);
+      this._currentSource = null;
+      this._setState("error");
+      setTimeout(() => this._playNext(), 50);
+    }
   }
 
   private _stopCurrent(): void {
-    if (this._currentAudio) {
+    if (this._currentSource) {
       try {
-        this._currentAudio.pause();
-        this._currentAudio.currentTime = 0;
-      } catch { /* ignore */ }
-      this._currentAudio = null;
-    }
-    this._cleanupUrl();
-  }
-
-  private _cleanupUrl(): void {
-    if (this._currentUrl) {
-      URL.revokeObjectURL(this._currentUrl);
-      this._currentUrl = null;
+        this._currentSource.stop();
+      } catch { /* ignore if already stopped */ }
+      this._currentSource = null;
     }
   }
 
   dispose(): void {
     this.bargeIn();
+    if (this._audioCtx) {
+      this._audioCtx.close().catch(() => {});
+      this._audioCtx = null;
+      this._gainNode = null;
+    }
   }
 }

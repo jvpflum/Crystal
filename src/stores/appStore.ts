@@ -9,7 +9,6 @@ export type AppView =
   | "agents"
   | "office"
   | "factory"
-  | "marketplace"
   | "models"
   | "sessions"
   | "templates"
@@ -76,7 +75,7 @@ const PERSISTED_VIEW_KEY = "crystal_current_view";
 
 const VALID_VIEWS = new Set<string>([
   "home", "conversation", "command-center", "agents", "office", "factory",
-  "marketplace", "models", "sessions", "templates", "channels", "memory",
+  "models", "sessions", "templates", "channels", "memory",
   "tools", "activity", "settings", "security", "hooks", "doctor", "nodes",
   "browser", "workspace", "messaging", "directory", "devices", "subagents",
   "webhooks", "voicecall", "tasks", "approvals", "city", "usage",
@@ -93,6 +92,10 @@ function loadPersistedNavigation(): { view: AppView; centerTab: CommandCenterTab
       localStorage.setItem(PERSISTED_VIEW_KEY, "agents");
       return { view: "agents", centerTab: null };
     }
+    if (saved === "marketplace") {
+      localStorage.setItem(PERSISTED_VIEW_KEY, "tools");
+      return { view: "tools", centerTab: null };
+    }
     if (saved && VALID_VIEWS.has(saved)) return { view: saved as AppView, centerTab: null };
   } catch { /* ignore */ }
   return { view: "home", centerTab: null };
@@ -104,7 +107,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   currentView: initialNav.view,
   pendingCommandCenterTab: initialNav.centerTab,
   setView: (view, opts) => {
-    const resolved = view === "office" ? "agents" : view;
+    const v = view as string;
+    const resolved = (v === "office" ? "agents" : v === "marketplace" ? "tools" : view) as AppView;
     let pending = get().pendingCommandCenterTab;
     if (resolved === "command-center") {
       pending = opts?.centerTab ?? null;

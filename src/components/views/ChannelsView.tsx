@@ -211,7 +211,7 @@ interface Channel {
   config?: Record<string, unknown>;
 }
 
-const CLI_TIMEOUT = 12_000;
+const CLI_TIMEOUT = 25_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -223,20 +223,29 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
-async function runCli(command: string): Promise<string> {
+/** Strip `[plugins]` and other diagnostic lines from CLI stdout before JSON.parse. */
+function extractJson(raw: string): string {
+  const lines = raw.split("\n");
+  const start = lines.findIndex(l => l.trimStart().startsWith("{") || l.trimStart().startsWith("["));
+  if (start === -1) return raw;
+  const end = lines.length - 1;
+  return lines.slice(start, end + 1).join("\n");
+}
+
+async function runCli(command: string, timeout = CLI_TIMEOUT): Promise<string> {
   const result = await withTimeout(
     invoke<{ stdout: string; stderr: string; code: number }>("execute_command", { command, cwd: null }),
-    CLI_TIMEOUT,
+    timeout,
     command.split(" ").slice(0, 3).join(" "),
   );
   if (result.code !== 0) throw new Error(result.stderr || `Command failed with code ${result.code}`);
   return result.stdout;
 }
 
-async function readCli(command: string, ttl = 60_000): Promise<string> {
+async function readCli(command: string, ttl = 60_000, timeout = CLI_TIMEOUT): Promise<string> {
   const result = await withTimeout(
-    cachedCommand(command, { ttl }),
-    CLI_TIMEOUT,
+    cachedCommand(command, { ttl, timeout }),
+    timeout + 2_000,
     command.split(" ").slice(0, 3).join(" "),
   );
   if (result.code !== 0) throw new Error(result.stderr || `Command failed with code ${result.code}`);
@@ -244,20 +253,20 @@ async function readCli(command: string, ttl = 60_000): Promise<string> {
 }
 
 async function fetchChannels(): Promise<{ channels: Channel[]; error?: string }> {
-  // Try the status endpoint first
+  // Try the status endpoint first (can take 15s+)
   try {
-    const statusRaw = await readCli("openclaw channels status --json");
-    const statusData = JSON.parse(statusRaw);
+    const statusRaw = await readCli("openclaw channels status --json", 120_000, 25_000);
+    const statusData = JSON.parse(extractJson(statusRaw));
     const channels: Channel[] = [];
     const meta: { id: string; label: string }[] = statusData.channelMeta || [];
     const chMap: Record<string, { configured: boolean; running: boolean }> = statusData.channels || {};
-    const accounts: Record<string, { accountId: string; connected: boolean; bot?: { username: string } }[]> = statusData.channelAccounts || {};
+    const accounts: Record<string, Record<string, unknown>[]> = statusData.channelAccounts || {};
 
     for (const m of meta) {
       const ch = chMap[m.id];
       if (!ch?.configured) continue;
       const accs = accounts[m.id] || [];
-      const connected = accs.some(a => a.connected);
+      const connected = accs.some(a => a.connected || (a.running && a.enabled));
       channels.push({
         name: m.id,
         type: m.id,
@@ -274,8 +283,8 @@ async function fetchChannels(): Promise<{ channels: Channel[]; error?: string }>
 
   // Fallback: try the simpler list command
   try {
-    const listRaw = await readCli("openclaw channels list --json");
-    const listData = JSON.parse(listRaw);
+    const listRaw = await readCli("openclaw channels list --json", 120_000, 25_000);
+    const listData = JSON.parse(extractJson(listRaw));
     const chat: Record<string, string[]> = listData.chat || {};
     const channels: Channel[] = [];
     for (const [type] of Object.entries(chat)) {
@@ -291,16 +300,16 @@ async function fetchChannels(): Promise<{ channels: Channel[]; error?: string }>
 
 async function fetchStatus(): Promise<Record<string, string>> {
   try {
-    const raw = await readCli("openclaw channels status --json");
-    const data = JSON.parse(raw);
+    const raw = await readCli("openclaw channels status --json", 120_000, 25_000);
+    const data = JSON.parse(extractJson(raw));
     const result: Record<string, string> = {};
     const chMap: Record<string, { configured: boolean; running: boolean }> = data.channels || {};
-    const accounts: Record<string, { connected: boolean }[]> = data.channelAccounts || {};
+    const accounts: Record<string, Record<string, unknown>[]> = data.channelAccounts || {};
 
     for (const [id, ch] of Object.entries(chMap)) {
       if (!ch.configured) continue;
       const accs = accounts[id] || [];
-      const connected = accs.some(a => a.connected);
+      const connected = accs.some(a => a.connected || (a.running && a.enabled));
       result[id] = connected ? "connected" : ch.running ? "disconnected" : "disconnected";
     }
     return result;
@@ -312,8 +321,8 @@ async function fetchStatus(): Promise<Record<string, string>> {
 
 async function fetchCapabilities(name: string): Promise<string[]> {
   try {
-    const raw = await readCli("openclaw channels capabilities --json");
-    const data = JSON.parse(raw);
+    const raw = await readCli("openclaw channels capabilities --json", 60_000, 20_000);
+    const data = JSON.parse(extractJson(raw));
     return data[name] ?? data ?? [];
   } catch {
     return [];

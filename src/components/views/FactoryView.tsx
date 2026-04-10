@@ -1,23 +1,51 @@
-import { useState, useEffect, useRef, useCallback, type CSSProperties } from "react";
+import React, { useState, useEffect, useRef, useCallback, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useFactoryStore, type AgentType, type AgentRun, type FactoryProject, type ForgeSchedule } from "@/stores/factoryStore";
+import {
+  useFactoryStore,
+  PIPELINE_STAGES,
+  type Build,
+  type PipelineStage,
+  type StageStatus,
+} from "@/stores/factoryStore";
 import { factoryService } from "@/lib/factory";
-import { openclawClient } from "@/lib/openclaw";
 import { escapeShellArg } from "@/lib/tools";
-import { invalidateCronJobsCliCache } from "@/stores/dataStore";
-import { RunWorkspace } from "@/components/factory/RunWorkspace";
+import { FileTree } from "@/components/factory/FileTree";
+import { FileViewer } from "@/components/factory/FileViewer";
 import {
   EASE, glowCard, hoverLift, hoverReset, pressDown, pressUp,
-  innerPanel, sectionLabel, iconTile,
-  inputStyle, btnPrimary, btnSecondary,
-  emptyState, row as rowStyle, MONO,
+  innerPanel, inputStyle, btnPrimary, btnSecondary, MONO,
 } from "@/styles/viewStyles";
 import {
-  Loader2, RefreshCw, Play, Zap, GitBranch, Bot, Terminal,
-  Square, Send, FileText, Eye, ChevronRight, ChevronDown,
-  Cpu, FolderOpen, Navigation as NavIcon, Clock, ExternalLink,
+  Loader2, Play, Zap, GitBranch, Terminal,
+  Square, Eye, ChevronDown,
+  Clock, ExternalLink,
   GitCommit, Upload, Globe, Check, AlertTriangle,
+  RotateCcw, SkipForward, X, Search,
+  FileCode, TestTube, ClipboardCheck, Lightbulb,
+  Hammer,
 } from "lucide-react";
+
+/* ═══════════════════════════════════════════════════════════════
+   CONSTANTS & SHARED STYLES
+   ═══════════════════════════════════════════════════════════════ */
+
+const NVIDIA_GREEN = "#76b900";
+
+const STAGE_META: Record<PipelineStage, { label: string; icon: typeof Lightbulb; color: string }> = {
+  plan:   { label: "Plan",   icon: Lightbulb,      color: "#60a5fa" },
+  code:   { label: "Code",   icon: FileCode,        color: NVIDIA_GREEN },
+  test:   { label: "Test",   icon: TestTube,        color: "#fbbf24" },
+  review: { label: "Review", icon: ClipboardCheck,  color: "#a78bfa" },
+};
+
+const STATUS_DOT: Record<StageStatus | "done", string> = {
+  pending: "var(--text-muted)",
+  running: NVIDIA_GREEN,
+  passed:  "#4ade80",
+  failed:  "#f87171",
+  skipped: "#fbbf24",
+  done:    "#4ade80",
+};
 
 const BTN_DANGER: CSSProperties = {
   background: "rgba(239,68,68,0.1)", color: "#ef4444",
@@ -27,228 +55,6 @@ const BTN_DANGER: CSSProperties = {
   transition: `all 0.2s ${EASE}`,
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  queued: "var(--text-muted)", running: "var(--accent)", completed: "var(--success)", failed: "var(--error)", cancelled: "var(--text-muted)",
-};
-
-interface LiveBuilder {
-  /** Task registry id (stable React key). */
-  id: string;
-  /** Token for `/subagents` / `/acp` commands (run id, session key, etc.). */
-  cmdTarget?: string;
-  label?: string;
-  status?: string;
-  task?: string;
-  model?: string;
-  thinking?: string;
-  runtime?: string;
-  cwd?: string;
-  source: "subagent" | "acp";
-  startedAt?: number;
-}
-
-function taskRegistryRuntimeKind(runtimeRaw: string): "subagent" | "acp" | null {
-  const r = runtimeRaw.toLowerCase();
-  if (r === "subagent" || r.includes("subagent")) return "subagent";
-  if (
-    r === "acp"
-    || r === "claude-code"
-    || r === "codex"
-    || r === "gemini-cli"
-    || r.includes("claude")
-    || r.includes("acp")
-  ) {
-    return "acp";
-  }
-  return null;
-}
-
-function mapOpenClawTaskToLiveBuilder(raw: unknown): LiveBuilder | null {
-  if (!raw || typeof raw !== "object") return null;
-  const t = raw as Record<string, unknown>;
-  const runtime = String(t.runtime ?? "");
-  const kind = taskRegistryRuntimeKind(runtime);
-  if (!kind) return null;
-  const taskId = String(t.taskId ?? t.id ?? "").trim();
-  const fallbackId = String(t.runId ?? t.sourceId ?? t.childSessionKey ?? "").trim();
-  const id = taskId || fallbackId;
-  if (!id) return null;
-  const source = kind === "acp" ? "acp" : "subagent";
-  const statusRaw = String(t.status ?? "unknown").toLowerCase();
-  let status = String(t.status ?? "unknown");
-  if (statusRaw === "succeeded") status = "completed";
-  else if (statusRaw === "timed_out") status = "failed";
-  else if (statusRaw === "lost") status = "failed";
-
-  const runId = typeof t.runId === "string" ? t.runId.trim() : "";
-  const sourceId = typeof t.sourceId === "string" ? t.sourceId.trim() : "";
-  const childSessionKey = typeof t.childSessionKey === "string" ? t.childSessionKey.trim() : "";
-  const cmdTarget =
-    source === "acp"
-      ? childSessionKey || sourceId || runId || id
-      : runId || sourceId || id;
-
-  const agentId = typeof t.agentId === "string" ? t.agentId.trim() : "";
-  return {
-    id,
-    cmdTarget,
-    label: typeof t.label === "string" ? t.label : undefined,
-    status,
-    task: typeof t.task === "string" ? t.task : undefined,
-    model: typeof t.model === "string" ? t.model : undefined,
-    thinking: typeof t.thinking === "string" ? t.thinking : undefined,
-    runtime: agentId || (source === "acp" ? "acp" : "subagent"),
-    cwd: typeof t.cwd === "string" ? t.cwd : undefined,
-    source,
-    startedAt: typeof t.startedAt === "number" ? t.startedAt : undefined,
-  };
-}
-
-/** Same spawn message shape as "New Build" and OpenClaw cron payloads. */
-function buildForgeSpawnSlashCommand(p: {
-  runtime: string;
-  model: string;
-  cwd: string;
-  thinking: string;
-  task: string;
-}): string {
-  let cmd = `/acp spawn --runtime ${p.runtime}`;
-  if (p.model.trim()) cmd += ` --model ${p.model.trim()}`;
-  if (p.cwd.trim()) cmd += ` --cwd ${p.cwd.trim()}`;
-  if (p.thinking !== "default") cmd += ` --thinking ${p.thinking}`;
-  cmd += ` ${p.task.trim()}`;
-  return cmd;
-}
-
-function mapSubagentListRowToLiveBuilder(raw: unknown): LiveBuilder | null {
-  if (!raw || typeof raw !== "object") return null;
-  const s = raw as Record<string, unknown>;
-  const id = String(s.id ?? s.runId ?? s.taskId ?? "").trim();
-  if (!id) return null;
-  const runId = typeof s.runId === "string" ? s.runId.trim() : "";
-  const cmdTarget = runId || id;
-  let status = String(s.status ?? "unknown");
-  const sr = status.toLowerCase();
-  if (sr === "succeeded") status = "completed";
-  else if (sr === "timed_out" || sr === "lost") status = "failed";
-  return {
-    id,
-    cmdTarget,
-    label: typeof s.label === "string" ? s.label : undefined,
-    status,
-    task: typeof s.task === "string" ? s.task : typeof s.objective === "string" ? s.objective : undefined,
-    model: typeof s.model === "string" ? s.model : undefined,
-    thinking: typeof s.thinking === "string" ? s.thinking : undefined,
-    runtime: typeof s.runtime === "string" && s.runtime.trim() ? String(s.runtime) : "subagent",
-    cwd: typeof s.cwd === "string" ? s.cwd : undefined,
-    source: "subagent",
-    startedAt: typeof s.startedAt === "number" ? s.startedAt : undefined,
-  };
-}
-
-function mapAcpListRowToLiveBuilder(raw: unknown): LiveBuilder | null {
-  if (!raw || typeof raw !== "object") return null;
-  const s = raw as Record<string, unknown>;
-  const id = String(s.id ?? s.sessionId ?? "").trim();
-  if (!id) return null;
-  const childKey = typeof s.childSessionKey === "string" ? s.childSessionKey.trim() : "";
-  const sourceId = typeof s.sourceId === "string" ? s.sourceId.trim() : "";
-  const cmdTarget = childKey || sourceId || id;
-  let status = String(s.status ?? s.state ?? "unknown");
-  const sr = status.toLowerCase();
-  if (sr === "succeeded") status = "completed";
-  return {
-    id,
-    cmdTarget,
-    label: typeof s.label === "string" ? s.label : undefined,
-    status,
-    task: typeof s.task === "string" ? s.task : typeof s.message === "string" ? s.message : typeof s.prompt === "string" ? s.prompt : undefined,
-    model: s.model ? String(s.model) : undefined,
-    thinking: typeof s.thinking === "string" ? s.thinking : undefined,
-    runtime: String(s.runtime ?? s.type ?? "acp"),
-    cwd: typeof s.cwd === "string" ? s.cwd : undefined,
-    source: "acp",
-    startedAt: typeof s.startedAt === "number" ? s.startedAt : undefined,
-  };
-}
-
-function mergeLiveBuilders(registry: LiveBuilder[], live: LiveBuilder[]): LiveBuilder[] {
-  const map = new Map<string, LiveBuilder>();
-  const keyOf = (b: LiveBuilder) => `${b.source}:${(b.cmdTarget ?? b.id).trim()}`;
-  for (const b of registry) map.set(keyOf(b), b);
-  for (const b of live) {
-    const k = keyOf(b);
-    const prev = map.get(k);
-    if (!prev) map.set(k, b);
-    else {
-      map.set(k, {
-        ...prev,
-        ...b,
-        task: b.task || prev.task,
-        cwd: b.cwd || prev.cwd,
-        label: b.label || prev.label,
-        model: b.model || prev.model,
-        status: b.status || prev.status,
-      });
-    }
-  }
-  return [...map.values()];
-}
-
-/** Normalize git remote to a github.com browse URL when applicable. */
-function githubBrowseUrlFromRemote(raw: string): string | null {
-  const u = raw.trim();
-  if (!u) return null;
-  const lower = u.toLowerCase();
-  if (!lower.includes("github.com")) return null;
-  const path = u
-    .replace(/^git@github\.com:/i, "")
-    .replace(/^https?:\/\/github\.com\//i, "")
-    .replace(/\.git$/i, "")
-    .replace(/\/$/, "");
-  if (!path) return null;
-  return `https://github.com/${path}`;
-}
-
-async function fetchGitHubOriginForDir(dir: string): Promise<string | null> {
-  const d = dir.trim();
-  if (!d) return null;
-  try {
-    const esc = escapeShellArg(d);
-    const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-      command: `git -C "${esc}" remote get-url origin`,
-      cwd: null,
-    });
-    if (result.code !== 0) return null;
-    return githubBrowseUrlFromRemote(result.stdout || "");
-  } catch {
-    return null;
-  }
-}
-
-function sortBuildersForDisplay(a: LiveBuilder, b: LiveBuilder): number {
-  const rank = (s?: string) => {
-    const x = s?.toLowerCase() ?? "";
-    if (x === "running" || x === "active") return 0;
-    if (x === "queued") return 1;
-    return 2;
-  };
-  const dr = rank(a.status) - rank(b.status);
-  if (dr !== 0) return dr;
-  const ta = a.startedAt ?? 0;
-  const tb = b.startedAt ?? 0;
-  return tb - ta;
-}
-
-type TabId = "builds" | "projects" | "deploy" | "schedule";
-
-const FORGE_CRON_PRESETS: { label: string; value: string }[] = [
-  { label: "2:00 AM every night", value: "0 2 * * *" },
-  { label: "3:00 AM every night", value: "0 3 * * *" },
-  { label: "1:00 AM weeknights", value: "0 1 * * 1-5" },
-  { label: "Midnight daily", value: "0 0 * * *" },
-];
-
 function elapsed(ms: number): string {
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
@@ -257,1315 +63,790 @@ function elapsed(ms: number): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
-function statusColor(s?: string): string {
-  if (!s) return "var(--text-muted)";
-  const l = s.toLowerCase();
-  if (l === "running" || l === "active") return "#4ade80";
-  if (l === "completed" || l === "done") return "var(--accent)";
-  if (l === "error" || l === "failed") return "#f87171";
-  if (l === "killed" || l === "stopped" || l === "cancelled") return "#fbbf24";
-  return "var(--text-muted)";
-}
+type FactoryTabId = "pipeline" | "workspace" | "history" | "deploy";
 
-function IconPlus() {
-  return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>;
-}
-function IconStop() {
-  return <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" /></svg>;
-}
-function IconTrash() {
-  return <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>;
-}
-function IconFolder() {
-  return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>;
-}
-function IconChevron({ open }: { open: boolean }) {
-  return <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ transition: `transform 0.15s ${EASE}`, transform: open ? "rotate(90deg)" : "rotate(0deg)" }}><polyline points="9 18 15 12 9 6" /></svg>;
-}
+/* ═══════════════════════════════════════════════════════════════
+   FACTORY VIEW — Main Shell
+   ═══════════════════════════════════════════════════════════════ */
 
 export function FactoryView() {
-  const [tab, setTab] = useState<TabId>("builds");
+  const [tab, setTab] = useState<FactoryTabId>("pipeline");
+  const { builds } = useFactoryStore();
+
+  const activeBuilds = builds.filter((b) => b.currentStage !== "done" && b.currentStage !== "failed");
+  const completedBuilds = builds.filter((b) => b.currentStage === "done" || b.currentStage === "failed");
+
+  const tabs: { id: FactoryTabId; label: string; icon: React.ReactNode; badge?: number }[] = [
+    { id: "pipeline", label: "Pipeline", icon: <Zap style={{ width: 12, height: 12 }} />, badge: activeBuilds.length || undefined },
+    { id: "workspace", label: "Workspace", icon: <Terminal style={{ width: 12, height: 12 }} /> },
+    { id: "history", label: "History", icon: <Clock style={{ width: 12, height: 12 }} />, badge: completedBuilds.length || undefined },
+    { id: "deploy", label: "Git & Deploy", icon: <GitBranch style={{ width: 12, height: 12 }} /> },
+  ];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-      <style>{`@keyframes _spin { to { transform: rotate(360deg) } } @keyframes _pulse { 0%,100% { opacity:1 } 50% { opacity:.4 } }`}</style>
+      <style>{`
+        @keyframes _spin { to { transform: rotate(360deg) } }
+        @keyframes _pulse { 0%,100% { opacity:1 } 50% { opacity:.4 } }
+        @keyframes stage-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(118,185,0,0.3) } 50% { box-shadow: 0 0 12px 3px rgba(118,185,0,0.15) } }
+      `}</style>
 
+      {/* Header */}
       <div style={{ padding: "18px 24px 0", flexShrink: 0 }}>
-        <h2 style={{ color: "var(--text)", fontSize: 16, fontWeight: 700, margin: 0 }}>The Forge</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 2 }}>
+          <Hammer style={{ width: 18, height: 18, color: NVIDIA_GREEN }} />
+          <h2 style={{ color: "var(--text)", fontSize: 16, fontWeight: 700, margin: 0 }}>The Forge</h2>
+        </div>
         <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "2px 0 12px" }}>
-          Codex &amp; ACP autonomous builds &middot; Git operations &middot; Preview &amp; deploy
+          AI Software Factory &middot; Plan &rarr; Code &rarr; Test &rarr; Review
         </p>
+
+        {/* Stats bar */}
+        <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
+          {[
+            { label: "Active", value: activeBuilds.length, color: NVIDIA_GREEN },
+            { label: "Completed", value: completedBuilds.filter((b) => b.currentStage === "done").length, color: "#4ade80" },
+            { label: "Failed", value: completedBuilds.filter((b) => b.currentStage === "failed").length, color: "#f87171" },
+          ].map((s) => (
+            <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: s.color, flexShrink: 0 }} />
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{s.label}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", fontFamily: MONO }}>{s.value}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Tab bar */}
         <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--border)" }}>
-          {([
-            { id: "builds" as TabId, label: "Builds", icon: <Cpu style={{ width: 11, height: 11 }} /> },
-            { id: "projects" as TabId, label: "Projects", icon: <FolderOpen style={{ width: 11, height: 11 }} /> },
-            { id: "deploy" as TabId, label: "Git & Deploy", icon: <GitBranch style={{ width: 11, height: 11 }} /> },
-            { id: "schedule" as TabId, label: "Schedule", icon: <Clock style={{ width: 11, height: 11 }} /> },
-          ]).map(t => (
+          {tabs.map((t) => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
               padding: "8px 20px", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer",
-              background: "transparent", color: tab === t.id ? "var(--accent)" : "var(--text-muted)",
-              borderBottom: tab === t.id ? "2px solid var(--accent)" : "2px solid transparent",
+              background: "transparent", color: tab === t.id ? NVIDIA_GREEN : "var(--text-muted)",
+              borderBottom: tab === t.id ? `2px solid ${NVIDIA_GREEN}` : "2px solid transparent",
               transition: `all 0.15s ${EASE}`, display: "flex", alignItems: "center", gap: 6,
             }}>
               {t.icon} {t.label}
+              {t.badge != null && (
+                <span style={{
+                  fontSize: 9, fontWeight: 700, background: `color-mix(in srgb, ${NVIDIA_GREEN} 15%, transparent)`,
+                  color: NVIDIA_GREEN, padding: "1px 6px", borderRadius: 10, fontFamily: MONO,
+                }}>{t.badge}</span>
+              )}
             </button>
           ))}
         </div>
       </div>
 
-      {tab === "builds" ? <BuildsTab /> : tab === "projects" ? <ProjectsTab /> : tab === "deploy" ? <DeployTab /> : <ForgeScheduleTab />}
+      {/* Tab content */}
+      {tab === "pipeline" && <PipelineTab />}
+      {tab === "workspace" && <WorkspaceTab />}
+      {tab === "history" && <HistoryTab />}
+      {tab === "deploy" && <DeployTab />}
     </div>
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════
-   BUILDS TAB — Live Claude Code sub-agent builds
-   ══════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════
+   PIPELINE TAB
+   ═══════════════════════════════════════════════════════════════ */
 
-function BuildsTab() {
-  const [builders, setBuilders] = useState<LiveBuilder[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [output, setOutput] = useState<{ title: string; content: string } | null>(null);
-  const [spawnOpen, setSpawnOpen] = useState(false);
+function PipelineTab() {
+  const { builds, addBuild, setActiveBuild, activeBuildId } = useFactoryStore();
+  const [showForm, setShowForm] = useState(false);
 
+  const activeBuilds = builds.filter((b) => b.currentStage !== "done" && b.currentStage !== "failed");
+  const activeBuild = activeBuildId ? builds.find((b) => b.id === activeBuildId) : null;
+
+  const handleNewBuild = (b: { title: string; task: string; runtime: string; model: string; cwd: string; thinking: string }) => {
+    const id = addBuild(b);
+    setShowForm(false);
+    factoryService.startPipeline(id);
+  };
+
+  return (
+    <div style={{ flex: 1, overflow: "auto", padding: "16px 24px" }}>
+      {/* New Build button */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+        <button onClick={() => setShowForm(!showForm)} onMouseDown={pressDown} onMouseUp={pressUp}
+          style={{ ...btnPrimary, background: NVIDIA_GREEN, display: "flex", alignItems: "center", gap: 6 }}>
+          <Zap style={{ width: 13, height: 13 }} /> New Build
+        </button>
+      </div>
+
+      {/* New build form */}
+      {showForm && <NewBuildForm onSubmit={handleNewBuild} onCancel={() => setShowForm(false)} />}
+
+      {/* Active builds */}
+      {activeBuilds.length === 0 && !showForm && (
+        <div style={{
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          gap: 12, padding: "60px 24px", color: "var(--text-muted)", fontSize: 13, textAlign: "center",
+        }}>
+          <Hammer style={{ width: 36, height: 36, opacity: 0.3 }} />
+          <div>No active builds</div>
+          <div style={{ fontSize: 11 }}>Click <strong>New Build</strong> to start an automated pipeline</div>
+        </div>
+      )}
+
+      {activeBuilds.map((build) => (
+        <PipelineCard
+          key={build.id}
+          build={build}
+          isSelected={build.id === activeBuildId}
+          onSelect={() => setActiveBuild(build.id)}
+        />
+      ))}
+
+      {/* Selected build detail */}
+      {activeBuild && (activeBuild.currentStage !== "done" && activeBuild.currentStage !== "failed") && (
+        <BuildOutputPanel build={activeBuild} />
+      )}
+    </div>
+  );
+}
+
+/* ─── New Build Form ──────────────────────────────────────────── */
+
+function NewBuildForm({ onSubmit, onCancel }: {
+  onSubmit: (b: { title: string; task: string; runtime: string; model: string; cwd: string; thinking: string }) => void;
+  onCancel: () => void;
+}) {
   const [task, setTask] = useState("");
   const [cwd, setCwd] = useState("");
-  const [customCwd, setCustomCwd] = useState("");
-  const [runtime, setRuntime] = useState<string>("codex");
-  const [model, setModel] = useState("");
-  const [thinking, setThinking] = useState("default");
-  const [spawning, setSpawning] = useState(false);
-
-  const [steerInputs, setSteerInputs] = useState<Record<string, string>>({});
-  const [sendInputs, setSendInputs] = useState<Record<string, string>>({});
-  const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set());
-
-  const { projects, runs } = useFactoryStore();
-  const [githubByPath, setGithubByPath] = useState<Record<string, string>>({});
-
-  const sendAgentMessage = useCallback(async (message: string): Promise<{ stdout: string; code: number }> => {
-    const result = await openclawClient.dispatchToAgent("main", message);
-    return { stdout: result.stdout || result.stderr, code: result.code };
-  }, []);
-
-  const loadBuilders = useCallback(async () => {
-    setLoadError(null);
-    try {
-      const [lists, tasksData] = await Promise.all([
-        openclawClient.fetchForgeAgentLists(),
-        openclawClient.listBackgroundTasks(),
-      ]);
-
-      const fromSub = lists.subagents
-        .map(mapSubagentListRowToLiveBuilder)
-        .filter((b): b is LiveBuilder => b != null);
-      const fromAcp = lists.acpSessions
-        .map(mapAcpListRowToLiveBuilder)
-        .filter((b): b is LiveBuilder => b != null);
-      const fromTasks = (tasksData?.tasks ?? [])
-        .map(mapOpenClawTaskToLiveBuilder)
-        .filter((b): b is LiveBuilder => b != null);
-
-      const merged = mergeLiveBuilders(fromTasks, [...fromSub, ...fromAcp]);
-      merged.sort(sortBuildersForDisplay);
-      setBuilders(merged);
-
-      if (!tasksData && fromSub.length === 0 && fromAcp.length === 0) {
-        setLoadError("Could not reach OpenClaw (tasks list and agent lists empty). Check the gateway and CLI.");
-      }
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Failed to load builds");
-      setBuilders([]);
-    }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { loadBuilders(); }, [loadBuilders]);
-  useEffect(() => {
-    if (feedback) { const t = setTimeout(() => setFeedback(null), 4000); return () => clearTimeout(t); }
-  }, [feedback]);
-
-  const githubFetchedRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const paths = new Set<string>();
-    for (const p of projects) { if (p.path?.trim()) paths.add(p.path.trim()); }
-    for (const b of builders) { if (b.cwd?.trim()) paths.add(b.cwd.trim()); }
-    let cancelled = false;
-    (async () => {
-      for (const dir of paths) {
-        if (githubFetchedRef.current.has(dir)) continue;
-        githubFetchedRef.current.add(dir);
-        const url = await fetchGitHubOriginForDir(dir);
-        if (cancelled) return;
-        if (url) setGithubByPath(prev => (prev[dir] ? prev : { ...prev, [dir]: url }));
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [builders, projects]);
-
-  const builderAction = async (label: string, message: string) => {
-    setActionLoading(label);
-    try {
-      const result = await sendAgentMessage(message);
-      if (result.code === 0) {
-        setFeedback({ type: "success", msg: `${label}: Done` });
-        if (result.stdout.trim()) setOutput({ title: label, content: result.stdout });
-        if (label.startsWith("Kill") || label.startsWith("Cancel") || label.startsWith("Close")) await loadBuilders();
-      } else {
-        setFeedback({ type: "error", msg: result.stdout || `${label} failed` });
-      }
-    } catch (e) {
-      setFeedback({ type: "error", msg: e instanceof Error ? e.message : `${label} failed` });
-    }
-    setActionLoading(null);
-  };
-
-  const isActionLoading = (key: string) => actionLoading === key;
-
-  const spawnBuild = async () => {
-    if (!task.trim()) return;
-    setSpawning(true);
-    try {
-      const cwdResolved = cwd === "__custom__" ? customCwd.trim() : cwd.trim();
-      const cmd = buildForgeSpawnSlashCommand({
-        runtime, model, cwd: cwdResolved, thinking, task: task.trim(),
-      });
-      const result = await sendAgentMessage(cmd);
-      if (result.code === 0) {
-        setFeedback({ type: "success", msg: "Build spawned via Claude Code" });
-        setTask(""); setCwd(""); setCustomCwd(""); setModel(""); setThinking("default");
-        setSpawnOpen(false);
-        await loadBuilders();
-      } else {
-        setFeedback({ type: "error", msg: result.stdout || "Spawn failed" });
-      }
-    } catch (e) {
-      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Spawn failed" });
-    }
-    setSpawning(false);
-  };
-
-  const toggleLog = (id: string) => {
-    setExpandedLogs(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
-
-  const activeBuilders = builders.filter(b => ["running", "active"].includes(b.status?.toLowerCase() ?? ""));
-  const inactiveBuilders = builders.filter(b => !["running", "active"].includes(b.status?.toLowerCase() ?? ""));
-  const recentLocalRuns = [...runs].sort((a, b) => b.createdAt - a.createdAt).slice(0, 15);
-  const projectGithubChips = projects
-    .map(p => ({ p, url: p.path?.trim() ? githubByPath[p.path.trim()] : undefined }))
-    .filter((x): x is { p: FactoryProject; url: string } => Boolean(x.url));
-
-  return (
-    <div style={{ flex: 1, overflow: "auto", padding: "16px 24px 24px" }}>
-      {loadError && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, marginBottom: 12,
-          background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.25)",
-        }}>
-          <span style={{ fontSize: 11, color: "#fbbf24", flex: 1 }}>{loadError}</span>
-          <button onClick={() => setLoadError(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}>×</button>
-        </div>
-      )}
-
-      {/* Feedback */}
-      {feedback && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, marginBottom: 12,
-          background: feedback.type === "success" ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
-          border: `1px solid ${feedback.type === "success" ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)"}`,
-        }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: feedback.type === "success" ? "#4ade80" : "#f87171" }} />
-          <span style={{ fontSize: 11, color: feedback.type === "success" ? "#4ade80" : "#f87171", flex: 1 }}>{feedback.msg}</span>
-          <button onClick={() => setFeedback(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}>×</button>
-        </div>
-      )}
-
-      {/* Spawn Build Card */}
-      <div style={{ marginBottom: 20 }}>
-        <button onClick={() => setSpawnOpen(!spawnOpen)} data-glow="#d4a574"
-          onMouseEnter={hoverLift} onMouseLeave={hoverReset} onMouseDown={pressDown} onMouseUp={pressUp}
-          style={{
-          display: "flex", alignItems: "center", gap: 10, width: "100%",
-          padding: "14px 18px", borderRadius: spawnOpen ? "10px 10px 0 0" : 10,
-          background: "linear-gradient(135deg, rgba(212,165,116,0.08), rgba(139,92,246,0.08))",
-          border: "1px solid rgba(212,165,116,0.2)", cursor: "pointer", color: "var(--text)",
-          transition: `all 0.2s ${EASE}`,
-        }}>
-          {spawnOpen ? <ChevronDown style={{ width: 14, height: 14, color: "#d4a574" }} /> : <ChevronRight style={{ width: 14, height: 14, color: "#d4a574" }} />}
-          <div style={{ width: 28, height: 28, borderRadius: 7, background: "rgba(212,165,116,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#d4a574" }}>C</div>
-          <div style={{ flex: 1, textAlign: "left" }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>New Build</div>
-            <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 1 }}>Spawn an autonomous agent (Codex, Gemini, ACP) to build software</div>
-          </div>
-          <Play style={{ width: 16, height: 16, color: "#d4a574" }} />
-        </button>
-
-        {spawnOpen && (
-          <div style={{ ...innerPanel, borderRadius: "0 0 10px 10px", borderTop: "none" }}>
-            <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-              <div>
-                <span style={sectionLabel}>What should Claude Code build? *</span>
-                <textarea value={task} onChange={e => setTask(e.target.value)}
-                  placeholder="Build a REST API with Express and TypeScript that has user auth, CRUD endpoints for posts, and PostgreSQL integration..."
-                  rows={4} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }}
-                  onKeyDown={e => { if (e.key === "Enter" && e.ctrlKey && task.trim()) spawnBuild(); }}
-                />
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                <div>
-                  <span style={sectionLabel}>Working Directory</span>
-                  {projects.length > 0 ? (
-                    <select value={cwd} onChange={e => setCwd(e.target.value)}
-                      style={{ ...inputStyle, fontFamily: "inherit" }}>
-                      <option value="">Default (agent home)</option>
-                      {projects.map(p => (
-                        <option key={p.id} value={p.path}>{p.name} — {p.path}</option>
-                      ))}
-                      <option value="__custom__">Custom path...</option>
-                    </select>
-                  ) : (
-                    <input value={cwd} onChange={e => setCwd(e.target.value)}
-                      placeholder="C:\Users\...\Projects\my-app" style={inputStyle} />
-                  )}
-                  {cwd === "__custom__" && (
-                    <input value={customCwd} onChange={e => setCustomCwd(e.target.value)}
-                      placeholder="Enter custom path..." style={{ ...inputStyle, marginTop: 6 }} autoFocus />
-                  )}
-                </div>
-                <div>
-                  <span style={sectionLabel}>Runtime</span>
-                  <select value={runtime} onChange={e => setRuntime(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }}>
-                    <option value="codex">Codex (OpenAI)</option>
-                    <option value="gemini-cli">Gemini CLI</option>
-                    <option value="claude-code">Claude Code</option>
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                <div>
-                  <span style={sectionLabel}>Model Override</span>
-                  <input value={model} onChange={e => setModel(e.target.value)}
-                    placeholder="Default (auto)" style={inputStyle} />
-                </div>
-                <div>
-                  <span style={sectionLabel}>Thinking Level</span>
-                  <select value={thinking} onChange={e => setThinking(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }}>
-                    {["default", "minimal", "low", "medium", "high"].map(l => (
-                      <option key={l} value={l}>{l}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-                <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Ctrl+Enter to launch</span>
-                <button onClick={spawnBuild} disabled={spawning || !task.trim() || (cwd === "__custom__" && !customCwd.trim())}
-                  onMouseDown={pressDown} onMouseUp={pressUp}
-                  style={{
-                    ...btnPrimary, padding: "10px 24px", fontWeight: 600, fontSize: 12,
-                    background: task.trim() && !(cwd === "__custom__" && !customCwd.trim()) ? "#d4a574" : "var(--bg-hover)",
-                    color: task.trim() && !(cwd === "__custom__" && !customCwd.trim()) ? "#fff" : "var(--text-muted)",
-                    opacity: !task.trim() || spawning || (cwd === "__custom__" && !customCwd.trim()) ? 0.5 : 1,
-                  }}>
-                  {spawning ? <Loader2 style={{ width: 14, height: 14, animation: "_spin 1s linear infinite" }} /> : <Play style={{ width: 14, height: 14 }} />}
-                  {spawning ? "Spawning..." : "Launch Build"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Stats Bar */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
-        {[
-          { label: "Active Builds", value: activeBuilders.length, color: "#4ade80", icon: <Cpu style={{ width: 12, height: 12 }} /> },
-          { label: "Total Agents", value: builders.length, color: "var(--accent)", icon: <Bot style={{ width: 12, height: 12 }} /> },
-          { label: "Sub-Agents", value: builders.filter(b => b.source === "subagent").length, color: "#60a5fa", icon: <GitBranch style={{ width: 12, height: 12 }} /> },
-          { label: "ACP Sessions", value: builders.filter(b => b.source === "acp").length, color: "#c084fc", icon: <Terminal style={{ width: 12, height: 12 }} /> },
-        ].map(s => (
-          <div key={s.label} style={{
-            ...glowCard(s.color), padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, flex: "1 1 140px",
-          }} data-glow={s.color} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-            <div style={{ color: s.color }}>{s.icon}</div>
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: s.color, fontFamily: MONO }}>{s.value}</div>
-              <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 500 }}>{s.label}</div>
-            </div>
-          </div>
-        ))}
-        <button onClick={() => loadBuilders()} disabled={loading} style={{ ...btnSecondary, alignSelf: "center" }}>
-          <RefreshCw style={{ width: 12, height: 12, ...(loading ? { animation: "_spin 1s linear infinite" } : {}) }} /> Refresh
-        </button>
-      </div>
-
-      {projectGithubChips.length > 0 && (
-        <div style={{ ...innerPanel, padding: "10px 14px", marginBottom: 16, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>GitHub</span>
-          {projectGithubChips.map(({ p, url }) => (
-            <a key={p.id} href={url} target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: 10, fontFamily: MONO, color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4, textDecoration: "none", padding: "4px 8px", borderRadius: 6, background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
-              <GitBranch style={{ width: 10, height: 10 }} /> {p.name}
-            </a>
-          ))}
-        </div>
-      )}
-
-      {/* Active Builds */}
-      {loading && builders.length === 0 ? (
-        <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
-          <Loader2 style={{ width: 20, height: 20, color: "var(--accent)", animation: "_spin 1s linear infinite" }} />
-        </div>
-      ) : builders.length === 0 ? (
-        <div style={{ ...glowCard("var(--text-muted)"), ...emptyState }}>
-          <div style={iconTile("#d4a574", 48)}>
-            <Bot style={{ width: 24, height: 24, color: "#d4a574", opacity: 0.5 }} />
-          </div>
-          <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: "0 0 4px" }}>No active builds</p>
-          <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0 }}>
-            Use "New Build" above to spawn a Claude Code agent, or dispatch a task via Telegram
-          </p>
-        </div>
-      ) : (
-        <>
-          {activeBuilders.length > 0 && (
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, color: "#4ade80", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#4ade80", animation: "_pulse 1.5s ease-in-out infinite" }} />
-                Active Builds ({activeBuilders.length})
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {activeBuilders.map(b => (
-                  <BuilderCard key={`${b.source}-${b.id}`} builder={b}
-                    steerInput={steerInputs[b.id] ?? ""} sendInput={sendInputs[b.id] ?? ""}
-                    onSteerChange={v => setSteerInputs(p => ({ ...p, [b.id]: v }))}
-                    onSendChange={v => setSendInputs(p => ({ ...p, [b.id]: v }))}
-                    onAction={builderAction} isActionLoading={isActionLoading}
-                    logExpanded={expandedLogs.has(b.id)} onToggleLog={() => toggleLog(b.id)}
-                    projects={projects} githubByPath={githubByPath} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {inactiveBuilders.length > 0 && (
-            <div>
-              <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, color: "var(--text-muted)", marginBottom: 8 }}>
-                Recent ({inactiveBuilders.length})
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {inactiveBuilders.map(b => (
-                  <BuilderCard key={`${b.source}-${b.id}`} builder={b}
-                    steerInput={steerInputs[b.id] ?? ""} sendInput={sendInputs[b.id] ?? ""}
-                    onSteerChange={v => setSteerInputs(p => ({ ...p, [b.id]: v }))}
-                    onSendChange={v => setSendInputs(p => ({ ...p, [b.id]: v }))}
-                    onAction={builderAction} isActionLoading={isActionLoading}
-                    logExpanded={expandedLogs.has(b.id)} onToggleLog={() => toggleLog(b.id)}
-                    projects={projects} githubByPath={githubByPath} />
-                ))}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {recentLocalRuns.length > 0 && (
-        <div style={{ marginTop: 24 }}>
-          <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, color: "var(--text-muted)", marginBottom: 8 }}>
-            Factory jobs (this device)
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {recentLocalRuns.map(r => {
-              const proj = projects.find(p => p.id === r.projectId);
-              return (
-                <div key={r.id} style={{ ...rowStyle, alignItems: "flex-start", justifyContent: "space-between" }} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>{proj?.name ?? "Project"}</div>
-                    <div style={{ fontSize: 10, color: "var(--text-secondary)", marginTop: 2, lineHeight: 1.4, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{r.objective}</div>
-                    <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 4, fontFamily: MONO }}>{r.agentType} · {new Date(r.createdAt).toLocaleString()}</div>
-                  </div>
-                  <span style={{
-                    fontSize: 8, padding: "2px 6px", borderRadius: 4, fontWeight: 600, textTransform: "uppercase", flexShrink: 0,
-                    background: `${STATUS_COLORS[r.status] ?? "var(--text-muted)"}18`,
-                    color: STATUS_COLORS[r.status] ?? "var(--text-muted)",
-                  }}>{r.status}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Output Panel */}
-      {output && (
-        <div style={{ marginTop: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-            <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--text-muted)" }}>{output.title}</span>
-            <button onClick={() => setOutput(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: 10, cursor: "pointer" }}>Dismiss</button>
-          </div>
-          <pre style={{
-            ...innerPanel, margin: 0, padding: "10px 14px",
-            fontSize: 11, fontFamily: MONO, color: "var(--text-secondary)",
-            whiteSpace: "pre-wrap", wordBreak: "break-word",
-            maxHeight: 300, overflowY: "auto",
-          }}>
-            {output.content}
-          </pre>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ── Builder Card ── */
-
-function resolveGithubForBuilder(builder: LiveBuilder, projects: FactoryProject[], githubByPath: Record<string, string>): string | null {
-  if (!builder.cwd?.trim()) {
-    return null;
-  }
-  const cwd = builder.cwd.trim();
-  const proj = projects.find(p => cwd.startsWith(p.path));
-  const key = proj?.path?.trim() || cwd;
-  return githubByPath[key] ?? githubByPath[cwd] ?? null;
-}
-
-function BuilderCard({ builder, steerInput, sendInput, onSteerChange, onSendChange, onAction, isActionLoading, logExpanded, onToggleLog, projects, githubByPath }: {
-  builder: LiveBuilder;
-  steerInput: string; sendInput: string;
-  onSteerChange: (v: string) => void; onSendChange: (v: string) => void;
-  onAction: (label: string, cmd: string) => void;
-  isActionLoading: (key: string) => boolean;
-  logExpanded: boolean; onToggleLog: () => void;
-  projects: FactoryProject[];
-  githubByPath: Record<string, string>;
-}) {
-  const cmdTok = builder.cmdTarget ?? builder.id;
-  const isActive = ["running", "active"].includes(builder.status?.toLowerCase() ?? "");
-  const runtimeLabel = builder.runtime ?? (builder.source === "acp" ? "ACP" : "Sub-Agent");
-  const isClaudeCode = runtimeLabel.toLowerCase().includes("claude");
-  const matchedProject = builder.cwd ? projects.find(p => builder.cwd?.startsWith(p.path)) : undefined;
-  const githubUrl = resolveGithubForBuilder(builder, projects, githubByPath);
-
-  return (
-    <div style={{
-      ...glowCard(statusColor(builder.status)),
-      borderColor: isActive ? `${statusColor(builder.status)}40` : undefined,
-      borderLeft: `3px solid ${statusColor(builder.status)}`,
-    }} data-glow={statusColor(builder.status)} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-      {/* Header */}
-      <div style={{ padding: "12px 14px", display: "flex", alignItems: "flex-start", gap: 10 }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: 9, flexShrink: 0,
-          background: isClaudeCode ? "rgba(212,165,116,0.12)" : "rgba(139,92,246,0.12)",
-          border: `1px solid ${isClaudeCode ? "rgba(212,165,116,0.25)" : "rgba(139,92,246,0.25)"}`,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 14, fontWeight: 700, color: isClaudeCode ? "#d4a574" : "#a78bfa",
-        }}>
-          {isClaudeCode ? "C" : builder.source === "acp" ? <Terminal style={{ width: 16, height: 16 }} /> : <Bot style={{ width: 16, height: 16 }} />}
-        </div>
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", fontFamily: MONO }}>{builder.id}</span>
-            <span style={{
-              fontSize: 8, padding: "2px 6px", borderRadius: 4, fontWeight: 600, textTransform: "uppercase",
-              background: isClaudeCode ? "rgba(212,165,116,0.12)" : builder.source === "acp" ? "rgba(168,85,247,0.12)" : "rgba(59,130,246,0.12)",
-              color: isClaudeCode ? "#d4a574" : builder.source === "acp" ? "#c084fc" : "var(--accent)",
-            }}>
-              {runtimeLabel}
-            </span>
-            {builder.label && <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{builder.label}</span>}
-            <span style={{
-              fontSize: 8, padding: "2px 6px", borderRadius: 4, fontWeight: 600,
-              background: `${statusColor(builder.status)}15`, color: statusColor(builder.status),
-              textTransform: "uppercase",
-            }}>
-              {isActive && <span style={{ width: 4, height: 4, borderRadius: "50%", background: statusColor(builder.status), display: "inline-block", marginRight: 3, animation: "_pulse 1.5s ease-in-out infinite" }} />}
-              {builder.status}
-            </span>
-          </div>
-
-          {builder.task && (
-            <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-              {builder.task}
-            </p>
-          )}
-
-          <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-            {builder.model && (
-              <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: MONO, display: "flex", alignItems: "center", gap: 3 }}>
-                <Cpu style={{ width: 9, height: 9 }} /> {builder.model}
-              </span>
-            )}
-            {builder.cwd && (
-              <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: MONO, display: "flex", alignItems: "center", gap: 3 }}>
-                <FolderOpen style={{ width: 9, height: 9 }} /> {matchedProject ? matchedProject.name : builder.cwd}
-              </span>
-            )}
-            {githubUrl && (
-              <a href={githubUrl} target="_blank" rel="noopener noreferrer"
-                style={{ fontSize: 9, color: "var(--accent)", fontFamily: MONO, display: "inline-flex", alignItems: "center", gap: 3, textDecoration: "none" }}
-                title={githubUrl}>
-                <GitBranch style={{ width: 9, height: 9 }} /> GitHub <ExternalLink style={{ width: 8, height: 8, opacity: 0.7 }} />
-              </a>
-            )}
-            {builder.thinking && (
-              <span style={{ fontSize: 8, padding: "1px 5px", borderRadius: 4, background: "var(--bg-hover)", color: "var(--text-muted)" }}>
-                thinking: {builder.thinking}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-          <button onClick={onToggleLog}
-            style={{ ...btnSecondary, padding: "4px 8px", fontSize: 10 }} title="View log">
-            <Eye style={{ width: 10, height: 10 }} />
-          </button>
-          {builder.source === "subagent" && (
-            <>
-              <button onClick={() => onAction(`Info-${builder.id}`, `/subagents info ${cmdTok}`)}
-                disabled={isActionLoading(`Info-${builder.id}`)}
-                style={{ ...btnSecondary, padding: "4px 8px", fontSize: 10 }} title="Info">
-                {isActionLoading(`Info-${builder.id}`) ? <Loader2 style={{ width: 10, height: 10, animation: "_spin 1s linear infinite" }} /> : <FileText style={{ width: 10, height: 10 }} />}
-              </button>
-              <button onClick={() => onAction(`Kill-${builder.id}`, `/subagents kill ${cmdTok}`)}
-                disabled={isActionLoading(`Kill-${builder.id}`)}
-                style={{ ...BTN_DANGER, padding: "4px 8px", fontSize: 10 }} title="Kill">
-                {isActionLoading(`Kill-${builder.id}`) ? <Loader2 style={{ width: 10, height: 10, animation: "_spin 1s linear infinite" }} /> : <Square style={{ width: 10, height: 10 }} />}
-              </button>
-            </>
-          )}
-          {builder.source === "acp" && (
-            <>
-              <button onClick={() => onAction(`Doctor-${builder.id}`, `/acp doctor ${cmdTok}`)}
-                disabled={isActionLoading(`Doctor-${builder.id}`)}
-                style={{ ...btnSecondary, padding: "4px 8px", fontSize: 10, color: "#c084fc" }} title="Doctor">
-                {isActionLoading(`Doctor-${builder.id}`) ? <Loader2 style={{ width: 10, height: 10, animation: "_spin 1s linear infinite" }} /> : <FileText style={{ width: 10, height: 10 }} />}
-              </button>
-              <button onClick={() => onAction(`Cancel-${builder.id}`, `/acp cancel ${cmdTok}`)}
-                disabled={isActionLoading(`Cancel-${builder.id}`)}
-                style={{ ...BTN_DANGER, padding: "4px 8px", fontSize: 10 }} title="Cancel">
-                {isActionLoading(`Cancel-${builder.id}`) ? <Loader2 style={{ width: 10, height: 10, animation: "_spin 1s linear infinite" }} /> : <Square style={{ width: 10, height: 10 }} />}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Log panel (expanded) */}
-      {logExpanded && (
-        <LogPanel commandTarget={cmdTok} source={builder.source} onAction={onAction} isActionLoading={isActionLoading} />
-      )}
-
-      {/* Steer + Send row */}
-      {isActive && (
-        <div style={{ padding: "8px 14px 10px", borderTop: "1px solid var(--border)", display: "flex", gap: 8 }}>
-          <div style={{ flex: 1, display: "flex", gap: 4 }}>
-            <input type="text" placeholder="Steer agent direction..."
-              value={steerInput}
-              onChange={e => onSteerChange(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === "Enter" && steerInput.trim()) {
-                  const cmd = builder.source === "acp" ? `/acp steer ${cmdTok} ${steerInput}` : `/subagents steer ${cmdTok} ${steerInput}`;
-                  onAction(`Steer-${builder.id}`, cmd);
-                  onSteerChange("");
-                }
-              }}
-              style={{ ...inputStyle, flex: 1, fontSize: 10, padding: "5px 8px" }} />
-            <button onClick={() => {
-              if (steerInput.trim()) {
-                const cmd = builder.source === "acp" ? `/acp steer ${cmdTok} ${steerInput}` : `/subagents steer ${cmdTok} ${steerInput}`;
-                onAction(`Steer-${builder.id}`, cmd);
-                onSteerChange("");
-              }
-            }} disabled={!steerInput.trim() || isActionLoading(`Steer-${builder.id}`)}
-              style={{ ...btnSecondary, padding: "4px 8px", fontSize: 10, borderColor: "rgba(251,191,36,0.3)", color: "#fbbf24" }} title="Steer">
-              {isActionLoading(`Steer-${builder.id}`) ? <Loader2 style={{ width: 9, height: 9, animation: "_spin 1s linear infinite" }} /> : <NavIcon style={{ width: 9, height: 9 }} />}
-            </button>
-          </div>
-          {builder.source === "subagent" && (
-            <div style={{ flex: 1, display: "flex", gap: 4 }}>
-              <input type="text" placeholder="Send message..."
-                value={sendInput}
-                onChange={e => onSendChange(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === "Enter" && sendInput.trim()) {
-                    onAction(`Send-${builder.id}`, `/subagents send ${cmdTok} ${sendInput}`);
-                    onSendChange("");
-                  }
-                }}
-                style={{ ...inputStyle, flex: 1, fontSize: 10, padding: "5px 8px" }} />
-              <button onClick={() => {
-                if (sendInput.trim()) {
-                  onAction(`Send-${builder.id}`, `/subagents send ${cmdTok} ${sendInput}`);
-                  onSendChange("");
-                }
-              }} disabled={!sendInput.trim() || isActionLoading(`Send-${builder.id}`)}
-                style={{ ...btnPrimary, padding: "4px 8px", fontSize: 10 }} title="Send">
-                {isActionLoading(`Send-${builder.id}`) ? <Loader2 style={{ width: 9, height: 9, animation: "_spin 1s linear infinite" }} /> : <Send style={{ width: 9, height: 9 }} />}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ── Log Panel (fetches and displays builder log) ── */
-
-function LogPanel({ commandTarget, source }: {
-  commandTarget: string; source: "subagent" | "acp";
-  onAction?: (label: string, cmd: string) => void;
-  isActionLoading?: (key: string) => boolean;
-}) {
-  const [log, setLog] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const logRef = useRef<HTMLPreElement>(null);
-
-  const fetchLog = useCallback(async () => {
-    setLoading(true);
-    try {
-      const cmd = source === "subagent" ? `/subagents log ${commandTarget}` : `/acp log ${commandTarget}`;
-      const result = await openclawClient.dispatchToAgent("main", cmd);
-      setLog(result.stdout || result.stderr || "(no output)");
-    } catch {
-      setLog("(failed to fetch log)");
-    }
-    setLoading(false);
-  }, [commandTarget, source]);
-
-  useEffect(() => { fetchLog(); }, [fetchLog]);
-  useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [log]);
-
-  return (
-    <div style={{ ...innerPanel, borderTop: "1px solid var(--border)", borderRadius: 0 }}>
-      <div style={{ padding: "4px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg-base)" }}>
-        <span style={{ fontSize: 9, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--text-muted)" }}>Build Output</span>
-        <button onClick={fetchLog} disabled={loading} style={{ ...btnSecondary, padding: "2px 6px", fontSize: 9 }}>
-          <RefreshCw style={{ width: 9, height: 9, ...(loading ? { animation: "_spin 1s linear infinite" } : {}) }} /> Refresh
-        </button>
-      </div>
-      {loading && !log ? (
-        <div style={{ padding: "20px 14px", display: "flex", justifyContent: "center" }}>
-          <Loader2 style={{ width: 14, height: 14, color: "var(--accent)", animation: "_spin 1s linear infinite" }} />
-        </div>
-      ) : (
-        <pre ref={logRef} style={{
-          margin: 0, padding: "8px 14px", fontSize: 10, lineHeight: 1.6, fontFamily: MONO,
-          color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-word",
-          maxHeight: 250, overflowY: "auto", background: "var(--bg-base)",
-        }}>
-          {log}
-        </pre>
-      )}
-    </div>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════════════════
-   SCHEDULE TAB — OpenClaw cron for overnight / recurring Forge builds
-   ══════════════════════════════════════════════════════════════════════ */
-
-function ForgeScheduleTab() {
-  const {
-    projects,
-    forgeSchedules,
-    addForgeSchedule,
-    updateForgeSchedule,
-    removeForgeSchedule,
-  } = useFactoryStore();
-
-  const [name, setName] = useState("");
-  const [projectId, setProjectId] = useState<string>("");
-  const [task, setTask] = useState("");
-  const [cwdExtra, setCwdExtra] = useState("");
   const [runtime, setRuntime] = useState("codex");
   const [model, setModel] = useState("");
   const [thinking, setThinking] = useState("default");
-  const [cronExpression, setCronExpression] = useState(FORGE_CRON_PRESETS[0].value);
-  const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
-  const [registering, setRegistering] = useState<string | null>(null);
 
-  const selectedProject = projectId ? projects.find(p => p.id === projectId) : null;
-  const effectiveCwd = (selectedProject?.path ?? "").trim() || cwdExtra.trim();
-
-  const saveSchedule = () => {
-    if (!name.trim() || !task.trim()) {
-      setFeedback({ type: "error", msg: "Name and build instructions are required." });
-      return;
-    }
-    addForgeSchedule({
-      name: name.trim(),
-      projectId: projectId || null,
-      task: task.trim(),
-      cwd: effectiveCwd,
-      runtime,
-      model,
-      thinking,
-      cronExpression: cronExpression.trim() || "0 2 * * *",
-    });
-    setName("");
-    setProjectId("");
-    setTask("");
-    setCwdExtra("");
-    setFeedback({ type: "success", msg: "Saved. Click “Register with OpenClaw” to add it to scheduled jobs (Command Center)." });
+  const handleSubmit = () => {
+    if (!task.trim()) return;
+    const title = task.length > 60 ? task.slice(0, 57) + "..." : task;
+    onSubmit({ title, task: task.trim(), runtime, model, cwd: cwd.trim(), thinking });
   };
-
-  const registerCron = async (s: ForgeSchedule) => {
-    setRegistering(s.id);
-    try {
-      const msg = buildForgeSpawnSlashCommand({
-        runtime: s.runtime,
-        model: s.model,
-        cwd: s.cwd,
-        thinking: s.thinking,
-        task: s.task,
-      });
-      const escaped = escapeShellArg(msg);
-      const escapedSched = escapeShellArg(s.cronExpression.trim());
-      const escapedName = escapeShellArg(s.name.trim());
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `openclaw cron add --cron "${escapedSched}" --message "${escaped}" --agent main --name "${escapedName}"`,
-        cwd: null,
-      });
-      if (result.code === 0) {
-        invalidateCronJobsCliCache();
-        updateForgeSchedule(s.id, { lastRegisteredAt: Date.now(), openclawJobName: s.name.trim() });
-        setFeedback({ type: "success", msg: `Registered “${s.name}” with OpenClaw.` });
-      } else {
-        setFeedback({ type: "error", msg: result.stderr || result.stdout || "openclaw cron add failed" });
-      }
-    } catch (e) {
-      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "openclaw cron add failed" });
-    }
-    setRegistering(null);
-  };
-
-  useEffect(() => {
-    if (!feedback) return;
-    const t = setTimeout(() => setFeedback(null), 5000);
-    return () => clearTimeout(t);
-  }, [feedback]);
 
   return (
-    <div style={{ flex: 1, overflow: "auto", padding: "16px 24px 24px" }}>
-      <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "0 0 16px", maxWidth: 640, lineHeight: 1.5 }}>
-        Define build recipes and when they should run. Registering sends the same <span style={{ fontFamily: MONO }}>/acp spawn</span> message as New Build to OpenClaw cron (see Command Center → Scheduled).
-      </p>
+    <div style={{ ...glowCard(NVIDIA_GREEN), padding: 16, marginBottom: 16 }} data-glow={NVIDIA_GREEN}
+      onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
+        <Zap style={{ width: 14, height: 14, color: NVIDIA_GREEN }} /> New Pipeline Build
+      </div>
 
-      {feedback && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, marginBottom: 14,
-          background: feedback.type === "success" ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
-          border: `1px solid ${feedback.type === "success" ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)"}`,
-        }}>
-          <span style={{ fontSize: 11, color: feedback.type === "success" ? "#4ade80" : "#f87171", flex: 1 }}>{feedback.msg}</span>
-          <button type="button" onClick={() => setFeedback(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}>×</button>
+      <textarea
+        value={task} onChange={(e) => setTask(e.target.value)}
+        placeholder="Describe what you want to build..."
+        rows={3}
+        style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", marginBottom: 10 }}
+        autoFocus
+      />
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+        <div>
+          <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 4 }}>Runtime</label>
+          <select value={runtime} onChange={(e) => setRuntime(e.target.value)}
+            style={{ ...inputStyle, fontSize: 12, padding: "6px 10px" }}>
+            <option value="codex">Codex</option>
+            <option value="gemini-cli">Gemini CLI</option>
+            <option value="claude-code">Claude Code</option>
+          </select>
         </div>
-      )}
-
-      <div style={{ ...glowCard("var(--accent)"), padding: 16, marginBottom: 20 }} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", marginBottom: 12 }}>New scheduled build</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div>
-            <span style={sectionLabel}>Name</span>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="Nightly API sync" style={inputStyle} />
-          </div>
-          <div>
-            <span style={sectionLabel}>When (cron)</span>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-              {FORGE_CRON_PRESETS.map(p => (
-                <button key={p.value} type="button" onClick={() => setCronExpression(p.value)}
-                  style={{
-                    ...btnSecondary, fontSize: 10,
-                    borderColor: cronExpression === p.value ? "var(--accent)" : "var(--border)",
-                    color: cronExpression === p.value ? "var(--accent)" : "var(--text-muted)",
-                  }}>
-                  {p.label}
-                </button>
-              ))}
-            </div>
-            <input value={cronExpression} onChange={e => setCronExpression(e.target.value)} placeholder="0 2 * * *" style={{ ...inputStyle, fontFamily: MONO }} />
-          </div>
-          <div>
-            <span style={sectionLabel}>Project folder (optional)</span>
-            <select value={projectId} onChange={e => setProjectId(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }}>
-              <option value="">None — use custom path below</option>
-              {projects.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            {!selectedProject && (
-              <input value={cwdExtra} onChange={e => setCwdExtra(e.target.value)} placeholder="Or enter working directory path" style={{ ...inputStyle, marginTop: 8 }} />
-            )}
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <div>
-              <span style={sectionLabel}>Runtime</span>
-              <select value={runtime} onChange={e => setRuntime(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }}>
-                <option value="codex">Codex (OpenAI)</option>
-                <option value="gemini-cli">Gemini CLI</option>
-                <option value="claude-code">Claude Code</option>
-              </select>
-            </div>
-            <div>
-              <span style={sectionLabel}>Thinking</span>
-              <select value={thinking} onChange={e => setThinking(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }}>
-                {["default", "minimal", "low", "medium", "high"].map(l => (
-                  <option key={l} value={l}>{l}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div>
-            <span style={sectionLabel}>Model override</span>
-            <input value={model} onChange={e => setModel(e.target.value)} placeholder="Optional" style={inputStyle} />
-          </div>
-          <div>
-            <span style={sectionLabel}>Build instructions *</span>
-            <textarea value={task} onChange={e => setTask(e.target.value)} rows={4} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5 }} placeholder="What the agent should do each run..." />
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button type="button" onClick={saveSchedule} disabled={!name.trim() || !task.trim()}
-              onMouseDown={pressDown} onMouseUp={pressUp}
-              style={{ ...btnPrimary, padding: "8px 18px", opacity: !name.trim() || !task.trim() ? 0.5 : 1 }}>
-              Save schedule
-            </button>
-          </div>
+        <div>
+          <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 4 }}>Thinking</label>
+          <select value={thinking} onChange={(e) => setThinking(e.target.value)}
+            style={{ ...inputStyle, fontSize: 12, padding: "6px 10px" }}>
+            <option value="default">Default</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
         </div>
       </div>
 
-      <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, color: "var(--text-muted)", marginBottom: 8 }}>
-        Saved schedules ({forgeSchedules.length})
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+        <div>
+          <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 4 }}>Model (optional)</label>
+          <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="auto"
+            style={{ ...inputStyle, fontSize: 12, padding: "6px 10px" }} />
+        </div>
+        <div>
+          <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 4 }}>Working Directory</label>
+          <input value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="C:\path\to\project"
+            style={{ ...inputStyle, fontSize: 12, padding: "6px 10px" }} />
+        </div>
       </div>
-      {forgeSchedules.length === 0 ? (
-        <div style={{ ...glowCard("var(--text-muted)"), ...emptyState, padding: 28, fontSize: 12 }}>
-          No schedules yet. Add one above, then register with OpenClaw.
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {forgeSchedules.map(s => (
-            <div key={s.id} style={{ ...rowStyle, padding: "12px 14px" }} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{s.name}</div>
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO, marginTop: 4 }}>{s.cronExpression}</div>
-                  {s.cwd && <div style={{ fontSize: 10, color: "var(--text-secondary)", marginTop: 4, fontFamily: MONO }}>{s.cwd}</div>}
-                  <div style={{ fontSize: 10, color: "var(--text-secondary)", marginTop: 6, lineHeight: 1.4 }}>{s.task}</div>
-                  {s.lastRegisteredAt && (
-                    <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 6 }}>Last registered {new Date(s.lastRegisteredAt).toLocaleString()}</div>
-                  )}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
-                  <button type="button" onClick={() => registerCron(s)} disabled={registering === s.id}
-                    onMouseDown={pressDown} onMouseUp={pressUp}
-                    style={{ ...btnPrimary, padding: "6px 12px", fontSize: 10, whiteSpace: "nowrap" }}>
-                    {registering === s.id ? <Loader2 style={{ width: 12, height: 12, animation: "_spin 1s linear infinite" }} /> : <Clock style={{ width: 11, height: 11 }} />}
-                    Register with OpenClaw
-                  </button>
-                  <button type="button" onClick={() => removeForgeSchedule(s.id)} style={{ ...BTN_DANGER, padding: "6px 12px", fontSize: 10 }}>
-                    Remove
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button onClick={onCancel} style={{ ...btnSecondary, fontSize: 11 }}>Cancel</button>
+        <button onClick={handleSubmit} disabled={!task.trim()} onMouseDown={pressDown} onMouseUp={pressUp}
+          style={{ ...btnPrimary, background: NVIDIA_GREEN, fontSize: 11, opacity: task.trim() ? 1 : 0.4 }}>
+          <Play style={{ width: 12, height: 12 }} /> Start Pipeline
+        </button>
+      </div>
     </div>
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════
-   PROJECTS TAB
-   ══════════════════════════════════════════════════════════════════════ */
+/* ─── Pipeline Card ──────────────────────────────────────────── */
 
-function ProjectsTab() {
-  const {
-    projects, runs, selectedProjectId,
-    addProject, removeProject, selectProject, updateProject,
-    addRun, updateRun, removeRun, clearCompletedRuns,
-  } = useFactoryStore();
-
-  const [showNewProject, setShowNewProject] = useState(false);
-  const [focusedRunId, setFocusedRunId] = useState<string | null>(null);
-  const selectedProject = projects.find(p => p.id === selectedProjectId) ?? null;
-  const projectRuns = runs.filter(r => r.projectId === selectedProjectId);
-  const focusedRun = focusedRunId ? runs.find(r => r.id === focusedRunId) ?? null : null;
-  const focusedProject = focusedRun ? projects.find(p => p.id === focusedRun.projectId) ?? null : null;
-
-  const activeRunCount = (pid: string) => runs.filter(r => r.projectId === pid && r.status === "running").length;
-
-  const handleStartRun = useCallback(async (agentType: AgentType, objective: string) => {
-    if (!selectedProject) return;
-    const runId = addRun({ projectId: selectedProject.id, agentType, objective });
-    updateRun(runId, { status: "running", startedAt: Date.now() });
-    updateProject(selectedProject.id, {});
-    setFocusedRunId(runId);
-    try {
-      const handle = await factoryService.startRun(runId, agentType, objective, selectedProject.path);
-      updateRun(runId, { pid: handle.pid, logFile: handle.logFile });
-      factoryService.startPolling(runId, handle.logFile, (output, finished, exitCode) => {
-        if (finished) {
-          updateRun(runId, { output, status: exitCode === 0 ? "completed" : "failed", completedAt: Date.now(), error: exitCode !== 0 ? `Exited with code ${exitCode}` : undefined });
-        } else {
-          updateRun(runId, { output });
-        }
-      }, handle.pid);
-    } catch (err) {
-      updateRun(runId, { status: "failed", error: err instanceof Error ? err.message : String(err), completedAt: Date.now() });
-    }
-  }, [selectedProject, addRun, updateRun, updateProject]);
-
-  const handleCancelRun = useCallback(async (run: AgentRun) => {
-    if (run.pid) await factoryService.cancelRun(run.pid);
-    factoryService.stopPolling(run.id);
-    updateRun(run.id, { status: "cancelled", completedAt: Date.now() });
-  }, [updateRun]);
+function PipelineCard({ build, isSelected, onSelect }: {
+  build: Build;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
+  const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
-    for (const run of runs) {
-      if (run.status === "running" && run.logFile) {
-        factoryService.startPolling(run.id, run.logFile, (output, finished, exitCode) => {
-          if (finished) updateRun(run.id, { output, status: exitCode === 0 ? "completed" : "failed", completedAt: Date.now() });
-          else updateRun(run.id, { output });
-        }, run.pid);
-      }
-    }
-    return () => { for (const run of runs) factoryService.stopPolling(run.id); };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    const isActive = build.currentStage !== "done" && build.currentStage !== "failed";
+    if (!isActive) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [build.currentStage]);
 
-  if (focusedRun && focusedProject) {
-    return (
-      <RunWorkspace run={focusedRun} project={focusedProject}
-        onBack={() => setFocusedRunId(null)} onCancel={() => handleCancelRun(focusedRun)} />
-    );
-  }
+  const duration = elapsed(((build.completedAt ?? now) - build.createdAt));
+  const isActive = build.currentStage !== "done" && build.currentStage !== "failed";
 
   return (
-    <div style={{ flex: 1, display: "flex", overflow: "hidden", padding: "12px 24px 24px", gap: 16 }}>
-      <div style={{ width: 240, flexShrink: 0, display: "flex", flexDirection: "column", gap: 6, overflowY: "auto" }}>
-        <button onClick={() => setShowNewProject(true)} onMouseDown={pressDown} onMouseUp={pressUp} style={{ ...btnPrimary, marginBottom: 8 }}>
-          <IconPlus /> New Project
-        </button>
-        {projects.map(p => {
-          const active = p.id === selectedProjectId;
-          const running = activeRunCount(p.id);
+    <div
+      onClick={onSelect}
+      style={{
+        ...glowCard(isActive ? NVIDIA_GREEN : "var(--text-muted)"),
+        padding: 14,
+        marginBottom: 10,
+        cursor: "pointer",
+        borderColor: isSelected ? `color-mix(in srgb, ${NVIDIA_GREEN} 40%, transparent)` : undefined,
+      }}
+      data-glow={NVIDIA_GREEN}
+      onMouseEnter={hoverLift}
+      onMouseLeave={hoverReset}
+    >
+      {/* Title row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span style={{
+          width: 6, height: 6, borderRadius: "50%",
+          background: isActive ? NVIDIA_GREEN : build.currentStage === "done" ? "#4ade80" : "#f87171",
+          animation: isActive ? "_pulse 1.5s ease-in-out infinite" : "none",
+          flexShrink: 0,
+        }} />
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {build.title}
+        </span>
+        <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO, flexShrink: 0 }}>{duration}</span>
+        <span style={{ fontSize: 9, color: "var(--text-muted)", flexShrink: 0, textTransform: "capitalize" }}>{build.runtime}</span>
+      </div>
+
+      {/* Stage progress bar */}
+      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+        {build.stages.map((sr, i) => {
+          const meta = STAGE_META[sr.stage];
+          const Icon = meta.icon;
           return (
-            <button key={p.id} onClick={() => { selectProject(p.id); setFocusedRunId(null); }}
-              style={{ ...glowCard(active ? "var(--accent)" : "var(--text-muted)"), padding: "10px 12px", cursor: "pointer", textAlign: "left", borderColor: active ? "var(--accent)" : undefined, background: active ? "var(--accent-bg)" : undefined, transition: `all 0.2s ${EASE}` }}
-              data-glow={active ? "var(--accent)" : undefined} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: active ? "var(--accent)" : "var(--text)", marginBottom: 2 }}>{p.name}</div>
-              <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.path}</div>
-              {running > 0 && (
-                <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 4 }}>
-                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--accent)", animation: "_pulse 1.5s ease-in-out infinite" }} />
-                  <span style={{ fontSize: 9, color: "var(--accent)" }}>{running} running</span>
-                </div>
+            <div key={sr.stage} style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
+              <StageIndicator status={sr.status} color={meta.color} />
+              <Icon style={{ width: 11, height: 11, color: sr.status === "running" ? meta.color : "var(--text-muted)", transition: "color 0.2s" }} />
+              <span style={{
+                fontSize: 9, fontWeight: 600, color: sr.status === "running" ? meta.color : sr.status === "passed" ? "#4ade80" : sr.status === "failed" ? "#f87171" : "var(--text-muted)",
+                transition: "color 0.2s",
+              }}>
+                {meta.label}
+              </span>
+              {i < 3 && (
+                <div style={{ flex: 1, height: 1, background: sr.status === "passed" ? "#4ade80" : "var(--border)", transition: "background 0.3s", marginLeft: 4, marginRight: 2 }} />
               )}
-            </button>
+            </div>
           );
         })}
       </div>
 
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", gap: 12 }}>
-        {showNewProject && <NewProjectForm onSubmit={p => { addProject(p); setShowNewProject(false); }} onCancel={() => setShowNewProject(false)} />}
-        {selectedProject ? (
-          <>
-            <ProjectHeader project={selectedProject} runCount={projectRuns.length} activeCount={activeRunCount(selectedProject.id)} onDelete={() => removeProject(selectedProject.id)} />
-            <NewRunForm onSubmit={handleStartRun} />
-            <RunsList runs={projectRuns} onCancel={handleCancelRun} onRemove={removeRun} onClearCompleted={() => clearCompletedRuns(selectedProject.id)} onOpenWorkspace={setFocusedRunId} />
-          </>
-        ) : !showNewProject ? (
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ textAlign: "center", color: "var(--text-muted)" }}>
-              <Zap style={{ width: 32, height: 32, marginBottom: 8 }} />
-              <p style={{ fontSize: 13, margin: 0 }}>Select or create a project</p>
+      {/* Actions */}
+      {(build.currentStage === "failed") && (
+        <div style={{ display: "flex", gap: 6, marginTop: 10, justifyContent: "flex-end" }}>
+          <button onClick={(e) => { e.stopPropagation(); factoryService.retryBuild(build.id); }}
+            style={{ ...btnSecondary, fontSize: 10, padding: "4px 10px", color: "#fbbf24", borderColor: "rgba(251,191,36,0.2)" }}>
+            <RotateCcw style={{ width: 10, height: 10 }} /> Retry
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); factoryService.skipStage(build.id); }}
+            style={{ ...btnSecondary, fontSize: 10, padding: "4px 10px" }}>
+            <SkipForward style={{ width: 10, height: 10 }} /> Skip
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Stage Indicator ─────────────────────────────────────────── */
+
+function StageIndicator({ status, color }: { status: StageStatus; color: string }) {
+  const size = 14;
+
+  if (status === "running") {
+    return (
+      <span style={{
+        width: size, height: size, borderRadius: "50%", flexShrink: 0,
+        background: `color-mix(in srgb, ${color} 20%, transparent)`,
+        border: `2px solid ${color}`,
+        animation: "stage-pulse 1.5s ease-in-out infinite",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        <Loader2 style={{ width: 8, height: 8, color, animation: "_spin 1s linear infinite" }} />
+      </span>
+    );
+  }
+
+  if (status === "passed") {
+    return (
+      <span style={{
+        width: size, height: size, borderRadius: "50%", flexShrink: 0,
+        background: "rgba(74,222,128,0.15)", border: "2px solid #4ade80",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        <Check style={{ width: 8, height: 8, color: "#4ade80" }} />
+      </span>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <span style={{
+        width: size, height: size, borderRadius: "50%", flexShrink: 0,
+        background: "rgba(248,113,113,0.15)", border: "2px solid #f87171",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        <X style={{ width: 8, height: 8, color: "#f87171" }} />
+      </span>
+    );
+  }
+
+  if (status === "skipped") {
+    return (
+      <span style={{
+        width: size, height: size, borderRadius: "50%", flexShrink: 0,
+        background: "rgba(251,191,36,0.12)", border: "2px solid #fbbf24",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        <SkipForward style={{ width: 6, height: 6, color: "#fbbf24" }} />
+      </span>
+    );
+  }
+
+  // pending
+  return (
+    <span style={{
+      width: size, height: size, borderRadius: "50%", flexShrink: 0,
+      background: "rgba(255,255,255,0.04)", border: "2px solid var(--border)",
+    }} />
+  );
+}
+
+/* ─── Build Output Panel ──────────────────────────────────────── */
+
+function BuildOutputPanel({ build }: { build: Build }) {
+  const outputRef = useRef<HTMLPreElement>(null);
+  const [stageTab, setStageTab] = useState<PipelineStage>(build.currentStage as PipelineStage);
+
+  useEffect(() => {
+    if (PIPELINE_STAGES.includes(build.currentStage as PipelineStage)) {
+      setStageTab(build.currentStage as PipelineStage);
+    }
+  }, [build.currentStage]);
+
+  useEffect(() => {
+    if (outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  });
+
+  const stageResult = build.stages.find((s) => s.stage === stageTab);
+  const isRunning = stageResult?.status === "running";
+
+  return (
+    <div style={{ ...glowCard(NVIDIA_GREEN), marginTop: 12, overflow: "hidden" }}>
+      {/* Stage tabs */}
+      <div style={{ display: "flex", borderBottom: "1px solid var(--border)" }}>
+        {build.stages.map((sr) => {
+          const meta = STAGE_META[sr.stage];
+          const Icon = meta.icon;
+          const active = stageTab === sr.stage;
+          return (
+            <button key={sr.stage} onClick={() => setStageTab(sr.stage)} style={{
+              padding: "8px 14px", fontSize: 11, fontWeight: active ? 600 : 500,
+              border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5,
+              background: active ? "rgba(255,255,255,0.04)" : "transparent",
+              color: active ? meta.color : "var(--text-muted)",
+              borderBottom: active ? `2px solid ${meta.color}` : "2px solid transparent",
+              transition: `all 0.15s ${EASE}`,
+            }}>
+              <Icon style={{ width: 11, height: 11 }} />
+              {meta.label}
+              {sr.status !== "pending" && (
+                <span style={{
+                  width: 5, height: 5, borderRadius: "50%",
+                  background: STATUS_DOT[sr.status],
+                  animation: sr.status === "running" ? "_pulse 1.5s ease-in-out infinite" : "none",
+                }} />
+              )}
+            </button>
+          );
+        })}
+
+        <div style={{ flex: 1 }} />
+
+        {/* Cancel build */}
+        <button onClick={() => factoryService.cancelBuild(build.id)}
+          style={{ ...BTN_DANGER, margin: "4px 8px", padding: "4px 10px", fontSize: 10, borderRadius: 8 }}>
+          <Square style={{ width: 8, height: 8 }} /> Cancel
+        </button>
+      </div>
+
+      {/* Output */}
+      <div style={{ position: "relative" }}>
+        {isRunning && (
+          <div style={{
+            position: "absolute", top: 8, right: 12, display: "flex", alignItems: "center", gap: 5,
+            fontSize: 9, color: NVIDIA_GREEN, zIndex: 1,
+          }}>
+            <Loader2 style={{ width: 10, height: 10, animation: "_spin 1s linear infinite" }} />
+            Streaming...
+          </div>
+        )}
+        <pre
+          ref={outputRef}
+          style={{
+            margin: 0, padding: "12px 14px", fontSize: 10.5, lineHeight: 1.65,
+            fontFamily: MONO, color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-word",
+            overflowY: "auto", maxHeight: 320, minHeight: 120,
+            background: "rgba(0,0,0,0.15)",
+          }}
+        >
+          {stageResult?.output || (isRunning ? "Waiting for output..." : stageResult?.status === "pending" ? "Stage not started yet." : "No output.")}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   WORKSPACE TAB
+   ═══════════════════════════════════════════════════════════════ */
+
+function WorkspaceTab() {
+  const { builds, activeBuildId, setActiveBuild } = useFactoryStore();
+  const build = activeBuildId ? builds.find((b) => b.id === activeBuildId) : null;
+
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [changedFiles, setChangedFiles] = useState<{ added: string[]; modified: string[]; deleted: string[] }>({ added: [], modified: [], deleted: [] });
+  const [stageTab, setStageTab] = useState<PipelineStage>("plan");
+  const baseSnapshotRef = useRef<Map<string, number> | null>(null);
+
+  const isActive = build && build.currentStage !== "done" && build.currentStage !== "failed";
+
+  const pollChanges = useCallback(async () => {
+    if (!build?.cwd) return;
+    try {
+      const current = await factoryService.snapshotFiles(build.cwd);
+      if (baseSnapshotRef.current) {
+        const diff = factoryService.diffSnapshots(baseSnapshotRef.current, current);
+        setChangedFiles(diff);
+      }
+    } catch { /* best effort */ }
+  }, [build?.cwd]);
+
+  useEffect(() => {
+    if (!build?.cwd) return;
+    let cancelled = false;
+    factoryService.snapshotFiles(build.cwd).then((snap) => {
+      if (!cancelled) baseSnapshotRef.current = snap;
+    });
+    const interval = isActive ? window.setInterval(pollChanges, 4000) : undefined;
+    if (!isActive) pollChanges();
+    return () => { cancelled = true; if (interval) clearInterval(interval); };
+  }, [build?.cwd, isActive, pollChanges]);
+
+  if (!build) {
+    return (
+      <div style={{ flex: 1, padding: 24 }}>
+        <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>Select a build to view its workspace</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {builds.slice(0, 10).map((b) => (
+            <button key={b.id} onClick={() => setActiveBuild(b.id)}
+              style={{
+                ...innerPanel, padding: "10px 14px", border: "1px solid var(--border)", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 8, textAlign: "left", background: "rgba(255,255,255,0.015)",
+              }}>
+              <span style={{
+                width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                background: b.currentStage === "done" ? "#4ade80" : b.currentStage === "failed" ? "#f87171" : NVIDIA_GREEN,
+              }} />
+              <span style={{ fontSize: 11, color: "var(--text)", fontWeight: 500, flex: 1 }}>{b.title}</span>
+              <span style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "capitalize" }}>{b.currentStage}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const stageResult = build.stages.find((s) => s.stage === stageTab);
+  const totalChanges = changedFiles.added.length + changedFiles.modified.length + changedFiles.deleted.length;
+  const outputRef = useRef<HTMLPreElement>(null);
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* Workspace header */}
+      <div style={{
+        padding: "8px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10,
+        background: "rgba(255,255,255,0.01)", flexShrink: 0,
+      }}>
+        <button onClick={() => setActiveBuild(null)}
+          style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+          <ChevronDown style={{ width: 10, height: 10, transform: "rotate(90deg)" }} /> Back
+        </button>
+        <div style={{ width: 1, height: 16, background: "var(--border)" }} />
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{build.title}</span>
+        {totalChanges > 0 && (
+          <span style={{ fontSize: 10, color: NVIDIA_GREEN, fontFamily: MONO }}>{totalChanges} file{totalChanges !== 1 ? "s" : ""} changed</span>
+        )}
+        <span style={{
+          fontSize: 9, padding: "2px 8px", borderRadius: 10, fontWeight: 600,
+          background: `color-mix(in srgb, ${STATUS_DOT[build.currentStage as StageStatus] ?? "#4ade80"} 12%, transparent)`,
+          color: STATUS_DOT[build.currentStage as StageStatus] ?? "#4ade80",
+          textTransform: "capitalize",
+        }}>
+          {build.currentStage}
+        </span>
+      </div>
+
+      {/* Three-panel body */}
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        {/* File tree */}
+        {build.cwd && (
+          <div style={{ width: 220, flexShrink: 0, borderRight: "1px solid var(--border)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            <div style={{ padding: "6px 10px", borderBottom: "1px solid var(--border)", fontSize: 10, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              Files
+            </div>
+            <div style={{ flex: 1, overflow: "auto" }}>
+              <FileTree rootPath={build.cwd} changedFiles={changedFiles} selectedFile={selectedFile} onSelectFile={setSelectedFile} />
             </div>
           </div>
-        ) : null}
+        )}
+
+        {/* File viewer */}
+        <div style={{ flex: 1, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column", borderRight: "1px solid var(--border)" }}>
+          <FileViewer filePath={selectedFile} isRunActive={!!isActive} />
+        </div>
+
+        {/* Stage output */}
+        <div style={{ width: 340, flexShrink: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          <div style={{ display: "flex", borderBottom: "1px solid var(--border)" }}>
+            {PIPELINE_STAGES.map((s) => {
+              const meta = STAGE_META[s];
+              const sr = build.stages.find((st) => st.stage === s);
+              return (
+                <button key={s} onClick={() => setStageTab(s)} style={{
+                  padding: "6px 10px", fontSize: 10, fontWeight: stageTab === s ? 600 : 500,
+                  border: "none", cursor: "pointer", background: stageTab === s ? "rgba(255,255,255,0.04)" : "transparent",
+                  color: stageTab === s ? meta.color : "var(--text-muted)",
+                  borderBottom: stageTab === s ? `2px solid ${meta.color}` : "2px solid transparent",
+                  display: "flex", alignItems: "center", gap: 4, transition: `all 0.15s ${EASE}`,
+                }}>
+                  {meta.label}
+                  {sr && sr.status !== "pending" && (
+                    <span style={{ width: 4, height: 4, borderRadius: "50%", background: STATUS_DOT[sr.status] }} />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <pre ref={outputRef} style={{
+            flex: 1, margin: 0, padding: "10px 12px", fontSize: 10, lineHeight: 1.6,
+            fontFamily: MONO, color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-word",
+            overflowY: "auto", background: "rgba(0,0,0,0.1)",
+          }}>
+            {stageResult?.output || (stageResult?.status === "running" ? "Streaming..." : stageResult?.status === "pending" ? "Pending" : "No output.")}
+          </pre>
+        </div>
       </div>
     </div>
   );
 }
 
-/* ── Sub-Components (Projects) ── */
+/* ═══════════════════════════════════════════════════════════════
+   HISTORY TAB
+   ═══════════════════════════════════════════════════════════════ */
 
-function ProjectHeader({ project, runCount, activeCount, onDelete }: {
-  project: FactoryProject; runCount: number; activeCount: number; onDelete: () => void;
-}) {
+function HistoryTab() {
+  const { builds, setActiveBuild, removeBuild } = useFactoryStore();
+  const [search, setSearch] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const completedBuilds = builds
+    .filter((b) => b.currentStage === "done" || b.currentStage === "failed")
+    .filter((b) => !search || b.title.toLowerCase().includes(search.toLowerCase()) || b.task.toLowerCase().includes(search.toLowerCase()));
+
   return (
-    <div style={{ ...glowCard("var(--accent)"), padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
-      <div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{project.name}</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
-          <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO }}>{project.path}</span>
-          <span style={{ fontSize: 10, color: "var(--text-muted)" }}>&middot; {runCount} run{runCount !== 1 ? "s" : ""}</span>
-          {activeCount > 0 && <span style={{ fontSize: 10, color: "var(--accent)" }}>&middot; {activeCount} active</span>}
+    <div style={{ flex: 1, overflow: "auto", padding: "16px 24px" }}>
+      {/* Search */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <div style={{ position: "relative", flex: 1 }}>
+          <Search style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", width: 13, height: 13, color: "var(--text-muted)" }} />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search builds..."
+            style={{ ...inputStyle, paddingLeft: 30, fontSize: 12 }} />
         </div>
       </div>
-      <button onClick={onDelete} style={BTN_DANGER} title="Delete project"><IconTrash /></button>
-    </div>
-  );
-}
 
-function slugify(name: string): string {
-  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "project";
-}
-
-function NewProjectForm({ onSubmit, onCancel }: {
-  onSubmit: (p: { name: string; description: string; path: string; techStack: string[] }) => void;
-  onCancel: () => void;
-}) {
-  const [name, setName] = useState("");
-  const [desc, setDesc] = useState("");
-  const [stack, setStack] = useState("");
-  const [creating, setCreating] = useState(false);
-
-  const handleSubmit = async () => {
-    if (!name.trim() || creating) return;
-    setCreating(true);
-    try {
-      const slug = slugify(name);
-      const mkdirCmd = `$base = Join-Path $env:USERPROFILE 'Projects'; if (!(Test-Path $base)) { New-Item -ItemType Directory -Path $base -Force | Out-Null }; $dir = Join-Path $base '${slug}'; if (!(Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }; Write-Output $dir`;
-      const result = await invoke<{ stdout: string }>("execute_command", { command: mkdirCmd, cwd: null });
-      onSubmit({ name: name.trim(), description: desc.trim(), path: result.stdout.trim(), techStack: stack.split(",").map(s => s.trim()).filter(Boolean) });
-    } catch (err) { console.error("Failed to create project directory:", err); }
-    setCreating(false);
-  };
-
-  return (
-    <div style={{ ...glowCard("var(--accent)"), padding: 16, flexShrink: 0 }} data-glow="var(--accent)">
-      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", marginBottom: 12 }}>New Project</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <div>
-          <span style={sectionLabel}>Project Name *</span>
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="My App" style={inputStyle} autoFocus onKeyDown={e => { if (e.key === "Enter") handleSubmit(); }} />
-        </div>
-        <div>
-          <span style={sectionLabel}>Folder</span>
-          <div style={{ ...inputStyle, background: "var(--bg-base)", color: "var(--text-muted)", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
-            <IconFolder /> <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>~/Projects/{name.trim() ? slugify(name) : "..."}</span>
-          </div>
-        </div>
-        <div style={{ gridColumn: "1 / -1" }}>
-          <span style={sectionLabel}>Description</span>
-          <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="A React dashboard with auth..." style={inputStyle} />
-        </div>
-        <div style={{ gridColumn: "1 / -1" }}>
-          <span style={sectionLabel}>Tech Stack (comma separated)</span>
-          <input value={stack} onChange={e => setStack(e.target.value)} placeholder="react, typescript, tailwind" style={inputStyle} />
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button onClick={handleSubmit} disabled={!name.trim() || creating} onMouseDown={pressDown} onMouseUp={pressUp} style={{ ...btnPrimary, opacity: !name.trim() || creating ? 0.5 : 1 }}>
-          <IconPlus /> {creating ? "Creating..." : "Create Project"}
-        </button>
-        <button onClick={onCancel} onMouseDown={pressDown} onMouseUp={pressUp} style={btnSecondary}>Cancel</button>
-      </div>
-    </div>
-  );
-}
-
-function NewRunForm({ onSubmit }: { onSubmit: (agentType: AgentType, objective: string) => void }) {
-  const [agentType, setAgentType] = useState<AgentType>("claude-code");
-  const [objective, setObjective] = useState("");
-  const [expanded, setExpanded] = useState(false);
-
-  return (
-    <div style={{ ...glowCard("var(--accent)"), flexShrink: 0, overflow: "visible" }}>
-      <button onClick={() => setExpanded(!expanded)}
-        style={{ width: "100%", padding: "10px 16px", display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", cursor: "pointer", color: "var(--text)" }}>
-        <IconChevron open={expanded} />
-        <span style={{ fontSize: 12, fontWeight: 600 }}>Local Build</span>
-        <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: "auto" }}>Dispatch an agent via OpenClaw CLI</span>
-      </button>
-      {expanded && (
-        <div style={{ padding: "0 16px 14px", borderTop: "1px solid var(--border)" }}>
-          <div style={{ marginTop: 12 }}>
-            <span style={sectionLabel}>Agent ID</span>
-            <input value={agentType} onChange={e => setAgentType(e.target.value)}
-              placeholder="claude-code, cortex, main, ..."
-              style={{ ...inputStyle, fontFamily: "inherit", marginBottom: 10 }} />
-          </div>
-          <div>
-            <span style={sectionLabel}>Objective</span>
-            <textarea value={objective} onChange={e => setObjective(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && e.ctrlKey) { if (objective.trim()) { onSubmit(agentType, objective.trim()); setObjective(""); } } }}
-              placeholder="Describe what to build (Ctrl+Enter to start)"
-              rows={3} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5, fontFamily: "inherit" }} />
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
-            <button onClick={() => { if (objective.trim()) { onSubmit(agentType, objective.trim()); setObjective(""); } }}
-              disabled={!objective.trim()} onMouseDown={pressDown} onMouseUp={pressUp} style={{ ...btnPrimary, opacity: !objective.trim() ? 0.5 : 1 }}>
-              <Play style={{ width: 11, height: 11 }} /> Build
-            </button>
-            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Ctrl+Enter</span>
-          </div>
+      {completedBuilds.length === 0 && (
+        <div style={{
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 12,
+          padding: "48px 24px", color: "var(--text-muted)", fontSize: 13, textAlign: "center",
+        }}>
+          <Clock style={{ width: 28, height: 28, opacity: 0.3 }} />
+          {search ? "No builds match your search" : "No completed builds yet"}
         </div>
       )}
-    </div>
-  );
-}
 
-function RunsList({ runs, onCancel, onRemove, onClearCompleted, onOpenWorkspace }: {
-  runs: AgentRun[]; onCancel: (run: AgentRun) => void; onRemove: (id: string) => void;
-  onClearCompleted: () => void; onOpenWorkspace: (runId: string) => void;
-}) {
-  const hasCompleted = runs.some(r => r.status !== "running" && r.status !== "queued");
-  return (
-    <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
-      {runs.length > 0 && hasCompleted && (
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button onClick={onClearCompleted} style={{ ...btnSecondary, fontSize: 10 }}>Clear Completed</button>
-        </div>
-      )}
-      {runs.length === 0 && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <p style={{ fontSize: 11, color: "var(--text-muted)" }}>No runs yet</p>
-        </div>
-      )}
-      {runs.map(run => (
-        <RunCard key={run.id} run={run} onCancel={() => onCancel(run)} onRemove={() => onRemove(run.id)} onOpenWorkspace={() => onOpenWorkspace(run.id)} />
-      ))}
-    </div>
-  );
-}
+      {completedBuilds.map((build) => {
+        const isExpanded = expandedId === build.id;
+        const isDone = build.currentStage === "done";
+        const duration = build.completedAt ? elapsed(build.completedAt - build.createdAt) : "—";
 
-function RunCard({ run, onCancel, onRemove, onOpenWorkspace }: {
-  run: AgentRun; onCancel: () => void; onRemove: () => void; onOpenWorkspace: () => void;
-}) {
-  const [expanded, setExpanded] = useState(run.status === "running");
-  const outputRef = useRef<HTMLPreElement>(null);
-  const isActive = run.status === "running" || run.status === "queued";
-  const color = "var(--accent)";
+        return (
+          <div key={build.id} style={{ ...glowCard(isDone ? "#4ade80" : "#f87171"), marginBottom: 8, overflow: "hidden" }}>
+            {/* Header */}
+            <div onClick={() => setExpandedId(isExpanded ? null : build.id)}
+              style={{ padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+              <ChevronDown style={{
+                width: 12, height: 12, color: "var(--text-muted)", transition: `transform 0.15s ${EASE}`,
+                transform: isExpanded ? "rotate(0deg)" : "rotate(-90deg)",
+              }} />
+              <span style={{
+                width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                background: isDone ? "#4ade80" : "#f87171",
+              }} />
+              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {build.title}
+              </span>
+              <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO, flexShrink: 0 }}>{duration}</span>
+              <span style={{ fontSize: 9, color: "var(--text-muted)", flexShrink: 0 }}>{build.runtime}</span>
+              <span style={{
+                fontSize: 9, fontWeight: 600, padding: "2px 8px", borderRadius: 10, flexShrink: 0,
+                background: isDone ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)",
+                color: isDone ? "#4ade80" : "#f87171",
+                textTransform: "capitalize",
+              }}>
+                {build.currentStage}
+              </span>
+            </div>
 
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    if (!isActive) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [isActive]);
+            {/* Expanded detail */}
+            {isExpanded && (
+              <div style={{ borderTop: "1px solid var(--border)", padding: "12px 14px" }}>
+                {/* Stage summary */}
+                <div style={{ display: "flex", gap: 4, marginBottom: 12, alignItems: "center" }}>
+                  {build.stages.map((sr, i) => {
+                    const meta = STAGE_META[sr.stage];
+                    return (
+                      <div key={sr.stage} style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
+                        <StageIndicator status={sr.status} color={meta.color} />
+                        <span style={{
+                          fontSize: 9, fontWeight: 600,
+                          color: sr.status === "passed" ? "#4ade80" : sr.status === "failed" ? "#f87171" : sr.status === "skipped" ? "#fbbf24" : "var(--text-muted)",
+                        }}>{meta.label}</span>
+                        {sr.completedAt && sr.startedAt && (
+                          <span style={{ fontSize: 8, color: "var(--text-muted)", fontFamily: MONO }}>
+                            {elapsed(sr.completedAt - sr.startedAt)}
+                          </span>
+                        )}
+                        {i < 3 && <div style={{ flex: 1, height: 1, background: "var(--border)", marginLeft: 4, marginRight: 2 }} />}
+                      </div>
+                    );
+                  })}
+                </div>
 
-  useEffect(() => {
-    if (expanded && outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
-  }, [run.output, expanded]);
+                {/* Stage outputs */}
+                {build.stages.filter((sr) => sr.output).map((sr) => {
+                  const meta = STAGE_META[sr.stage];
+                  return (
+                    <div key={sr.stage} style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: meta.color, marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                        <meta.icon style={{ width: 10, height: 10 }} /> {meta.label} Output
+                      </div>
+                      <pre style={{
+                        margin: 0, padding: "8px 10px", fontSize: 9.5, lineHeight: 1.5,
+                        fontFamily: MONO, color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-word",
+                        background: "rgba(0,0,0,0.12)", borderRadius: 8, maxHeight: 200, overflowY: "auto",
+                      }}>
+                        {sr.output}
+                      </pre>
+                    </div>
+                  );
+                })}
 
-  const duration = run.startedAt ? elapsed((run.completedAt ?? now) - run.startedAt) : "—";
-
-  return (
-    <div style={{ ...glowCard(isActive ? "var(--accent)" : "var(--text-muted)"), borderColor: isActive ? "var(--accent)" + "40" : undefined }} data-glow={isActive ? "var(--accent)" : undefined} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-      <button onClick={() => setExpanded(!expanded)}
-        style={{ width: "100%", padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: "pointer", color: "var(--text)" }}>
-        <span style={{ width: 20, height: 20, borderRadius: 5, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: color, color: "#fff" }}>
-          {run.agentType.charAt(0).toUpperCase()}
-        </span>
-        <div style={{ flex: 1, textAlign: "left" }}>
-          <div style={{ fontSize: 11, fontWeight: 600 }}>
-            {run.agentType}
-            <span style={{ fontWeight: 400, color: "var(--text-secondary)", marginLeft: 8 }}>
-              {run.objective.length > 80 ? run.objective.slice(0, 80) + "..." : run.objective}
-            </span>
+                {/* Actions */}
+                <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                  <button onClick={() => { setActiveBuild(build.id); }}
+                    style={{ ...btnSecondary, fontSize: 10, padding: "4px 10px" }}>
+                    <Eye style={{ width: 10, height: 10 }} /> View Workspace
+                  </button>
+                  <button onClick={() => removeBuild(build.id)}
+                    style={{ ...BTN_DANGER, fontSize: 10, padding: "4px 10px" }}>
+                    <X style={{ width: 10, height: 10 }} /> Remove
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO }}>{duration}</span>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: STATUS_COLORS[run.status] ?? "var(--text-muted)" }} />
-          <span style={{ fontSize: 10, color: STATUS_COLORS[run.status], textTransform: "capitalize" }}>{run.status}</span>
-          <IconChevron open={expanded} />
-        </div>
-      </button>
-      {expanded && (
-        <div style={{ borderTop: "1px solid var(--border)" }}>
-          {run.error && <div style={{ padding: "8px 14px", background: "rgba(239,68,68,0.06)", fontSize: 11, color: "#ef4444" }}>{run.error}</div>}
-          {(run.output || !isActive) && (
-            <pre ref={outputRef} style={{ margin: 0, padding: "10px 14px", fontSize: 10, lineHeight: 1.6, fontFamily: MONO, color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 300, overflowY: "auto", background: "var(--bg-base)" }}>
-              {run.output || "No output captured."}
-            </pre>
-          )}
-          <div style={{ padding: "8px 14px", display: "flex", gap: 8, borderTop: "1px solid var(--border)" }}>
-            <button onClick={onOpenWorkspace} onMouseDown={pressDown} onMouseUp={pressUp} style={btnPrimary}><IconFolder /> Workspace</button>
-            {isActive && <button onClick={onCancel} onMouseDown={pressDown} onMouseUp={pressUp} style={BTN_DANGER}><IconStop /> Cancel</button>}
-            {!isActive && <button onClick={onRemove} onMouseDown={pressDown} onMouseUp={pressUp} style={btnSecondary}><IconTrash /> Remove</button>}
-          </div>
-        </div>
-      )}
+        );
+      })}
     </div>
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════
-   DEPLOY TAB — Git operations, preview, and deployment pipeline
-   ══════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════
+   DEPLOY TAB — Git operations + preview server
+   ═══════════════════════════════════════════════════════════════ */
 
 interface GitFileEntry { status: string; path: string; staged: boolean }
 interface GitLogEntry { hash: string; message: string; ago: string; author: string }
 
 async function runGit(args: string, dir: string): Promise<{ stdout: string; stderr: string; code: number }> {
+  const escaped = escapeShellArg(dir);
   return invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-    command: `git -C "${dir}" ${args}`,
+    command: `git -C "${escaped}" ${args}`,
     cwd: null,
   });
 }
 
 function parseGitStatusOutput(raw: string): GitFileEntry[] {
-  const entries: GitFileEntry[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    if (line.length < 3) continue;
-    const idx = line[0];
-    const wt = line[1];
-    const fp = line.slice(3);
-    if (!fp) continue;
-    if (idx !== " " && idx !== "?") entries.push({ status: idx, path: fp, staged: true });
-    if (wt !== " " && wt !== undefined) entries.push({ status: wt === "?" ? "?" : wt, path: fp, staged: false });
-  }
-  return entries;
+  return raw.split(/\r?\n/).filter(Boolean).map((line) => {
+    const x = line[0], y = line[1];
+    const path = line.slice(3).trim();
+    const staged = x !== " " && x !== "?";
+    const statusMap: Record<string, string> = { M: "modified", A: "added", D: "deleted", R: "renamed", "?": "untracked" };
+    return { status: statusMap[staged ? x : y] || "modified", path, staged };
+  });
 }
 
 function parseGitLogOutput(raw: string): GitLogEntry[] {
-  return raw.split(/\r?\n/).filter(l => l.includes("<|>")).map(line => {
-    const parts = line.split("<|>");
+  return raw.split(/\r?\n/).filter(Boolean).map((line) => {
+    const parts = line.replace(/^"|"$/g, "").split("<|>");
     return { hash: parts[0] ?? "", message: parts[1] ?? "", ago: parts[2] ?? "", author: parts[3] ?? "" };
-  }).filter(e => e.hash);
+  });
 }
 
-const GIT_STATUS_META: Record<string, { color: string }> = {
-  M: { color: "#fbbf24" },
-  A: { color: "#4ade80" },
-  D: { color: "#f87171" },
-  R: { color: "#60a5fa" },
-  C: { color: "#a78bfa" },
-  "?": { color: "#94a3b8" },
-  U: { color: "#ef4444" },
-};
-
 const PREVIEW_PRESETS = [
-  { label: "npm run dev", cmd: "npm run dev", ports: [3000, 5173] },
-  { label: "npm start", cmd: "npm start", ports: [3000] },
+  { label: "npm dev", cmd: "npm run dev", ports: [3000, 5173] },
+  { label: "pnpm dev", cmd: "pnpm dev", ports: [3000, 5173] },
   { label: "yarn dev", cmd: "yarn dev", ports: [3000, 5173] },
-  { label: "python http", cmd: "python -m http.server 8000", ports: [8000] },
+  { label: "python", cmd: "python -m http.server 8000", ports: [8000] },
 ];
 
 function DeployTab() {
-  const { projects } = useFactoryStore();
-  const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
-  const project = projects.find(p => p.id === projectId) ?? null;
+  const { projects, builds } = useFactoryStore();
+  const allDirs = [
+    ...projects.map((p) => ({ label: p.name, path: p.path })),
+    ...builds.filter((b) => b.cwd).map((b) => ({ label: b.title, path: b.cwd })),
+  ];
+  const uniqueDirs = [...new Map(allDirs.map((d) => [d.path, d])).values()];
+
+  const [dirPath, setDirPath] = useState(uniqueDirs[0]?.path ?? "");
 
   const [isGitRepo, setIsGitRepo] = useState<boolean | null>(null);
   const [branch, setBranch] = useState("");
@@ -1573,14 +854,12 @@ function DeployTab() {
   const [gitFiles, setGitFiles] = useState<GitFileEntry[]>([]);
   const [gitLog, setGitLog] = useState<GitLogEntry[]>([]);
   const [commitMsg, setCommitMsg] = useState("");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const [loading, setLoading] = useState(false);
   const [gitIniting, setGitIniting] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
-
   const [addingRemote, setAddingRemote] = useState(false);
   const [remoteInput, setRemoteInput] = useState("");
 
@@ -1597,496 +876,306 @@ function DeployTab() {
   }, [feedback]);
 
   const loadGitInfo = useCallback(async () => {
-    if (!project?.path) return;
+    if (!dirPath) return;
     setLoading(true);
     try {
-      const check = await runGit("rev-parse --is-inside-work-tree", project.path);
+      const check = await runGit("rev-parse --is-inside-work-tree", dirPath);
       const isRepo = check.code === 0 && check.stdout.trim() === "true";
       setIsGitRepo(isRepo);
-
-      if (!isRepo) {
-        setBranch(""); setRemoteUrl(""); setGitFiles([]); setGitLog([]);
-        setLoading(false);
-        return;
-      }
+      if (!isRepo) { setBranch(""); setRemoteUrl(""); setGitFiles([]); setGitLog([]); setLoading(false); return; }
 
       const [branchRes, remoteRes, statusRes, logRes] = await Promise.all([
-        runGit("branch --show-current", project.path),
-        runGit("remote get-url origin", project.path).catch(() => ({ stdout: "", stderr: "", code: 1 })),
-        runGit("status --porcelain", project.path),
-        runGit('log -20 --format="%h<|>%s<|>%ar<|>%an"', project.path).catch(() => ({ stdout: "", stderr: "", code: 1 })),
+        runGit("branch --show-current", dirPath),
+        runGit("remote get-url origin", dirPath).catch(() => ({ stdout: "", stderr: "", code: 1 })),
+        runGit("status --porcelain", dirPath),
+        runGit('log -20 --format="%h<|>%s<|>%ar<|>%an"', dirPath).catch(() => ({ stdout: "", stderr: "", code: 1 })),
       ]);
 
       setBranch(branchRes.stdout.trim());
       setRemoteUrl(remoteRes.code === 0 ? remoteRes.stdout.trim() : "");
       setGitFiles(parseGitStatusOutput(statusRes.stdout));
       setGitLog(parseGitLogOutput(logRes.stdout));
-    } catch {
-      setIsGitRepo(false);
-    }
+    } catch { setIsGitRepo(false); }
     setLoading(false);
-  }, [project?.path]);
+  }, [dirPath]);
 
-  useEffect(() => {
-    if (project) loadGitInfo();
-    else setIsGitRepo(null);
-  }, [project, loadGitInfo]);
+  useEffect(() => { if (dirPath) loadGitInfo(); else setIsGitRepo(null); }, [dirPath, loadGitInfo]);
 
   const gitInit = async () => {
-    if (!project?.path) return;
+    if (!dirPath) return;
     setGitIniting(true);
     try {
-      const res = await runGit("init", project.path);
-      if (res.code === 0) {
-        setFeedback({ type: "success", msg: "Git repository initialized" });
-        await loadGitInfo();
-      } else {
-        setFeedback({ type: "error", msg: res.stderr || "git init failed" });
-      }
-    } catch (e) {
-      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "git init failed" });
-    }
+      const res = await runGit("init", dirPath);
+      if (res.code === 0) { setFeedback({ type: "success", msg: "Git repository initialized" }); await loadGitInfo(); }
+      else setFeedback({ type: "error", msg: res.stderr || "git init failed" });
+    } catch (e) { setFeedback({ type: "error", msg: e instanceof Error ? e.message : "git init failed" }); }
     setGitIniting(false);
   };
 
-  const stageFiles = async (files: string[]) => {
-    if (!project?.path || files.length === 0) return;
-    try {
-      for (const f of files) {
-        await runGit(`add -- "${f}"`, project.path);
-      }
-      setFeedback({ type: "success", msg: `Staged ${files.length} file(s)` });
-      setSelected(new Set());
-      await loadGitInfo();
-    } catch (e) {
-      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "git add failed" });
-    }
-  };
-
   const stageAll = async () => {
-    if (!project?.path) return;
-    try {
-      const res = await runGit("add -A", project.path);
-      if (res.code === 0) {
-        setFeedback({ type: "success", msg: "Staged all changes" });
-        await loadGitInfo();
-      } else {
-        setFeedback({ type: "error", msg: res.stderr || "git add failed" });
-      }
-    } catch (e) {
-      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "git add failed" });
-    }
+    if (!dirPath) return;
+    const res = await runGit("add -A", dirPath);
+    if (res.code === 0) { setFeedback({ type: "success", msg: "Staged all changes" }); await loadGitInfo(); }
+    else setFeedback({ type: "error", msg: res.stderr || "git add failed" });
   };
 
   const unstageAll = async () => {
-    if (!project?.path) return;
-    try {
-      await runGit("reset HEAD", project.path);
-      setFeedback({ type: "success", msg: "Unstaged all files" });
-      await loadGitInfo();
-    } catch (e) {
-      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "git reset failed" });
-    }
+    if (!dirPath) return;
+    await runGit("reset HEAD", dirPath);
+    setFeedback({ type: "success", msg: "Unstaged all files" });
+    await loadGitInfo();
   };
 
   const commit = async () => {
-    if (!project?.path || !commitMsg.trim()) return;
+    if (!dirPath || !commitMsg.trim()) return;
     setCommitting(true);
     try {
       const escaped = commitMsg.trim().replace(/`/g, "``").replace(/"/g, '`"').replace(/\$/g, "`$");
-      const res = await runGit(`commit -m "${escaped}"`, project.path);
+      const res = await runGit(`commit -m "${escaped}"`, dirPath);
       if (res.code === 0) {
         setFeedback({ type: "success", msg: "Committed successfully" });
         setCommitMsg("");
         setCmdOutput({ title: "Commit", content: res.stdout });
         await loadGitInfo();
-      } else {
-        setFeedback({ type: "error", msg: res.stderr || res.stdout || "Commit failed" });
-      }
-    } catch (e) {
-      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Commit failed" });
-    }
+      } else setFeedback({ type: "error", msg: res.stderr || res.stdout || "Commit failed" });
+    } catch (e) { setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Commit failed" }); }
     setCommitting(false);
   };
 
   const push = async () => {
-    if (!project?.path) return;
+    if (!dirPath) return;
     setPushing(true);
     try {
-      const branchName = branch || "main";
-      const res = await runGit(`push -u origin ${branchName}`, project.path);
-      if (res.code === 0) {
-        setFeedback({ type: "success", msg: `Pushed ${branchName} to origin` });
-        setCmdOutput({ title: "Push", content: res.stdout || res.stderr || "Success" });
-      } else {
-        setFeedback({ type: "error", msg: res.stderr || "Push failed" });
-        if (res.stderr) setCmdOutput({ title: "Push Error", content: res.stderr });
-      }
-    } catch (e) {
-      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Push failed" });
-    }
+      const res = await runGit(`push -u origin ${branch || "main"}`, dirPath);
+      if (res.code === 0) { setFeedback({ type: "success", msg: `Pushed to origin` }); setCmdOutput({ title: "Push", content: res.stdout || res.stderr || "Success" }); }
+      else { setFeedback({ type: "error", msg: res.stderr || "Push failed" }); if (res.stderr) setCmdOutput({ title: "Push Error", content: res.stderr }); }
+    } catch (e) { setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Push failed" }); }
     setPushing(false);
   };
 
   const pull = async () => {
-    if (!project?.path) return;
+    if (!dirPath) return;
     setPulling(true);
     try {
-      const res = await runGit("pull", project.path);
-      if (res.code === 0) {
-        setFeedback({ type: "success", msg: "Pulled latest changes" });
-        setCmdOutput({ title: "Pull", content: res.stdout || res.stderr || "Already up to date." });
-        await loadGitInfo();
-      } else {
-        setFeedback({ type: "error", msg: res.stderr || "Pull failed" });
-      }
-    } catch (e) {
-      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Pull failed" });
-    }
+      const res = await runGit("pull", dirPath);
+      if (res.code === 0) { setFeedback({ type: "success", msg: "Pulled latest changes" }); setCmdOutput({ title: "Pull", content: res.stdout || res.stderr || "Already up to date." }); await loadGitInfo(); }
+      else setFeedback({ type: "error", msg: res.stderr || "Pull failed" });
+    } catch (e) { setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Pull failed" }); }
     setPulling(false);
   };
 
   const addRemote = async () => {
-    if (!project?.path || !remoteInput.trim()) return;
-    try {
-      const res = await runGit(`remote add origin ${remoteInput.trim()}`, project.path);
-      if (res.code === 0) {
-        setFeedback({ type: "success", msg: "Remote origin added" });
-        setRemoteUrl(remoteInput.trim());
-        setAddingRemote(false);
-        setRemoteInput("");
-      } else {
-        setFeedback({ type: "error", msg: res.stderr || "Failed to add remote" });
-      }
-    } catch (e) {
-      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Failed to add remote" });
-    }
+    if (!dirPath || !remoteInput.trim()) return;
+    const res = await runGit(`remote add origin ${remoteInput.trim()}`, dirPath);
+    if (res.code === 0) {
+      setFeedback({ type: "success", msg: "Remote origin added" });
+      setRemoteUrl(remoteInput.trim());
+      setAddingRemote(false);
+      setRemoteInput("");
+    } else setFeedback({ type: "error", msg: res.stderr || "Failed to add remote" });
   };
 
   const startPreview = async () => {
-    if (!project?.path || !previewCmd.trim()) return;
+    if (!dirPath || !previewCmd.trim()) return;
     setPreviewStarting(true);
     try {
-      const escaped = previewCmd.trim().replace(/"/g, '\\"');
-      const spawnCmd = `$proc = Start-Process -FilePath "cmd" -ArgumentList "/c ${escaped}" -WorkingDirectory "${project.path}" -WindowStyle Hidden -PassThru; $proc.Id`;
-      const res = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: spawnCmd, cwd: null,
-      });
-      const pid = parseInt(res.stdout.trim(), 10);
-      if (!isNaN(pid)) {
-        setPreviewPid(pid);
-        setFeedback({ type: "success", msg: `Preview started (PID ${pid})` });
-      } else {
-        setFeedback({ type: "error", msg: "Failed to start preview process" });
-      }
-    } catch (e) {
-      setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Failed to start preview" });
-    }
+      const streamId = await invoke<string>("start_streaming_command", { command: previewCmd.trim(), cwd: dirPath });
+      setPreviewPid(parseInt(streamId, 10) || 1);
+    } catch (e) { setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Failed to start preview" }); }
     setPreviewStarting(false);
   };
 
-  const stopPreview = async () => {
-    if (previewPid === null) return;
-    try {
-      await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${previewPid} } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; Stop-Process -Id ${previewPid} -Force -ErrorAction SilentlyContinue`,
-        cwd: null,
-      });
-      setPreviewPid(null);
-      setFeedback({ type: "success", msg: "Preview stopped" });
-    } catch {
-      setPreviewPid(null);
-    }
+  const stopPreview = () => { setPreviewPid(null); };
+
+  const openInBrowser = (port: number) => {
+    invoke("execute_command", { command: `Start-Process "http://localhost:${port}"`, cwd: null }).catch(() => {});
   };
 
-  const openInBrowser = async (port: number) => {
-    try {
-      await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `Start-Process "http://localhost:${port}"`, cwd: null,
-      });
-    } catch { /* best effort */ }
-  };
+  const staged = gitFiles.filter((f) => f.staged);
 
-  const toggleFile = (path: string) => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      next.has(path) ? next.delete(path) : next.add(path);
-      return next;
-    });
-  };
-
-  const unstagedFiles = gitFiles.filter(f => !f.staged);
-  const stagedFiles = gitFiles.filter(f => f.staged);
-  const hasChanges = gitFiles.length > 0;
-  const canCommit = stagedFiles.length > 0 && commitMsg.trim().length > 0;
-  const ghUrl = remoteUrl ? githubBrowseUrlFromRemote(remoteUrl) : null;
+  const githubUrl = (() => {
+    if (!remoteUrl) return null;
+    const u = remoteUrl.toLowerCase();
+    if (!u.includes("github.com")) return null;
+    const path = remoteUrl.replace(/^git@github\.com:/i, "").replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/i, "").replace(/\/$/, "");
+    return path ? `https://github.com/${path}` : null;
+  })();
 
   return (
-    <div style={{ flex: 1, overflow: "auto", padding: "16px 24px 24px" }}>
-      {/* Project Selector */}
-      <div style={{ marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-end" }}>
-        <div style={{ flex: 1 }}>
-          <span style={sectionLabel}>Project</span>
-          <select value={projectId} onChange={e => setProjectId(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }}>
-            <option value="">Select a project...</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.name} — {p.path}</option>)}
-          </select>
-        </div>
-        {ghUrl && (
-          <a href={ghUrl} target="_blank" rel="noopener noreferrer"
-            style={{ ...btnSecondary, padding: "8px 14px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--accent)", whiteSpace: "nowrap" }}>
-            <GitBranch style={{ width: 12, height: 12 }} /> GitHub <ExternalLink style={{ width: 10, height: 10, opacity: 0.6 }} />
-          </a>
-        )}
-      </div>
-
+    <div style={{ flex: 1, overflow: "auto", padding: "16px 24px" }}>
+      {/* Feedback */}
       {feedback && (
         <div style={{
-          display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, marginBottom: 14,
+          padding: "8px 14px", borderRadius: 10, marginBottom: 12, fontSize: 11, fontWeight: 500,
           background: feedback.type === "success" ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
-          border: `1px solid ${feedback.type === "success" ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)"}`,
+          color: feedback.type === "success" ? "#4ade80" : "#f87171",
+          border: `1px solid ${feedback.type === "success" ? "rgba(74,222,128,0.15)" : "rgba(248,113,113,0.15)"}`,
+          display: "flex", alignItems: "center", gap: 6,
         }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: feedback.type === "success" ? "#4ade80" : "#f87171" }} />
-          <span style={{ fontSize: 11, color: feedback.type === "success" ? "#4ade80" : "#f87171", flex: 1 }}>{feedback.msg}</span>
-          <button onClick={() => setFeedback(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}>×</button>
+          {feedback.type === "success" ? <Check style={{ width: 12, height: 12 }} /> : <AlertTriangle style={{ width: 12, height: 12 }} />}
+          {feedback.msg}
         </div>
       )}
 
-      {!project ? (
-        <div style={{ ...glowCard("var(--text-muted)"), ...emptyState }}>
-          <div style={iconTile("var(--accent)", 48)}>
-            <GitBranch style={{ width: 24, height: 24, color: "var(--accent)", opacity: 0.5 }} />
-          </div>
-          <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: "0 0 4px" }}>Select a project</p>
-          <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0 }}>Choose a project from the dropdown, or create one in the Projects tab</p>
+      {/* Directory selector */}
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ fontSize: 10, color: "var(--text-muted)", display: "block", marginBottom: 4 }}>Working Directory</label>
+        {uniqueDirs.length > 0 ? (
+          <select value={dirPath} onChange={(e) => setDirPath(e.target.value)} style={{ ...inputStyle, fontSize: 12 }}>
+            {uniqueDirs.map((d) => (
+              <option key={d.path} value={d.path}>{d.label} — {d.path}</option>
+            ))}
+          </select>
+        ) : (
+          <input value={dirPath} onChange={(e) => setDirPath(e.target.value)} placeholder="C:\path\to\project" style={{ ...inputStyle, fontSize: 12 }} />
+        )}
+      </div>
+
+      {loading && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 20, color: "var(--text-muted)", fontSize: 12 }}>
+          <Loader2 style={{ width: 14, height: 14, animation: "_spin 1s linear infinite" }} /> Loading git info...
         </div>
-      ) : loading ? (
-        <div style={{ display: "flex", justifyContent: "center", padding: 60 }}>
-          <Loader2 style={{ width: 24, height: 24, color: "var(--accent)", animation: "_spin 1s linear infinite" }} />
+      )}
+
+      {!loading && !dirPath && (
+        <div style={{ padding: "40px 24px", textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
+          Enter a project directory or create a build to get started
         </div>
-      ) : isGitRepo === false ? (
-        <div style={{ ...glowCard("var(--accent)"), padding: 28, textAlign: "center" }} data-glow="var(--accent)">
-          <div style={{ ...iconTile("#fbbf24", 48), margin: "0 auto 12px" }}>
-            <AlertTriangle style={{ width: 24, height: 24, color: "#fbbf24" }} />
-          </div>
-          <p style={{ fontSize: 14, color: "var(--text)", margin: "0 0 4px", fontWeight: 600 }}>Not a Git repository</p>
-          <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "0 0 16px", fontFamily: MONO }}>{project.path}</p>
-          <button onClick={gitInit} disabled={gitIniting} onMouseDown={pressDown} onMouseUp={pressUp}
-            style={{ ...btnPrimary, padding: "10px 24px" }}>
-            {gitIniting ? <Loader2 style={{ width: 14, height: 14, animation: "_spin 1s linear infinite" }} /> : <GitBranch style={{ width: 14, height: 14 }} />}
-            Initialize Git Repository
+      )}
+
+      {!loading && dirPath && isGitRepo === false && (
+        <div style={{ ...glowCard("#fbbf24"), padding: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>Not a Git repository</div>
+          <button onClick={gitInit} disabled={gitIniting} style={{ ...btnPrimary, fontSize: 11, background: "#fbbf24", color: "#000" }}>
+            {gitIniting ? <Loader2 style={{ width: 12, height: 12, animation: "_spin 1s linear infinite" }} /> : <GitBranch style={{ width: 12, height: 12 }} />}
+            Initialize Git
           </button>
         </div>
-      ) : (
+      )}
+
+      {!loading && isGitRepo && (
         <>
-          {/* Status Bar */}
-          <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-            <div style={{ ...glowCard("#60a5fa"), padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, flex: "1 1 160px" }}
-              data-glow="#60a5fa" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-              <GitBranch style={{ width: 14, height: 14, color: "#60a5fa" }} />
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#60a5fa", fontFamily: MONO }}>{branch || "HEAD"}</div>
-                <div style={{ fontSize: 9, color: "var(--text-muted)" }}>Current branch</div>
-              </div>
+          {/* Branch & remote info */}
+          <div style={{ ...glowCard(NVIDIA_GREEN), padding: 14, marginBottom: 14 }} data-glow={NVIDIA_GREEN} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <GitBranch style={{ width: 14, height: 14, color: NVIDIA_GREEN }} />
+              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{branch || "main"}</span>
+              {remoteUrl && (
+                <>
+                  <span style={{ fontSize: 10, color: "var(--text-muted)" }}>&rarr;</span>
+                  <span style={{ fontSize: 10, color: "var(--text-muted)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{remoteUrl}</span>
+                </>
+              )}
+              {githubUrl && (
+                <button onClick={() => invoke("execute_command", { command: `Start-Process "${githubUrl}"`, cwd: null }).catch(() => {})}
+                  style={{ ...btnSecondary, fontSize: 9, padding: "3px 8px" }}>
+                  <ExternalLink style={{ width: 10, height: 10 }} /> GitHub
+                </button>
+              )}
             </div>
-            <div style={{ ...glowCard(remoteUrl ? "#4ade80" : "#fbbf24"), padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, flex: "1 1 200px" }}
-              data-glow={remoteUrl ? "#4ade80" : "#fbbf24"} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-              {remoteUrl ? <ExternalLink style={{ width: 14, height: 14, color: "#4ade80" }} /> : <AlertTriangle style={{ width: 14, height: 14, color: "#fbbf24" }} />}
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: remoteUrl ? "#4ade80" : "#fbbf24", fontFamily: MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {remoteUrl || "No remote"}
-                </div>
-                <div style={{ fontSize: 9, color: "var(--text-muted)" }}>{remoteUrl ? "Remote origin" : "Add a remote to push"}</div>
-              </div>
+
+            {/* Git actions */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button onClick={() => loadGitInfo()} style={{ ...btnSecondary, fontSize: 10, padding: "4px 10px" }}>
+                <RotateCcw style={{ width: 10, height: 10 }} /> Refresh
+              </button>
+              <button onClick={pull} disabled={pulling} style={{ ...btnSecondary, fontSize: 10, padding: "4px 10px" }}>
+                {pulling ? <Loader2 style={{ width: 10, height: 10, animation: "_spin 1s linear infinite" }} /> : <ChevronDown style={{ width: 10, height: 10 }} />}
+                Pull
+              </button>
+              <button onClick={push} disabled={pushing || !remoteUrl} style={{ ...btnSecondary, fontSize: 10, padding: "4px 10px", color: NVIDIA_GREEN, borderColor: `color-mix(in srgb, ${NVIDIA_GREEN} 25%, transparent)` }}>
+                {pushing ? <Loader2 style={{ width: 10, height: 10, animation: "_spin 1s linear infinite" }} /> : <Upload style={{ width: 10, height: 10 }} />}
+                Push
+              </button>
+              {!remoteUrl && !addingRemote && (
+                <button onClick={() => setAddingRemote(true)} style={{ ...btnSecondary, fontSize: 10, padding: "4px 10px", color: "#fbbf24" }}>
+                  <GitBranch style={{ width: 10, height: 10 }} /> Add Remote
+                </button>
+              )}
             </div>
-            <div style={{ ...glowCard(hasChanges ? "#fbbf24" : "var(--text-muted)"), padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, flex: "1 1 100px" }}
-              data-glow={hasChanges ? "#fbbf24" : "var(--text-muted)"} onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-              <FileText style={{ width: 14, height: 14, color: hasChanges ? "#fbbf24" : "var(--text-muted)" }} />
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: hasChanges ? "#fbbf24" : "var(--text-muted)", fontFamily: MONO }}>{gitFiles.length}</div>
-                <div style={{ fontSize: 9, color: "var(--text-muted)" }}>Changes</div>
+
+            {addingRemote && (
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <input value={remoteInput} onChange={(e) => setRemoteInput(e.target.value)} placeholder="https://github.com/user/repo.git"
+                  style={{ ...inputStyle, fontSize: 11, flex: 1 }} />
+                <button onClick={addRemote} style={{ ...btnPrimary, fontSize: 10, padding: "4px 10px", background: "#fbbf24", color: "#000" }}>Add</button>
+                <button onClick={() => setAddingRemote(false)} style={{ ...btnSecondary, fontSize: 10, padding: "4px 10px" }}>Cancel</button>
               </div>
-            </div>
-            <button onClick={() => loadGitInfo()} disabled={loading} style={{ ...btnSecondary, alignSelf: "center" }}>
-              <RefreshCw style={{ width: 12, height: 12, ...(loading ? { animation: "_spin 1s linear infinite" } : {}) }} /> Refresh
-            </button>
+            )}
           </div>
 
-          {/* Source Control + Commit/Push grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
-            {/* Changed Files */}
-            <div style={{ ...glowCard("var(--accent)") }} data-glow="var(--accent)">
-              <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>Source Control</span>
+          {/* Staging area */}
+          {gitFiles.length > 0 && (
+            <div style={{ ...glowCard("#60a5fa"), padding: 14, marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
+                  <FileCode style={{ width: 13, height: 13, color: "#60a5fa" }} /> Changes ({gitFiles.length})
+                </span>
                 <div style={{ display: "flex", gap: 4 }}>
-                  {selected.size > 0 && (
-                    <button onClick={() => stageFiles([...selected])} onMouseDown={pressDown} onMouseUp={pressUp}
-                      style={{ ...btnPrimary, padding: "4px 10px", fontSize: 10 }}>
-                      <Check style={{ width: 10, height: 10 }} /> Stage {selected.size}
-                    </button>
-                  )}
-                  {unstagedFiles.length > 0 && (
-                    <button onClick={stageAll} onMouseDown={pressDown} onMouseUp={pressUp}
-                      style={{ ...btnSecondary, padding: "4px 10px", fontSize: 10 }}>
-                      Stage All
-                    </button>
-                  )}
-                  {stagedFiles.length > 0 && (
-                    <button onClick={unstageAll} onMouseDown={pressDown} onMouseUp={pressUp}
-                      style={{ ...btnSecondary, padding: "4px 10px", fontSize: 10, color: "#fbbf24", borderColor: "rgba(251,191,36,0.2)" }}>
-                      Unstage
-                    </button>
-                  )}
+                  <button onClick={stageAll} style={{ ...btnSecondary, fontSize: 9, padding: "3px 8px" }}>Stage All</button>
+                  {staged.length > 0 && <button onClick={unstageAll} style={{ ...btnSecondary, fontSize: 9, padding: "3px 8px" }}>Unstage All</button>}
                 </div>
               </div>
-              <div style={{ maxHeight: 280, overflowY: "auto" }}>
-                {stagedFiles.length > 0 && (
-                  <>
-                    <div style={{ padding: "6px 14px", fontSize: 9, fontWeight: 600, color: "#4ade80", textTransform: "uppercase", letterSpacing: 0.5, background: "rgba(74,222,128,0.04)" }}>
-                      Staged ({stagedFiles.length})
-                    </div>
-                    {stagedFiles.map(f => (
-                      <div key={`s-${f.path}`} style={{ padding: "5px 14px", display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
-                        <Check style={{ width: 10, height: 10, color: "#4ade80", flexShrink: 0 }} />
-                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: GIT_STATUS_META[f.status]?.color ?? "var(--text-muted)", flexShrink: 0 }} />
-                        <span style={{ fontSize: 8, fontWeight: 600, color: GIT_STATUS_META[f.status]?.color, minWidth: 12 }}>{f.status}</span>
-                        <span style={{ color: "var(--text-secondary)", fontFamily: MONO, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.path}</span>
-                      </div>
-                    ))}
-                  </>
-                )}
-                {unstagedFiles.length > 0 && (
-                  <>
-                    <div style={{ padding: "6px 14px", fontSize: 9, fontWeight: 600, color: "#fbbf24", textTransform: "uppercase", letterSpacing: 0.5, background: "rgba(251,191,36,0.04)" }}>
-                      Unstaged ({unstagedFiles.length})
-                    </div>
-                    {unstagedFiles.map(f => (
-                      <div key={`u-${f.path}`}
-                        onClick={() => toggleFile(f.path)}
-                        style={{
-                          padding: "5px 14px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
-                          borderBottom: "1px solid rgba(255,255,255,0.02)",
-                          background: selected.has(f.path) ? "rgba(99,102,241,0.06)" : "transparent",
-                          transition: `background 0.15s ${EASE}`,
-                        }}>
-                        <input type="checkbox" checked={selected.has(f.path)} readOnly
-                          style={{ width: 12, height: 12, accentColor: "var(--accent)", cursor: "pointer", flexShrink: 0 }} />
-                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: GIT_STATUS_META[f.status]?.color ?? "var(--text-muted)", flexShrink: 0 }} />
-                        <span style={{ fontSize: 8, fontWeight: 600, color: GIT_STATUS_META[f.status]?.color, minWidth: 12 }}>{f.status}</span>
-                        <span style={{ color: "var(--text-secondary)", fontFamily: MONO, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.path}</span>
-                      </div>
-                    ))}
-                  </>
-                )}
-                {!hasChanges && (
-                  <div style={{ padding: "28px 14px", textAlign: "center", color: "var(--text-muted)" }}>
-                    <Check style={{ width: 20, height: 20, marginBottom: 6, opacity: 0.4 }} />
-                    <p style={{ fontSize: 11, margin: 0 }}>Working tree clean</p>
-                  </div>
-                )}
-              </div>
-            </div>
 
-            {/* Commit + Sync */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ ...glowCard("var(--accent)"), padding: 14 }} data-glow="var(--accent)">
-                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                  <GitCommit style={{ width: 12, height: 12, color: "var(--accent)" }} /> Commit
-                </div>
-                <textarea value={commitMsg} onChange={e => setCommitMsg(e.target.value)}
-                  placeholder="Commit message..."
-                  rows={3} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5, marginBottom: 8 }}
-                  onKeyDown={e => { if (e.key === "Enter" && e.ctrlKey && canCommit) commit(); }} />
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button onClick={commit} disabled={!canCommit || committing} onMouseDown={pressDown} onMouseUp={pressUp}
-                    style={{ ...btnPrimary, flex: 1, opacity: !canCommit || committing ? 0.5 : 1 }}>
-                    {committing ? <Loader2 style={{ width: 12, height: 12, animation: "_spin 1s linear infinite" }} /> : <GitCommit style={{ width: 12, height: 12 }} />}
+              <div style={{ maxHeight: 180, overflowY: "auto", marginBottom: 10 }}>
+                {gitFiles.map((f) => {
+                  const colors: Record<string, string> = { added: "#4ade80", modified: "#60a5fa", deleted: "#f87171", untracked: "#fbbf24", renamed: "#a78bfa" };
+                  return (
+                    <div key={f.path} style={{
+                      padding: "4px 8px", fontSize: 10, display: "flex", alignItems: "center", gap: 6,
+                      borderRadius: 4, marginBottom: 1,
+                      background: f.staged ? "rgba(74,222,128,0.05)" : "transparent",
+                    }}>
+                      <span style={{ width: 4, height: 4, borderRadius: "50%", background: colors[f.status] ?? "var(--text-muted)", flexShrink: 0 }} />
+                      <span style={{ fontSize: 9, color: colors[f.status] ?? "var(--text-muted)", fontWeight: 600, width: 14, textAlign: "center", flexShrink: 0 }}>
+                        {f.status[0]?.toUpperCase()}
+                      </span>
+                      <span style={{ fontFamily: MONO, color: f.staged ? "#4ade80" : "var(--text-secondary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.path}</span>
+                      {f.staged && <span style={{ fontSize: 8, color: "#4ade80" }}>STAGED</span>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Commit */}
+              {staged.length > 0 && (
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input value={commitMsg} onChange={(e) => setCommitMsg(e.target.value)} placeholder="Commit message..."
+                    style={{ ...inputStyle, fontSize: 11, flex: 1 }} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) commit(); }} />
+                  <button onClick={commit} disabled={committing || !commitMsg.trim()}
+                    style={{ ...btnPrimary, fontSize: 10, padding: "6px 12px", background: "#4ade80", color: "#000", opacity: commitMsg.trim() ? 1 : 0.4 }}>
+                    {committing ? <Loader2 style={{ width: 10, height: 10, animation: "_spin 1s linear infinite" }} /> : <GitCommit style={{ width: 10, height: 10 }} />}
                     Commit
                   </button>
-                  <span style={{ fontSize: 9, color: "var(--text-muted)" }}>Ctrl+Enter</span>
                 </div>
-                {stagedFiles.length === 0 && hasChanges && (
-                  <p style={{ fontSize: 9, color: "var(--text-muted)", margin: "6px 0 0" }}>Stage files first</p>
-                )}
-              </div>
-
-              <div style={{ ...glowCard("#4ade80"), padding: 14 }} data-glow="#4ade80">
-                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                  <Upload style={{ width: 12, height: 12, color: "#4ade80" }} /> Sync with Remote
-                </div>
-                {remoteUrl ? (
-                  <>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={push} disabled={pushing} onMouseDown={pressDown} onMouseUp={pressUp}
-                        style={{ ...btnPrimary, flex: 1, opacity: pushing ? 0.5 : 1, background: "#4ade80", color: "#000" }}>
-                        {pushing ? <Loader2 style={{ width: 12, height: 12, animation: "_spin 1s linear infinite" }} /> : <Upload style={{ width: 12, height: 12 }} />}
-                        Push
-                      </button>
-                      <button onClick={pull} disabled={pulling} onMouseDown={pressDown} onMouseUp={pressUp}
-                        style={{ ...btnSecondary, flex: 1, opacity: pulling ? 0.5 : 1 }}>
-                        {pulling ? <Loader2 style={{ width: 12, height: 12, animation: "_spin 1s linear infinite" }} /> : <RefreshCw style={{ width: 12, height: 12 }} />}
-                        Pull
-                      </button>
-                    </div>
-                    <p style={{ fontSize: 9, color: "var(--text-muted)", margin: "6px 0 0", fontFamily: MONO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {remoteUrl}
-                    </p>
-                  </>
-                ) : addingRemote ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <input value={remoteInput} onChange={e => setRemoteInput(e.target.value)}
-                      placeholder="https://github.com/user/repo.git"
-                      style={{ ...inputStyle, fontSize: 11 }}
-                      onKeyDown={e => { if (e.key === "Enter" && remoteInput.trim()) addRemote(); }}
-                      autoFocus />
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={addRemote} disabled={!remoteInput.trim()} onMouseDown={pressDown} onMouseUp={pressUp}
-                        style={{ ...btnPrimary, flex: 1, fontSize: 10, opacity: !remoteInput.trim() ? 0.5 : 1 }}>
-                        Add Origin
-                      </button>
-                      <button onClick={() => { setAddingRemote(false); setRemoteInput(""); }} onMouseDown={pressDown} onMouseUp={pressUp}
-                        style={{ ...btnSecondary, fontSize: 10 }}>
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button onClick={() => setAddingRemote(true)} onMouseDown={pressDown} onMouseUp={pressUp}
-                    style={{ ...btnSecondary, width: "100%", color: "#fbbf24", borderColor: "rgba(251,191,36,0.2)" }}>
-                    <GitBranch style={{ width: 12, height: 12 }} /> Add Remote Origin
-                  </button>
-                )}
-              </div>
+              )}
             </div>
-          </div>
+          )}
 
           {/* Preview */}
-          <div style={{ ...glowCard("#8b5cf6"), padding: 14, marginBottom: 20 }} data-glow="#8b5cf6" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+          <div style={{ ...glowCard("#8b5cf6"), padding: 14, marginBottom: 14 }} data-glow="#8b5cf6" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
-                <Globe style={{ width: 14, height: 14, color: "#8b5cf6" }} /> Preview &amp; Dev Server
-              </div>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
+                <Globe style={{ width: 14, height: 14, color: "#8b5cf6" }} /> Preview Server
+              </span>
               {previewPid !== null && (
                 <span style={{ fontSize: 9, color: "#4ade80", display: "flex", alignItems: "center", gap: 4 }}>
                   <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#4ade80", animation: "_pulse 1.5s ease-in-out infinite" }} />
-                  Running (PID {previewPid})
+                  Running
                 </span>
               )}
             </div>
             <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
-              {PREVIEW_PRESETS.map(p => (
+              {PREVIEW_PRESETS.map((p) => (
                 <button key={p.cmd} onClick={() => { setPreviewCmd(p.cmd); setPreviewPorts(p.ports); }}
-                  style={{
-                    ...btnSecondary, padding: "4px 10px", fontSize: 10,
-                    borderColor: previewCmd === p.cmd ? "rgba(139,92,246,0.4)" : "var(--border)",
-                    color: previewCmd === p.cmd ? "#a78bfa" : "var(--text-muted)",
-                  }}>
+                  style={{ ...btnSecondary, padding: "4px 10px", fontSize: 10, borderColor: previewCmd === p.cmd ? "rgba(139,92,246,0.4)" : "var(--border)", color: previewCmd === p.cmd ? "#a78bfa" : "var(--text-muted)" }}>
                   {p.label}
                 </button>
               ))}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <input value={previewCmd} onChange={e => setPreviewCmd(e.target.value)} placeholder="npm run dev" style={{ ...inputStyle, flex: 1, fontSize: 12 }} />
+              <input value={previewCmd} onChange={(e) => setPreviewCmd(e.target.value)} placeholder="npm run dev"
+                style={{ ...inputStyle, flex: 1, fontSize: 12 }} />
               {previewPid === null ? (
                 <button onClick={startPreview} disabled={previewStarting || !previewCmd.trim()} onMouseDown={pressDown} onMouseUp={pressUp}
                   style={{ ...btnPrimary, background: "#8b5cf6", opacity: previewStarting || !previewCmd.trim() ? 0.5 : 1, whiteSpace: "nowrap" }}>
@@ -2094,8 +1183,7 @@ function DeployTab() {
                   Start
                 </button>
               ) : (
-                <button onClick={stopPreview} onMouseDown={pressDown} onMouseUp={pressUp}
-                  style={{ ...BTN_DANGER, whiteSpace: "nowrap" }}>
+                <button onClick={stopPreview} style={{ ...BTN_DANGER, whiteSpace: "nowrap" }}>
                   <Square style={{ width: 10, height: 10 }} /> Stop
                 </button>
               )}
@@ -2103,9 +1191,8 @@ function DeployTab() {
             {previewPid !== null && (
               <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 9, color: "var(--text-muted)", alignSelf: "center" }}>Open:</span>
-                {previewPorts.map(port => (
-                  <button key={port} onClick={() => openInBrowser(port)} onMouseDown={pressDown} onMouseUp={pressUp}
-                    style={{ ...btnSecondary, padding: "4px 10px", fontSize: 10, color: "#8b5cf6", borderColor: "rgba(139,92,246,0.25)" }}>
+                {previewPorts.map((port) => (
+                  <button key={port} onClick={() => openInBrowser(port)} style={{ ...btnSecondary, padding: "4px 10px", fontSize: 10, color: "#8b5cf6", borderColor: "rgba(139,92,246,0.25)" }}>
                     <Globe style={{ width: 10, height: 10 }} /> localhost:{port}
                   </button>
                 ))}
@@ -2119,15 +1206,15 @@ function DeployTab() {
               <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", fontSize: 11, fontWeight: 600, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
                 <Clock style={{ width: 12, height: 12, color: "var(--text-muted)" }} /> Recent Commits ({gitLog.length})
               </div>
-              <div style={{ maxHeight: 260, overflowY: "auto" }}>
+              <div style={{ maxHeight: 220, overflowY: "auto" }}>
                 {gitLog.map((entry, i) => (
                   <div key={`${entry.hash}-${i}`} style={{
-                    padding: "7px 14px", display: "flex", alignItems: "center", gap: 10,
+                    padding: "6px 14px", display: "flex", alignItems: "center", gap: 10,
                     borderBottom: "1px solid rgba(255,255,255,0.02)", fontSize: 11,
                   }}>
-                    <span style={{ fontSize: 10, fontFamily: MONO, color: "var(--accent)", fontWeight: 600, flexShrink: 0, letterSpacing: "0.02em" }}>{entry.hash}</span>
+                    <span style={{ fontSize: 10, fontFamily: MONO, color: NVIDIA_GREEN, fontWeight: 600, flexShrink: 0 }}>{entry.hash}</span>
                     <span style={{ color: "var(--text-secondary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.message}</span>
-                    <span style={{ fontSize: 9, color: "var(--text-muted)", flexShrink: 0, whiteSpace: "nowrap" }}>{entry.ago}</span>
+                    <span style={{ fontSize: 9, color: "var(--text-muted)", flexShrink: 0 }}>{entry.ago}</span>
                     <span style={{ fontSize: 9, color: "var(--text-muted)", flexShrink: 0, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.author}</span>
                   </div>
                 ))}
@@ -2137,7 +1224,7 @@ function DeployTab() {
 
           {/* Command Output */}
           {cmdOutput && (
-            <div style={{ marginTop: 16 }}>
+            <div style={{ marginTop: 14 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                 <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--text-muted)" }}>{cmdOutput.title}</span>
                 <button onClick={() => setCmdOutput(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: 10, cursor: "pointer" }}>Dismiss</button>

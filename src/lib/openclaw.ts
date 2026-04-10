@@ -23,6 +23,7 @@ export interface Message {
   artifacts?: Artifact[];
   toolCalls?: ToolCallEvent[];
   attachments?: ChatAttachment[];
+  feedback?: "up" | "down";
 }
 
 export interface Artifact {
@@ -765,11 +766,24 @@ class OpenClawClient {
 
   async getMemoryStatus(): Promise<Record<string, unknown> | null> {
     try {
-      const result = await cachedCommand(`${OPENCLAW_CMD} memory status --json`, { ttl: 60_000 });
-      if (result.code === 0 && result.stdout.trim()) {
-        const parsed = JSON.parse(result.stdout);
-        return Array.isArray(parsed) ? parsed[0] : parsed;
+      const result = await cachedCommand(`${OPENCLAW_CMD} ltm stats`, { ttl: 300_000, timeout: 120_000 });
+      const out = (result.stdout ?? "") + (result.stderr ?? "");
+      const match = out.match(/Total memories:\s*(\d+)/i);
+      const chunks = match ? parseInt(match[1], 10) : 0;
+
+      let vectorReady = false;
+      let provider = "none";
+      if (/memory-lancedb/i.test(out)) {
+        vectorReady = true;
+        provider = "lancedb";
       }
+
+      return {
+        chunks, files: 0, dirty: false, provider,
+        vector: { available: vectorReady },
+        fts: { available: false },
+        custom: { searchMode: vectorReady ? "vector" : "unknown" },
+      };
     } catch { /* ignore */ }
     return null;
   }
@@ -863,6 +877,22 @@ class OpenClawClient {
     }
     agents.defaults = defaults;
     await this.updateConfig({ agents } as Partial<OpenClawConfig>);
+  }
+
+  private _lastAppliedOverrides = "";
+
+  async applySessionOverrides(overrides: { temperature?: number; maxTokens?: number; topP?: number }): Promise<void> {
+    const key = JSON.stringify(overrides);
+    if (key === this._lastAppliedOverrides) return;
+    const existing = await this.getConfig(true);
+    const agents = { ...((existing.agents as Record<string, unknown>) || {}) };
+    const defaults = { ...((agents.defaults as Record<string, unknown>) || {}) };
+    if (overrides.temperature !== undefined) defaults.temperature = overrides.temperature;
+    if (overrides.maxTokens !== undefined) defaults.maxTokens = overrides.maxTokens;
+    if (overrides.topP !== undefined) defaults.topP = overrides.topP;
+    agents.defaults = defaults;
+    await this.updateConfig({ agents } as Partial<OpenClawConfig>);
+    this._lastAppliedOverrides = key;
   }
 
   /* ── Channels ── */

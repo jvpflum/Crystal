@@ -1,16 +1,14 @@
 /**
- * Voice service compatibility shim.
+ * Voice service — local GPU voice pipeline with NVIDIA primary, local fallbacks.
  *
- * This module preserves the original VoiceService API so that existing consumers
- * (useVoice hook, VoiceOrb, ConversationView, SettingsView) continue to work
- * without changes during migration.
+ * Pipeline:
+ *   STT: NVIDIA Nemotron/Parakeet (8090) → Whisper (8080) → Browser API
+ *   TTS: NVIDIA Magpie (8091) → Kokoro (8081) → Browser API
  *
- * Under the hood, it delegates to the new ConversationAgent which uses
- * provider-pluggable STT/TTS with NVIDIA Nemotron/Magpie as primary targets.
- *
- * Provider selection (automatic, runtime):
- *   STT: NVIDIA Nemotron (8090) → Whisper (8080) → Browser Speech API
- *   TTS: NVIDIA Magpie (8091)   → Kokoro (8081)  → Browser speechSynthesis
+ * Optimizations:
+ *   - Event-based init wait (no polling)
+ *   - Single refreshProviders call deduplicates concurrent check requests
+ *   - Lazy initialization — doesn't block constructor
  */
 
 import { ConversationAgent } from "./voice/conversation-agent";
@@ -29,15 +27,11 @@ export interface VoiceConfig {
 const defaultConfig: VoiceConfig = {
   wakeWord: "hey crystal",
   sttModel: "nvidia-nemotron",
-  ttsVoice: "default",
+  ttsVoice: "nvidia-magpie",
   silenceThreshold: 1500,
   maxRecordingTime: 30000,
 };
 
-/**
- * Map expanded 8-state VoiceState to the legacy 4-state type
- * so existing UI components don't break.
- */
 function toLegacyState(state: NewVoiceState): VoiceState {
   switch (state) {
     case "idle":
@@ -63,9 +57,12 @@ class VoiceService {
   private onTranscript: ((text: string) => void) | null = null;
 
   private _agent: ConversationAgent;
-  private _initialized = false;
+  private _initPromise: Promise<void>;
   private _whisperAvailable = false;
   private _ttsAvailable = false;
+
+  // Dedup concurrent refreshProvider calls
+  private _refreshInFlight: Promise<{ stt: string; tts: string }> | null = null;
 
   constructor() {
     this._agent = new ConversationAgent({
@@ -75,11 +72,9 @@ class VoiceService {
       maxRecordingTime: this.config.maxRecordingTime,
     });
 
-    // Wire agent events to legacy callbacks
     this._agent.on((event) => {
       if (event.kind === "state_change") {
-        const legacy = toLegacyState(event.to);
-        this.onStateChange?.(legacy);
+        this.onStateChange?.(toLegacyState(event.to));
       }
 
       if (event.kind === "transcript" && event.entry.role === "user" && !event.entry.is_partial) {
@@ -87,15 +82,12 @@ class VoiceService {
       }
     });
 
-    this._initAsync();
+    this._initPromise = this._initAsync();
   }
 
   private async _initAsync(): Promise<void> {
     try {
       await this._agent.initialize();
-      this._initialized = true;
-
-      // Check which providers are available for legacy compatibility booleans
       this._whisperAvailable = this._agent.hasStt;
       this._ttsAvailable = this._agent.hasTts;
     } catch (err) {
@@ -103,7 +95,6 @@ class VoiceService {
     }
   }
 
-  /** Access the underlying ConversationAgent for new-style consumers. */
   get agent(): ConversationAgent {
     return this._agent;
   }
@@ -125,6 +116,7 @@ class VoiceService {
   }
 
   async startListening(): Promise<void> {
+    await this._waitForInit();
     await this._agent.startListening();
   }
 
@@ -133,31 +125,23 @@ class VoiceService {
   }
 
   async speak(text: string): Promise<void> {
+    await this._waitForInit();
     await this._agent.speak(text);
   }
 
-  setWhisperEndpoint(_endpoint: string) {
-    // No-op in new architecture — providers manage their own endpoints
-  }
-
-  setTTSEndpoint(_endpoint: string) {
-    // No-op in new architecture — providers manage their own endpoints
-  }
+  setWhisperEndpoint(_endpoint: string) {}
+  setTTSEndpoint(_endpoint: string) {}
 
   async checkWhisperConnection(): Promise<boolean> {
-    if (!this._initialized) {
-      await this._waitForInit();
-    }
-    const result = await this._agent.refreshProviders();
+    await this._waitForInit();
+    const result = await this._refreshProvidersDedup();
     this._whisperAvailable = result.stt !== "None";
     return this._whisperAvailable;
   }
 
   async checkTTSConnection(): Promise<boolean> {
-    if (!this._initialized) {
-      await this._waitForInit();
-    }
-    const result = await this._agent.refreshProviders();
+    await this._waitForInit();
+    const result = await this._refreshProvidersDedup();
     this._ttsAvailable = result.tts !== "None";
     return this._ttsAvailable;
   }
@@ -171,33 +155,35 @@ class VoiceService {
   }
 
   async getProviderStatuses(): Promise<ProviderStatuses> {
-    if (!this._initialized) await this._waitForInit();
+    await this._waitForInit();
     return this._agent.getProviderStatuses();
   }
 
   async setPreferredSttProvider(id: string): Promise<void> {
-    if (!this._initialized) await this._waitForInit();
+    await this._waitForInit();
     await this._agent.setPreferredSttProvider(id);
   }
 
   async setPreferredTtsProvider(id: string): Promise<void> {
-    if (!this._initialized) await this._waitForInit();
+    await this._waitForInit();
     await this._agent.setPreferredTtsProvider(id);
   }
 
-  private _waitForInit(): Promise<void> {
-    if (this._initialized) return Promise.resolve();
-    return new Promise((resolve) => {
-      const check = () => {
-        if (this._initialized) {
-          resolve();
-        } else {
-          setTimeout(check, 500);
-        }
-      };
-      check();
-      setTimeout(resolve, 10000);
+  /**
+   * Dedup concurrent refreshProviders calls — multiple callers
+   * (e.g. checkWhisperConnection + checkTTSConnection in parallel)
+   * share a single network round-trip.
+   */
+  private async _refreshProvidersDedup(): Promise<{ stt: string; tts: string }> {
+    if (this._refreshInFlight) return this._refreshInFlight;
+    this._refreshInFlight = this._agent.refreshProviders().finally(() => {
+      this._refreshInFlight = null;
     });
+    return this._refreshInFlight;
+  }
+
+  private _waitForInit(): Promise<void> {
+    return this._initPromise;
   }
 }
 

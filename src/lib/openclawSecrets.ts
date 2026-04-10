@@ -191,7 +191,7 @@ function findOpenAiKeyInOpenClawJson(value: unknown, jsonPath: string, requireOp
 
 async function resolveAuthProfileKeyValue(raw: string): Promise<string | null> {
   const t = raw.trim();
-  if (!t || t === "ollama") return null;
+  if (!t || t === "ollama" || t === "vllm") return null;
   if (t.toLowerCase().startsWith("op://")) {
     const r = await readOnePasswordSecret(t);
     if (!r.ok) return null;

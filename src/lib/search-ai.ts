@@ -17,7 +17,6 @@ OPENCLAW SECTION:
 - Memory: Knowledge store with hot/warm/cold tiers, curated memories, daily logs, vector DB tab (LanceDB embeddings, embedding config, reindexing), full-text search, and file workspace.
 - Models: LLM model management — view active/available models, switch models, check status and auth for OpenAI/Anthropic/Ollama/local endpoints.
 - Channels: Telegram channel configuration with topic management and message routing.
-- Skills (Marketplace): Browse, enable/disable OpenClaw skills. Features skill cards with details, dependencies, and documentation links.
 - Hooks: Agent lifecycle hooks and event triggers.
 
 SYSTEM SECTION:
@@ -178,10 +177,10 @@ const VIEW_MAP: Record<string, string> = {
   "model management": "models",
   channels: "channels",
   telegram: "channels",
-  skills: "marketplace",
-  marketplace: "marketplace",
-  "skill store": "marketplace",
-  plugins: "marketplace",
+  skills: "tools",
+  marketplace: "tools",
+  "skill store": "tools",
+  plugins: "tools",
   hooks: "hooks",
   "event hooks": "hooks",
 

@@ -4,20 +4,13 @@
  * Concrete STT provider targeting local GPU inference with:
  *   nvidia/nemotron-speech-streaming-en-0.6b (Parakeet-family streaming ASR)
  *
- * This provider connects to a local Python WebSocket worker (nvidia_stt_worker.py)
- * running on port 8090. The worker loads the NeMo ASR model on the local NVIDIA GPU
- * and performs streaming transcription.
+ * Connects to a local Python WebSocket worker (nvidia_stt_worker.py) on port 8090.
  *
- * Protocol:
- *   1. Client opens WS to ws://127.0.0.1:8090
- *   2. Client sends JSON: { type: "start", config: { sample_rate, encoding, ... } }
- *   3. Client pushes binary PCM audio chunks
- *   4. Server sends JSON partials: { type: "partial", text: "..." }
- *   5. Client sends JSON: { type: "end" }
- *   6. Server sends JSON final: { type: "final", text: "...", confidence: 0.95 }
- *
- * All Nemotron/Parakeet-specific protocol details are isolated in this file.
- * The actual model loading and inference happen in the Python worker.
+ * Optimizations vs. previous version:
+ *   - Callbacks are wired BEFORE startStream to eliminate race conditions
+ *   - endStream uses a dedicated promise instead of overriding onFinalTranscript
+ *   - Safety timeout reduced from 10s to 4s
+ *   - Cached availability to avoid redundant /health pings
  */
 
 import type { SpeechToTextProvider, SttStreamHandle } from "./stt-provider";
@@ -25,48 +18,65 @@ import type { SttConfig, SttPartialResult } from "../types";
 import { DEFAULT_STT_CONFIG } from "../types";
 import { SttBridge } from "../bridge/speech-bridge";
 
+const GATEWAY_PORT = 6500;
 const NEMOTRON_STT_PORT = 8090;
-const NEMOTRON_WS_URL = `ws://127.0.0.1:${NEMOTRON_STT_PORT}`;
-const NEMOTRON_HTTP_URL = `http://127.0.0.1:${NEMOTRON_STT_PORT}`;
+const GATEWAY_WS_URL = `ws://127.0.0.1:${GATEWAY_PORT}/stt/realtime`;
+const GATEWAY_HTTP_URL = `http://127.0.0.1:${GATEWAY_PORT}`;
+const DIRECT_WS_URL = `ws://127.0.0.1:${NEMOTRON_STT_PORT}/ws`;
+const DIRECT_HTTP_URL = `http://127.0.0.1:${NEMOTRON_STT_PORT}`;
+
+const END_STREAM_TIMEOUT_MS = 4000;
+const HEALTH_CACHE_TTL_MS = 5000;
 
 class NemotronStreamHandle implements SttStreamHandle {
   private _bridge: SttBridge;
-  private _finalResolve: ((text: string) => void) | null = null;
   private _finalText = "";
+  private _ended = false;
+
+  // Separate callback lists — endStream doesn't clobber user-set callbacks
+  private _userFinalCb: ((text: string, confidence?: number) => void) | null = null;
+  private _endResolve: ((text: string) => void) | null = null;
 
   constructor(bridge: SttBridge) {
     this._bridge = bridge;
+
+    // Wire final transcript from bridge to BOTH user callback and endStream promise
+    this._bridge.onFinalTranscript((text, confidence) => {
+      this._finalText = text;
+      this._userFinalCb?.(text, confidence);
+      this._endResolve?.(text);
+      this._endResolve = null;
+    });
   }
 
   pushAudioChunk(pcm: Float32Array | Int16Array): void {
+    if (this._ended) return;
     this._bridge.pushAudioChunk(pcm);
   }
 
   async endStream(): Promise<string> {
+    if (this._ended) return this._finalText;
+    this._ended = true;
+
     return new Promise<string>((resolve) => {
-      this._finalResolve = resolve;
-      this._bridge.onFinalTranscript((text) => {
-        this._finalText = text;
-        this._finalResolve?.(text);
-        this._finalResolve = null;
-      });
+      this._endResolve = resolve;
       this._bridge.endStream();
 
-      // Safety timeout: if the worker doesn't respond in 10s, resolve with whatever we have
       setTimeout(() => {
-        if (this._finalResolve) {
-          this._finalResolve(this._finalText);
-          this._finalResolve = null;
+        if (this._endResolve) {
+          this._endResolve(this._finalText);
+          this._endResolve = null;
         }
-      }, 10000);
+      }, END_STREAM_TIMEOUT_MS);
     });
   }
 
   cancelStream(): void {
+    this._ended = true;
     this._bridge.cancelStream();
-    if (this._finalResolve) {
-      this._finalResolve("");
-      this._finalResolve = null;
+    if (this._endResolve) {
+      this._endResolve("");
+      this._endResolve = null;
     }
   }
 
@@ -82,10 +92,7 @@ class NemotronStreamHandle implements SttStreamHandle {
   }
 
   onFinalTranscript(cb: (text: string, confidence?: number) => void): void {
-    this._bridge.onFinalTranscript((text, confidence) => {
-      this._finalText = text;
-      cb(text, confidence);
-    });
+    this._userFinalCb = cb;
   }
 
   onError(cb: (error: Error) => void): void {
@@ -98,31 +105,59 @@ export class NvidiaNemotronSpeechProvider implements SpeechToTextProvider {
   readonly name = "NVIDIA Nemotron/Parakeet Streaming ASR";
 
   private _available = false;
+  private _lastHealthCheck = 0;
+  private _lastHealthResult = false;
+  private _useGateway = false;
 
   async initialize(): Promise<void> {
     this._available = await this.isAvailable();
     if (this._available) {
-      console.log("[NvidiaNemotronSTT] Worker available on port", NEMOTRON_STT_PORT);
+      const via = this._useGateway ? "Voice Gateway (:6500)" : `direct (:${NEMOTRON_STT_PORT})`;
+      console.log(`[NvidiaNemotronSTT] Available via ${via}`);
     } else {
-      console.warn("[NvidiaNemotronSTT] Worker not available on port", NEMOTRON_STT_PORT);
+      console.warn("[NvidiaNemotronSTT] Not available");
     }
   }
 
   async isAvailable(): Promise<boolean> {
-    try {
-      const resp = await fetch(`${NEMOTRON_HTTP_URL}/health`, {
-        signal: AbortSignal.timeout(3000),
-      });
-      if (!resp.ok) return false;
-      const data = await resp.json();
-      return data.status === "ok";
-    } catch {
-      return false;
+    const now = Date.now();
+    if (now - this._lastHealthCheck < HEALTH_CACHE_TTL_MS) {
+      return this._lastHealthResult;
     }
+
+    // Try Voice Gateway first, fall back to direct NVIDIA port
+    for (const [url, isGateway] of [
+      [GATEWAY_HTTP_URL, true],
+      [DIRECT_HTTP_URL, false],
+    ] as const) {
+      try {
+        const resp = await fetch(`${url}/health`, {
+          signal: AbortSignal.timeout(1500),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.status === "ok") {
+            this._useGateway = isGateway;
+            this._lastHealthResult = true;
+            this._lastHealthCheck = now;
+            return true;
+          }
+        }
+      } catch {
+        // try next
+      }
+    }
+
+    this._lastHealthResult = false;
+    this._lastHealthCheck = now;
+    return false;
   }
 
   startStream(config?: Partial<SttConfig>): SttStreamHandle {
-    const bridge = new SttBridge({ sttWsUrl: NEMOTRON_WS_URL });
+    const wsUrl = this._useGateway ? GATEWAY_WS_URL : DIRECT_WS_URL;
+    const bridge = new SttBridge({ sttWsUrl: wsUrl });
+
+    // Wire callbacks BEFORE starting the stream to prevent race conditions
     const handle = new NemotronStreamHandle(bridge);
 
     const mergedConfig: SttConfig = { ...DEFAULT_STT_CONFIG, ...config };
@@ -131,19 +166,16 @@ export class NvidiaNemotronSpeechProvider implements SpeechToTextProvider {
     return handle;
   }
 
-  /**
-   * Batch transcription fallback. Sends the entire audio blob to the worker's
-   * HTTP endpoint. This is not the primary path — streaming via startStream()
-   * is preferred for low latency.
-   */
   async transcribe(audio: Blob): Promise<string> {
     const formData = new FormData();
     formData.append("file", audio, "audio.wav");
 
-    const resp = await fetch(`${NEMOTRON_HTTP_URL}/transcribe`, {
+    const baseUrl = this._useGateway ? GATEWAY_HTTP_URL : DIRECT_HTTP_URL;
+    const endpoint = this._useGateway ? "/stt/transcribe" : "/transcribe";
+    const resp = await fetch(`${baseUrl}${endpoint}`, {
       method: "POST",
       body: formData,
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!resp.ok) {

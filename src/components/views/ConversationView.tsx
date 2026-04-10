@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Mic, Loader2, Trash2, Terminal, ChevronDown, ChevronRight, Copy, Check, Bot, User, Plus, X, PanelLeftClose, PanelLeft, MessageSquare, Zap, Settings2, Shield, Puzzle, Stethoscope, Play, Search, RefreshCw, Download, Globe, Cpu, Brain, ArrowDown, Volume2, Paperclip, FileText, ImageIcon, Music, Video, FileArchive, Upload, Square } from "lucide-react";
+import { Send, Mic, MicOff, Loader2, Trash2, Terminal, ChevronDown, ChevronRight, Copy, Check, Bot, User, Plus, X, PanelLeftClose, PanelLeft, MessageSquare, Zap, Settings2, Shield, Puzzle, Stethoscope, Play, Search, RefreshCw, Download, Globe, Cpu, Brain, ArrowDown, Volume2, Paperclip, FileText, ImageIcon, Music, Video, FileArchive, Upload, Square, ThumbsUp, ThumbsDown, Pencil } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -8,7 +8,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { Message, ChatAttachment, Surface, openclawClient } from "@/lib/openclaw";
 import { useAppStore, type AppView } from "@/stores/appStore";
 import { voiceService } from "@/lib/voice";
+import { useVoice } from "@/hooks/useVoice";
+import { NvidiaLogo } from "@/components/widgets/GpuMonitor";
 import { useTokenUsageStore, roughTokenPairEstimate } from "@/stores/tokenUsageStore";
+import { useChatSettingsStore } from "@/stores/chatSettingsStore";
+import { ChatSettingsDrawer } from "@/components/chat/ChatSettingsDrawer";
 import { EASE, innerPanel, MONO } from "@/styles/viewStyles";
 
 /* ── Conversation types ── */
@@ -26,7 +30,7 @@ interface StoredConversation {
   id: string;
   sessionId?: string;
   title: string;
-  messages: Array<{ id: string; role: string; content: string; timestamp: string; surface?: Surface; attachments?: Array<{ id: string; name: string; size: number; type: string }> }>;
+  messages: Array<{ id: string; role: string; content: string; timestamp: string; surface?: Surface; attachments?: Array<{ id: string; name: string; size: number; type: string }>; feedback?: "up" | "down" }>;
   createdAt: number;
   updatedAt: number;
 }
@@ -104,6 +108,7 @@ function loadConversations(): Conversation[] {
         timestamp: new Date(m.timestamp),
         surface: m.surface as Surface | undefined,
         attachments: m.attachments?.map(a => ({ ...a, content: "" })),
+        feedback: m.feedback,
       })),
     }));
   } catch {
@@ -120,6 +125,7 @@ function saveConversations(conversations: Conversation[]) {
       timestamp: m.timestamp.toISOString(),
       surface: m.surface,
       attachments: m.attachments?.map(a => ({ id: a.id, name: a.name, size: a.size, type: a.type })),
+      feedback: m.feedback,
     })),
   }));
   localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable));
@@ -187,8 +193,17 @@ export function ConversationView() {
   const editInputRef = useRef<HTMLInputElement>(null);
   const [actionButtons, setActionButtons] = useState<ActionButton[]>([]);
   const [isListening, setIsListening] = useState(false);
-  const recognitionRef = useRef<any>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
+
+  // Local STT/TTS pipeline via useVoice (NVIDIA Nemotron → Whisper → browser fallback)
+  const {
+    voiceState, transcript: voiceTranscript,
+    isWhisperConnected,
+    hasSpeechRecognition: hasLocalStt,
+    startListening: localStartListening, stopListening: localStopListening,
+    speak: localSpeak,
+  } = useVoice();
+  const localSttAvailable = hasLocalStt || isWhisperConnected;
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
@@ -207,6 +222,15 @@ export function ConversationView() {
   const modelKey = openclawClient.getModel();
   const model = openclawClient.getModelDisplayName(modelKey);
   const [liveTps, setLiveTps] = useState(0);
+
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editMsgContent, setEditMsgContent] = useState("");
+
+  const { offlineMode, temperature, maxTokens, topP, responseStyle } = useChatSettingsStore();
 
   useEffect(() => {
     return openclawClient.onTps(tps => setLiveTps(Math.round(tps)));
@@ -227,7 +251,7 @@ export function ConversationView() {
     { cmd: "/memory", label: "Memory", description: "Knowledge store & vector DB", action: () => setView("memory") },
     { cmd: "/models", label: "Models", description: "LLM model management", action: () => setView("models") },
     { cmd: "/channels", label: "Channels", description: "Telegram channel configuration", action: () => setView("channels") },
-    { cmd: "/skills", label: "Skills", description: "Browse & manage OpenClaw skills", action: () => setView("marketplace") },
+    { cmd: "/skills", label: "Skills", description: "Browse & manage OpenClaw skills", action: () => setView("tools") },
     { cmd: "/hooks", label: "Hooks", description: "Agent lifecycle hooks", action: () => setView("hooks") },
     // Navigation — system
     { cmd: "/usage", label: "Usage", description: "Token usage, costs & analytics", action: () => setView("usage") },
@@ -440,33 +464,48 @@ export function ConversationView() {
     }
   }, [editingId]);
 
-  const handleMicClick = useCallback(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setMicFlashRed(true);
-      setTimeout(() => setMicFlashRed(false), 800);
-      return;
-    }
-    if (isListening) {
-      recognitionRef.current?.stop();
+  // Sync isListening with local STT voiceState
+  useEffect(() => {
+    if (voiceState !== "listening" && voiceState !== "idle") return;
+    if (voiceState !== "listening" && isListening && localSttAvailable) {
       setIsListening(false);
+    }
+  }, [voiceState, isListening, localSttAvailable]);
+
+  // When local STT produces a transcript, inject it into the input and auto-send
+  const lastTranscriptRef = useRef("");
+  useEffect(() => {
+    if (voiceTranscript && voiceTranscript !== lastTranscriptRef.current && !isLoading) {
+      lastTranscriptRef.current = voiceTranscript;
+      voiceTriggeredRef.current = true;
+      pendingSendRef.current = { surface: "voice" };
+      setInput(voiceTranscript);
+      // Wait for React to re-render with new input, then click the send button
+      setTimeout(() => {
+        const sendBtn = document.querySelector<HTMLButtonElement>("[data-send-btn]");
+        if (sendBtn && !sendBtn.disabled) {
+          sendBtn.click();
+        }
+      }, 150);
+    }
+  }, [voiceTranscript, isLoading]);
+
+  const handleMicClick = useCallback(async () => {
+    if (!localSttAvailable) {
+      // NVIDIA STT worker not ready — flash red to indicate
+      setMicFlashRed(true);
+      setTimeout(() => setMicFlashRed(false), 1200);
       return;
     }
-    const recognition = new SpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    recognition.onresult = (event: any) => {
-      const text = event.results[0][0].transcript;
-      setInput(prev => prev ? prev + " " + text : text);
-      inputRef.current?.focus();
-    };
-    recognition.onend = () => setIsListening(false);
-    recognition.onerror = () => setIsListening(false);
-    recognitionRef.current = recognition;
-    recognition.start();
-    setIsListening(true);
-  }, [isListening]);
+
+    if (isListening || voiceState === "listening") {
+      await localStopListening();
+      setIsListening(false);
+    } else {
+      setIsListening(true);
+      await localStartListening();
+    }
+  }, [isListening, localSttAvailable, voiceState, localStartListening, localStopListening]);
 
   const handleAttachFiles = useCallback(async (files: FileList | File[]) => {
     const TEXT_EXTENSIONS = new Set([
@@ -606,7 +645,9 @@ export function ConversationView() {
       updatedAt: Date.now(),
     }));
 
-    const messageToSend = buildMessageWithAttachments(text, currentAttachments);
+    let messageToSend = buildMessageWithAttachments(text, currentAttachments);
+    if (responseStyle === "concise") messageToSend = "[Be concise and direct] " + messageToSend;
+    else if (responseStyle === "detailed") messageToSend = "[Be thorough and detailed] " + messageToSend;
 
     const safetyTimer = setTimeout(() => {
       if (!abortRef.current) {
@@ -621,7 +662,7 @@ export function ConversationView() {
       let tokenCount = 0;
       const streamStart = Date.now();
       const FLUSH_INTERVAL = 40;
-      for await (const token of agentService.streamChat(messageToSend, sessionId, thinkingLevel)) {
+      for await (const token of agentService.streamChat(messageToSend, sessionId, thinkingLevel, { temperature, maxTokens, topP })) {
         if (abortRef.current) {
           accumulated += "\n\n*[Cancelled by user]*";
           break;
@@ -683,8 +724,8 @@ export function ConversationView() {
           .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
           .replace(/<[^>]+>/g, "")
           .trim();
-        if (plainText.length > 0 && plainText.length < 500) {
-          voiceService.speak(plainText).catch(() => {});
+        if (plainText.length > 0 && plainText.length < 2000) {
+          localSpeak(plainText).catch(() => {});
         }
       }
     } catch (err) {
@@ -739,7 +780,7 @@ export function ConversationView() {
         }
         break;
       case "power_up":
-        setView("marketplace");
+        setView("tools");
         break;
       case "new_chat":
         handleNewChat();
@@ -820,6 +861,195 @@ export function ConversationView() {
     const text = last.content.replace(/[*#_`\n]/g, " ").trim();
     return text.length > 40 ? text.slice(0, 40) + "…" : text;
   };
+
+  const handleRegenerate = useCallback((assistantMsgId: string) => {
+    const conv = conversations.find(c => c.id === activeId);
+    if (!conv) return;
+    const idx = conv.messages.findIndex(m => m.id === assistantMsgId);
+    if (idx < 1) return;
+    const userMsg = conv.messages.slice(0, idx).reverse().find(m => m.role === "user");
+    if (!userMsg) return;
+    updateConversation(activeId, c => ({
+      ...c,
+      messages: c.messages.map(m => m.id === assistantMsgId ? { ...m, content: "" } : m),
+      updatedAt: Date.now(),
+    }));
+    const messageToSend = buildMessageWithAttachments(userMsg.content, userMsg.attachments || []);
+    const sessionId = conv.sessionId;
+    setIsLoading(true);
+    setToolSteps([]);
+    (async () => {
+      try {
+        let accumulated = "";
+        let lastFlush = 0;
+        const FLUSH_INTERVAL = 40;
+        for await (const token of agentService.streamChat(messageToSend, sessionId, thinkingLevel, { temperature, maxTokens, topP })) {
+          if (abortRef.current) { accumulated += "\n\n*[Cancelled by user]*"; break; }
+          accumulated += token;
+          const now = Date.now();
+          if (now - lastFlush >= FLUSH_INTERVAL) {
+            lastFlush = now;
+            const snap = accumulated;
+            updateConversation(activeId, c => ({
+              ...c,
+              messages: c.messages.map(m => m.id === assistantMsgId ? { ...m, content: snap } : m),
+              updatedAt: now,
+            }));
+          }
+        }
+        updateConversation(activeId, c => ({
+          ...c,
+          messages: c.messages.map(m => m.id === assistantMsgId ? { ...m, content: accumulated } : m),
+          updatedAt: Date.now(),
+        }));
+      } catch (err) {
+        updateConversation(activeId, c => ({
+          ...c,
+          messages: c.messages.map(m => m.id === assistantMsgId
+            ? { ...m, content: `**Error:** ${err instanceof Error ? err.message : "Unknown error"}` }
+            : m),
+          updatedAt: Date.now(),
+        }));
+      } finally {
+        setIsLoading(false);
+        abortRef.current = false;
+      }
+    })();
+  }, [activeId, conversations, updateConversation, buildMessageWithAttachments, thinkingLevel, temperature, maxTokens, topP]);
+
+  const handleEditResend = useCallback((userMsgId: string, newContent: string) => {
+    setEditingMsgId(null);
+    setEditMsgContent("");
+    const conv = conversations.find(c => c.id === activeId);
+    if (!conv) return;
+    const idx = conv.messages.findIndex(m => m.id === userMsgId);
+    if (idx < 0) return;
+    const trimmed = conv.messages.slice(0, idx);
+    const editedMsg: Message = { id: crypto.randomUUID(), role: "user", content: newContent, timestamp: new Date(), surface: "gui-chat" };
+    updateConversation(activeId, c => ({
+      ...c,
+      messages: [...trimmed, editedMsg],
+      updatedAt: Date.now(),
+    }));
+    setInput("");
+    setIsLoading(true);
+    setToolSteps([]);
+    const sessionId = conv.sessionId;
+    const msgId = crypto.randomUUID();
+    const assistantMessage: Message = { id: msgId, role: "assistant", content: "", timestamp: new Date(), surface: "gui-chat" };
+    updateConversation(activeId, c => ({
+      ...c,
+      messages: [...c.messages, assistantMessage],
+      updatedAt: Date.now(),
+    }));
+    (async () => {
+      try {
+        let accumulated = "";
+        let lastFlush = 0;
+        const FLUSH_INTERVAL = 40;
+        for await (const token of agentService.streamChat(newContent, sessionId, thinkingLevel, { temperature, maxTokens, topP })) {
+          if (abortRef.current) { accumulated += "\n\n*[Cancelled by user]*"; break; }
+          accumulated += token;
+          const now = Date.now();
+          if (now - lastFlush >= FLUSH_INTERVAL) {
+            lastFlush = now;
+            const snap = accumulated;
+            updateConversation(activeId, c => ({
+              ...c,
+              messages: c.messages.map(m => m.id === msgId ? { ...m, content: snap } : m),
+              updatedAt: now,
+            }));
+          }
+        }
+        updateConversation(activeId, c => ({
+          ...c,
+          messages: c.messages.map(m => m.id === msgId ? { ...m, content: accumulated } : m),
+          updatedAt: Date.now(),
+        }));
+      } catch (err) {
+        updateConversation(activeId, c => ({
+          ...c,
+          messages: c.messages.map(m => m.id === msgId
+            ? { ...m, content: `**Error:** ${err instanceof Error ? err.message : "Unknown error"}` }
+            : m),
+          updatedAt: Date.now(),
+        }));
+      } finally {
+        setIsLoading(false);
+        abortRef.current = false;
+      }
+    })();
+  }, [activeId, conversations, updateConversation, thinkingLevel, temperature, maxTokens, topP]);
+
+  const handleFeedback = useCallback((msgId: string, fb: "up" | "down") => {
+    updateConversation(activeId, c => ({
+      ...c,
+      messages: c.messages.map(m => m.id === msgId ? { ...m, feedback: m.feedback === fb ? undefined : fb } : m),
+      updatedAt: Date.now(),
+    }));
+  }, [activeId, updateConversation]);
+
+  const exportConversation = useCallback(() => {
+    const conv = conversations.find(c => c.id === activeId);
+    if (!conv) return;
+    const lines: string[] = [
+      `# ${conv.title}`,
+      "",
+      `**Model:** ${model}`,
+      `**Session:** ${conv.sessionId}`,
+      `**Date:** ${new Date(conv.createdAt).toLocaleDateString()}`,
+      "",
+      "---",
+      "",
+    ];
+    for (const msg of conv.messages) {
+      if (msg.id === "welcome") continue;
+      const role = msg.role === "user" ? "**You**" : "**Crystal**";
+      const time = msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      lines.push(`### ${role} — ${time}`);
+      lines.push("");
+      lines.push(msg.content);
+      lines.push("");
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${conv.title.replace(/[^a-zA-Z0-9 ]/g, "").trim() || "chat"}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [activeId, conversations, model]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (settingsOpen) { setSettingsOpen(false); e.preventDefault(); return; }
+        if (searchOpen) { setSearchOpen(false); setSearchQuery(""); e.preventDefault(); return; }
+      }
+      if (e.ctrlKey && e.key === "f" && !e.shiftKey) {
+        e.preventDefault();
+        setSearchOpen(prev => !prev);
+        setTimeout(() => searchInputRef.current?.focus(), 100);
+      }
+      if (e.ctrlKey && e.shiftKey && e.key === "N") {
+        e.preventDefault();
+        handleNewChat();
+      }
+      if (e.ctrlKey && e.shiftKey && e.key === "E") {
+        e.preventDefault();
+        exportConversation();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [settingsOpen, searchOpen, handleNewChat, exportConversation]);
+
+  const searchLower = searchQuery.toLowerCase();
+  const filteredMessages = searchOpen && searchQuery.trim()
+    ? messages.filter(m => m.content.toLowerCase().includes(searchLower))
+    : messages;
+
+  const messageCount = messages.filter(m => m.id !== "welcome").length;
 
   return (
     <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
@@ -960,7 +1190,7 @@ export function ConversationView() {
       </div>
 
       {/* Main Chat Area */}
-      <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", position: "relative" }}>
         {/* Header */}
         <div style={{
           padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0,
@@ -989,7 +1219,17 @@ export function ConversationView() {
             </h2>
             <StatusPill connected={gatewayConnected} label="OpenClaw" />
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {offlineMode && (
+              <span style={{
+                fontSize: 8, padding: "2px 6px", borderRadius: 4,
+                background: "rgba(74,222,128,0.1)", color: "var(--success)",
+                fontWeight: 700, letterSpacing: "0.08em", fontFamily: MONO,
+                border: "1px solid rgba(74,222,128,0.2)",
+              }}>
+                LOCAL
+              </span>
+            )}
             {activeConversation?.sessionId && (
               <span
                 title={`Session: ${activeConversation.sessionId}`}
@@ -1015,6 +1255,29 @@ export function ConversationView() {
                 {liveTps} tok/s
               </span>
             )}
+            {messageCount > 0 && (
+              <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: MONO }}>{messageCount} msg</span>
+            )}
+            <button onClick={() => { setSearchOpen(p => !p); setTimeout(() => searchInputRef.current?.focus(), 100); }} title="Search (Ctrl+F)" style={{
+              background: searchOpen ? "rgba(59,130,246,0.1)" : "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 4,
+              display: "flex", alignItems: "center",
+              transition: `background 0.2s ${EASE}`,
+            }}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
+              onMouseLeave={e => e.currentTarget.style.background = searchOpen ? "rgba(59,130,246,0.1)" : "none"}
+            >
+              <Search style={{ width: 13, height: 13, color: searchOpen ? "var(--accent)" : "var(--text-muted)" }} />
+            </button>
+            <button onClick={exportConversation} title="Export (Ctrl+Shift+E)" style={{
+              background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 4,
+              display: "flex", alignItems: "center",
+              transition: `background 0.2s ${EASE}`,
+            }}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
+              onMouseLeave={e => e.currentTarget.style.background = "none"}
+            >
+              <Download style={{ width: 13, height: 13, color: "var(--text-muted)" }} />
+            </button>
             <button onClick={clearConversation} title="Clear chat" style={{
               background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 4,
               display: "flex", alignItems: "center",
@@ -1025,8 +1288,50 @@ export function ConversationView() {
             >
               <Trash2 style={{ width: 13, height: 13, color: "var(--text-muted)" }} />
             </button>
+            <button onClick={() => setSettingsOpen(p => !p)} title="Chat settings" style={{
+              background: settingsOpen ? "rgba(59,130,246,0.1)" : "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 4,
+              display: "flex", alignItems: "center",
+              transition: `background 0.2s ${EASE}`,
+            }}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
+              onMouseLeave={e => e.currentTarget.style.background = settingsOpen ? "rgba(59,130,246,0.1)" : "none"}
+            >
+              <Settings2 style={{ width: 13, height: 13, color: settingsOpen ? "var(--accent)" : "var(--text-muted)" }} />
+            </button>
           </div>
         </div>
+
+        {/* Search bar */}
+        {searchOpen && (
+          <div style={{
+            padding: "6px 16px", borderBottom: "1px solid var(--border)",
+            background: "var(--bg-surface)", flexShrink: 0,
+            display: "flex", alignItems: "center", gap: 8,
+          }}>
+            <Search style={{ width: 12, height: 12, color: "var(--text-muted)", flexShrink: 0 }} />
+            <input
+              ref={searchInputRef}
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => { if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); } }}
+              placeholder="Search messages..."
+              style={{
+                flex: 1, padding: "4px 0", background: "transparent", border: "none",
+                color: "var(--text)", fontSize: 12, outline: "none", fontFamily: "inherit",
+              }}
+            />
+            {searchQuery && (
+              <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO, flexShrink: 0 }}>
+                {filteredMessages.filter(m => m.id !== "welcome").length} results
+              </span>
+            )}
+            <button onClick={() => { setSearchOpen(false); setSearchQuery(""); }} style={{
+              background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex", alignItems: "center",
+            }}>
+              <X style={{ width: 12, height: 12, color: "var(--text-muted)" }} />
+            </button>
+          </div>
+        )}
 
         {/* Messages */}
         <div
@@ -1066,8 +1371,24 @@ export function ConversationView() {
             </div>
           )}
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-            {messages.map((msg, i) => (
-              <MessageBubble key={msg.id} message={msg} isLatest={i === messages.length - 1 && msg.role === "assistant"} meta={responseMeta[msg.id]} onImageClick={(src, name) => setLightboxSrc({ src, name })} />
+            {filteredMessages.map((msg, i) => (
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                isLatest={i === filteredMessages.length - 1 && msg.role === "assistant"}
+                meta={responseMeta[msg.id]}
+                onImageClick={(src, name) => setLightboxSrc({ src, name })}
+                onRegenerate={handleRegenerate}
+                onFeedback={handleFeedback}
+                isLoading={isLoading}
+                editingMsgId={editingMsgId}
+                editMsgContent={editMsgContent}
+                onStartEdit={(id, content) => { setEditingMsgId(id); setEditMsgContent(content); }}
+                onCancelEdit={() => { setEditingMsgId(null); setEditMsgContent(""); }}
+                onSubmitEdit={handleEditResend}
+                onEditContentChange={setEditMsgContent}
+                searchQuery={searchOpen ? searchQuery : ""}
+              />
             ))}
 
             {messages.length === 1 && messages[0].id === "welcome" && !isLoading && (
@@ -1389,15 +1710,18 @@ export function ConversationView() {
             </button>
             <button
               onClick={handleMicClick}
-              aria-label="Voice input"
+              aria-label={isListening ? "Stop listening" : localSttAvailable ? "Voice input (NVIDIA Nemotron)" : "Voice input (NVIDIA offline)"}
+              title={isListening ? "Click to stop" : localSttAvailable ? "NVIDIA Nemotron STT — click to speak" : "NVIDIA STT offline — waiting for GPU worker"}
               style={{
-                padding: 6, borderRadius: 8, border: "none", cursor: "pointer", flexShrink: 0,
-                display: "flex", alignItems: "center",
+                padding: "4px 8px", borderRadius: 8, border: "none", cursor: "pointer", flexShrink: 0,
+                display: "flex", alignItems: "center", gap: 4,
                 background: isListening
-                  ? "rgba(59,130,246,0.2)"
-                  : "transparent",
+                  ? "rgba(118,185,0,0.15)"
+                  : micFlashRed
+                    ? "rgba(239,68,68,0.1)"
+                    : "transparent",
                 boxShadow: isListening
-                  ? "0 0 12px rgba(59,130,246,0.4)"
+                  ? "0 0 16px rgba(118,185,0,0.35)"
                   : "none",
                 animation: isListening
                   ? "mic-pulse 1.5s ease-in-out infinite"
@@ -1405,15 +1729,37 @@ export function ConversationView() {
                 transition: `all 0.2s ${EASE}`,
               }}
             >
-              <Mic style={{
-                width: 15, height: 15,
-                color: micFlashRed
-                  ? "var(--error)"
-                  : isListening
-                    ? "var(--accent-hover)"
-                    : "var(--text-muted)",
-                transition: `color 0.2s ${EASE}`,
-              }} />
+              <NvidiaLogo size={13} color={
+                isListening ? "#76b900"
+                  : localSttAvailable ? "#76b900"
+                    : micFlashRed ? "var(--error)"
+                      : "var(--text-muted)"
+              } />
+              {isListening ? (
+                <MicOff style={{
+                  width: 14, height: 14,
+                  color: "#76b900",
+                  transition: `color 0.2s ${EASE}`,
+                }} />
+              ) : (
+                <Mic style={{
+                  width: 14, height: 14,
+                  color: micFlashRed
+                    ? "var(--error)"
+                    : localSttAvailable
+                      ? "#76b900"
+                      : "var(--text-muted)",
+                  transition: `color 0.2s ${EASE}`,
+                }} />
+              )}
+              {localSttAvailable && !isListening && (
+                <span style={{
+                  width: 4, height: 4, borderRadius: "50%",
+                  background: "#76b900",
+                  flexShrink: 0,
+                  boxShadow: "0 0 4px rgba(118,185,0,0.6)",
+                }} />
+              )}
             </button>
             <button
               onClick={cycleThinkingLevel}
@@ -1484,6 +1830,8 @@ export function ConversationView() {
         </div>
       </div>
 
+      <ChatSettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+
       {lightboxSrc && (
         <ImageLightbox src={lightboxSrc.src} name={lightboxSrc.name} onClose={() => setLightboxSrc(null)} />
       )}
@@ -1512,10 +1860,27 @@ function StatusPill({ connected, label }: { connected: boolean; label: string })
 }
 
 /* ── Message bubble ── */
-function MessageBubble({ message, isLatest, meta, onImageClick }: { message: Message; isLatest: boolean; meta?: { tokens: number; durationMs: number }; onImageClick?: (src: string, name: string) => void }) {
+function MessageBubble({ message, isLatest, meta, onImageClick, onRegenerate, onFeedback, isLoading: parentLoading, editingMsgId, editMsgContent, onStartEdit, onCancelEdit, onSubmitEdit, onEditContentChange, searchQuery }: {
+  message: Message;
+  isLatest: boolean;
+  meta?: { tokens: number; durationMs: number };
+  onImageClick?: (src: string, name: string) => void;
+  onRegenerate?: (id: string) => void;
+  onFeedback?: (id: string, fb: "up" | "down") => void;
+  isLoading?: boolean;
+  editingMsgId?: string | null;
+  editMsgContent?: string;
+  onStartEdit?: (id: string, content: string) => void;
+  onCancelEdit?: () => void;
+  onSubmitEdit?: (id: string, content: string) => void;
+  onEditContentChange?: (v: string) => void;
+  searchQuery?: string;
+}) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const isEditing = editingMsgId === message.id;
+  const hasSearchMatch = !!(searchQuery && message.content.toLowerCase().includes(searchQuery.toLowerCase()));
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -1571,8 +1936,12 @@ function MessageBubble({ message, isLatest, meta, onImageClick }: { message: Mes
           background: isUser
             ? "var(--chat-user)"
             : "var(--chat-assistant)",
-          border: isUser ? "none" : "1px solid var(--chat-assistant-border)",
-          boxShadow: isUser ? "0 1px 4px rgba(0,0,0,0.15)" : "none",
+          border: hasSearchMatch
+            ? "1px solid rgba(251,191,36,0.4)"
+            : isUser ? "none" : "1px solid var(--chat-assistant-border)",
+          boxShadow: hasSearchMatch
+            ? "0 0 12px rgba(251,191,36,0.15)"
+            : isUser ? "0 1px 4px rgba(0,0,0,0.15)" : "none",
         }}
         onMouseEnter={e => {
           const btn = e.currentTarget.querySelector("[data-copy]") as HTMLElement;
@@ -1583,7 +1952,7 @@ function MessageBubble({ message, isLatest, meta, onImageClick }: { message: Mes
           if (btn) btn.style.opacity = "0";
         }}
       >
-        {/* Action buttons */}
+        {/* Assistant action buttons */}
         {!isUser && message.id !== "welcome" && (
           <div
             data-copy
@@ -1604,6 +1973,20 @@ function MessageBubble({ message, isLatest, meta, onImageClick }: { message: Mes
             >
               <Volume2 style={{ width: 11, height: 11, color: speaking ? "var(--accent)" : "var(--text-secondary)" }} />
             </button>
+            {isLatest && !parentLoading && onRegenerate && (
+              <button
+                onClick={() => onRegenerate(message.id)}
+                aria-label="Regenerate"
+                title="Regenerate response"
+                style={{
+                  padding: 4, borderRadius: 5,
+                  background: "rgba(255,255,255,0.08)", border: "none", cursor: "pointer",
+                  display: "flex", alignItems: "center",
+                }}
+              >
+                <RefreshCw style={{ width: 11, height: 11, color: "var(--text-secondary)" }} />
+              </button>
+            )}
             <button
               onClick={handleCopy}
               aria-label="Copy message"
@@ -1622,7 +2005,60 @@ function MessageBubble({ message, isLatest, meta, onImageClick }: { message: Mes
           </div>
         )}
 
+        {/* User action buttons (edit) */}
+        {isUser && message.id !== "welcome" && !isEditing && (
+          <div
+            data-copy
+            style={{
+              position: "absolute", top: 6, left: 6, display: "flex", gap: 2,
+              opacity: 0, transition: `opacity 0.15s ${EASE}`, zIndex: 2,
+            }}
+          >
+            <button
+              onClick={() => onStartEdit?.(message.id, message.content)}
+              aria-label="Edit message"
+              title="Edit and resend"
+              style={{
+                padding: 4, borderRadius: 5,
+                background: "rgba(255,255,255,0.15)", border: "none", cursor: "pointer",
+                display: "flex", alignItems: "center",
+              }}
+            >
+              <Pencil style={{ width: 10, height: 10, color: "rgba(255,255,255,0.7)" }} />
+            </button>
+          </div>
+        )}
+
         {isUser ? (
+          isEditing ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <textarea
+                value={editMsgContent}
+                onChange={e => onEditContentChange?.(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSubmitEdit?.(message.id, editMsgContent || ""); }
+                  if (e.key === "Escape") onCancelEdit?.();
+                }}
+                autoFocus
+                style={{
+                  width: "100%", minHeight: 60, padding: 8, borderRadius: 8,
+                  background: "rgba(0,0,0,0.2)", border: "1px solid rgba(59,130,246,0.3)",
+                  color: "var(--chat-user-text)", fontSize: 13, outline: "none",
+                  resize: "vertical", fontFamily: "inherit", lineHeight: 1.5,
+                }}
+              />
+              <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                <button onClick={() => onCancelEdit?.()} style={{
+                  padding: "3px 10px", borderRadius: 6, fontSize: 10, cursor: "pointer",
+                  background: "rgba(255,255,255,0.1)", border: "none", color: "rgba(255,255,255,0.7)",
+                }}>Cancel</button>
+                <button onClick={() => onSubmitEdit?.(message.id, editMsgContent || "")} style={{
+                  padding: "3px 10px", borderRadius: 6, fontSize: 10, cursor: "pointer",
+                  background: "var(--accent)", border: "none", color: "#fff", fontWeight: 600,
+                }}>Resend</button>
+              </div>
+            </div>
+          ) : (
           <div>
             {message.attachments && message.attachments.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 6 }}>
@@ -1700,6 +2136,7 @@ function MessageBubble({ message, isLatest, meta, onImageClick }: { message: Mes
               {message.content}
             </div>
           </div>
+          )
         ) : (
           <div className={`md-content ${isLatest ? "animate-fade-in" : ""}`}>
             <ReactMarkdown
@@ -1749,7 +2186,7 @@ function MessageBubble({ message, isLatest, meta, onImageClick }: { message: Mes
           </div>
         )}
 
-        {/* Timestamp + surface + performance meta */}
+        {/* Timestamp + surface + performance meta + feedback */}
         <div style={{
           fontSize: 9, color: isUser ? "rgba(255,255,255,0.5)" : "var(--text-muted)",
           marginTop: 4, textAlign: isUser ? "right" : "left",
@@ -1771,6 +2208,42 @@ function MessageBubble({ message, isLatest, meta, onImageClick }: { message: Mes
               {(meta.durationMs / 1000).toFixed(1)}s
               {meta.tokens > 0 && ` · ${Math.round(meta.tokens / (meta.durationMs / 1000))} tok/s`}
             </span>
+          )}
+          {!isUser && message.id !== "welcome" && onFeedback && (
+            <>
+              <button
+                onClick={() => onFeedback(message.id, "up")}
+                title="Good response"
+                style={{
+                  background: "none", border: "none", cursor: "pointer", padding: 2,
+                  display: "flex", alignItems: "center", borderRadius: 3,
+                  opacity: message.feedback === "up" ? 1 : 0.5,
+                  transition: `opacity 0.15s ${EASE}`,
+                }}
+              >
+                <ThumbsUp style={{
+                  width: 10, height: 10,
+                  color: message.feedback === "up" ? "var(--success)" : "var(--text-muted)",
+                  fill: message.feedback === "up" ? "var(--success)" : "none",
+                }} />
+              </button>
+              <button
+                onClick={() => onFeedback(message.id, "down")}
+                title="Poor response"
+                style={{
+                  background: "none", border: "none", cursor: "pointer", padding: 2,
+                  display: "flex", alignItems: "center", borderRadius: 3,
+                  opacity: message.feedback === "down" ? 1 : 0.5,
+                  transition: `opacity 0.15s ${EASE}`,
+                }}
+              >
+                <ThumbsDown style={{
+                  width: 10, height: 10,
+                  color: message.feedback === "down" ? "var(--error)" : "var(--text-muted)",
+                  fill: message.feedback === "down" ? "var(--error)" : "none",
+                }} />
+              </button>
+            </>
           )}
         </div>
       </div>

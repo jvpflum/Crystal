@@ -26,7 +26,7 @@ describe("appStore", () => {
   it("accepts all valid AppView values", () => {
     const views: AppView[] = [
       "home", "conversation", "command-center", "agents", "office",
-      "factory", "marketplace", "models", "sessions", "templates",
+      "factory", "models", "sessions", "templates",
       "channels", "memory", "tools", "activity", "settings",
       "security", "hooks", "doctor", "nodes", "browser", "workspace",
       "messaging", "directory", "devices", "subagents", "webhooks", "voicecall",

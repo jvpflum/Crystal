@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "@/stores/appStore";
 import { openclawClient } from "@/lib/openclaw";
 import { cachedCommand } from "@/lib/cache";
-import { GpuMonitor, NvidiaLogo } from "@/components/widgets/GpuMonitor";
+import { GpuMonitor, NvidiaLogo, HudSectionLabel } from "@/components/widgets/GpuMonitor";
 import { LobsterIcon } from "@/components/LobsterIcon";
 import {
   Bot, Activity, Wrench,
@@ -36,6 +36,7 @@ interface MetaInfo {
   telegramBot: string;
   heartbeatInterval: string;
   llmModel: string;
+  vllmRunning: boolean;
   ollamaReachable: boolean | null;
   ollamaModel: string;
   ollamaRunning: boolean;
@@ -86,7 +87,7 @@ function parseVectorStoreInfo(mem: Record<string, unknown> | null | undefined): 
 
 const META_INITIAL: MetaInfo = {
   openclawVersion: "—", telegramStatus: "unknown", telegramBot: "",
-  heartbeatInterval: "—", llmModel: "—", ollamaReachable: null, ollamaModel: "", ollamaRunning: false,
+  heartbeatInterval: "—", llmModel: "—", vllmRunning: false, ollamaReachable: null, ollamaModel: "", ollamaRunning: false,
 };
 
 /* ═══════════════════════════════════════════════════════════════
@@ -515,7 +516,11 @@ export function HomeView() {
   const [sessionCount, setSessionCount] = useState<number>(
     () => (useDataStore.getState().sessions?.data as unknown[] | undefined)?.length ?? 0
   );
-  const [vectorStore, setVectorStore] = useState<VectorStoreInfo>({ chunks: 0, files: 0, vectorReady: false, ftsReady: false, provider: "none", searchMode: "unknown", dirty: false });
+  const memoryEntry = useDataStore(s => s.memoryStatus);
+  const vectorStore = useMemo(
+    () => parseVectorStoreInfo(memoryEntry?.data as Record<string, unknown> | null),
+    [memoryEntry],
+  );
   const localLifetimeTokens = useTokenUsageStore(s => s.totalTokens);
   const recordTokens = useTokenUsageStore(s => s.recordTokens);
   const [gwTokenTotal, setGwTokenTotal] = useState<number>(0);
@@ -527,9 +532,10 @@ export function HomeView() {
     let cancelled = false;
     (async () => {
       try {
-        const [agents, cron, skills, sessions, memory] = await Promise.all([
-          getAgents(), getCronJobs(), getSkills(), getSessions(), getMemoryStatus(),
+        const [agents, cron, skills, sessions] = await Promise.all([
+          getAgents(), getCronJobs(), getSkills(), getSessions(),
         ]);
+        getMemoryStatus(true);
         if (cancelled) return;
         if (Array.isArray(agents)) setAgentCount(agents.length);
         if (Array.isArray(cron)) {
@@ -555,7 +561,6 @@ export function HomeView() {
           setGwTokenTotal(gwTotal);
           if (gwTotal > localLifetimeTokens) recordTokens(gwTotal - localLifetimeTokens);
         }
-        setVectorStore(parseVectorStoreInfo(memory as Record<string, unknown> | null));
       } catch { /* degrade gracefully */ }
       if (!cancelled) setStatsLoaded(true);
     })();
@@ -614,12 +619,20 @@ export function HomeView() {
         if (!ollamaModel && ollamaReachable) {
           ollamaModel = "no models";
         }
+        // Check vLLM availability via server status
+        let vllmRunning = false;
+        try {
+          const srvStatus = await invoke<{ vllm_running: boolean }>("get_server_status");
+          vllmRunning = srvStatus.vllm_running;
+        } catch { /* non-fatal */ }
+
         const newMeta: MetaInfo = {
           openclawVersion: versionMatch?.[1] ?? "—",
           telegramStatus: telegramMatch?.[1] ?? "unknown",
           telegramBot: telegramMatch?.[2] ?? "",
           heartbeatInterval: heartbeatMatch?.[1] ?? "—",
           llmModel: modelMatch?.[1] ?? openclawClient.getModel() ?? "—",
+          vllmRunning,
           ollamaReachable,
           ollamaModel,
           ollamaRunning,
@@ -846,7 +859,7 @@ export function HomeView() {
         <StatTile icon={Bot} label="Agents" value={loading ? "…" : String(agentCount)} color="#06b6d4"
           onClick={() => setView("agents")} />
         <StatTile icon={Wrench} label="Skills" value={loading ? "…" : String(skillCount)} color="#a855f7"
-          onClick={() => setView("marketplace")} />
+          onClick={() => setView("tools")} />
         <StatTile icon={Zap} label="Heartbeat" value={loading ? "…" : meta.heartbeatInterval} color="#f59e0b" />
       </div>
 
@@ -992,9 +1005,9 @@ export function HomeView() {
                   : meta.ollamaReachable ? "No models installed" : "Offline"}
               </p>
               <p style={{ margin: "2px 0 0", fontSize: 8, color: "var(--text-muted)", letterSpacing: "0.04em" }}>
-                Local · Ollama{meta.ollamaModel && meta.ollamaModel !== "no models" && meta.ollamaReachable
+                Local · {meta.vllmRunning ? "vLLM · Running" : `Ollama${meta.ollamaModel && meta.ollamaModel !== "no models" && meta.ollamaReachable
                   ? (meta.ollamaRunning ? " · Running" : " · Installed")
-                  : ""}
+                  : ""}`}
               </p>
             </div>
             <span style={{
@@ -1069,7 +1082,7 @@ export function HomeView() {
 
       {/* ═══ Row 6: GPU ═══ */}
       <div style={{ marginBottom: 14 }}>
-        <SectionLabel text="GPU" />
+        <HudSectionLabel number="01" text="GPU MONITOR" />
         <GpuMonitor />
       </div>
 

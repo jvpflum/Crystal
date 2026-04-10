@@ -24,7 +24,6 @@ export function useVoice() {
     voiceService.onTranscriptCallback(setTranscript);
 
     const applyPrefsAndCheck = async () => {
-      // Apply saved preferences before first provider check
       const sttPref = localStorage.getItem("crystal_stt_provider");
       const ttsPref = localStorage.getItem("crystal_tts_provider");
       try {
@@ -34,9 +33,15 @@ export function useVoice() {
       await checkServersInternal();
     };
 
+    /**
+     * Single combined check — checkWhisperConnection and checkTTSConnection
+     * share the same underlying refreshProviders() call via dedup in VoiceService.
+     */
     const checkServersInternal = async () => {
-      const whisper = await voiceService.checkWhisperConnection();
-      const tts = await voiceService.checkTTSConnection();
+      const [whisper, tts] = await Promise.all([
+        voiceService.checkWhisperConnection(),
+        voiceService.checkTTSConnection(),
+      ]);
       setIsWhisperConnected(whisper);
       setIsTTSConnected(tts);
       setHasStt(voiceService.hasSpeechRecognition());
@@ -49,7 +54,7 @@ export function useVoice() {
 
     applyPrefsAndCheck();
 
-    // Fast polling for the first 30s while workers are loading models
+    // Fast polling for the first 20s while GPU models are loading
     let fastPollCount = 0;
     fastPollRef.current = window.setInterval(() => {
       fastPollCount++;
@@ -57,10 +62,10 @@ export function useVoice() {
       if (fastPollCount >= 10) {
         if (fastPollRef.current) clearInterval(fastPollRef.current);
       }
-    }, 3000);
+    }, 2000);
 
-    // Slow polling after that
-    pollIntervalRef.current = window.setInterval(checkServersInternal, 15000);
+    // Slow polling after that — 30s is sufficient with cached health checks
+    pollIntervalRef.current = window.setInterval(checkServersInternal, 30000);
 
     return () => {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);

@@ -23,7 +23,6 @@ const HomeView = lazy(() => import("@/components/views/HomeView").then(m => ({ d
 const ConversationView = lazy(() => import("@/components/views/ConversationView").then(m => ({ default: m.ConversationView })));
 const CommandCenterView = lazy(() => import("@/components/views/CommandCenterView").then(m => ({ default: m.CommandCenterView })));
 const AgentsView = lazy(() => import("@/components/views/AgentsView").then(m => ({ default: m.AgentsView })));
-const MarketplaceView = lazy(() => import("@/components/views/MarketplaceView").then(m => ({ default: m.MarketplaceView })));
 const ModelsView = lazy(() => import("@/components/views/ModelsView").then(m => ({ default: m.ModelsView })));
 const SessionsView = lazy(() => import("@/components/views/SessionsView").then(m => ({ default: m.SessionsView })));
 const TemplatesView = lazy(() => import("@/components/views/TemplatesView").then(m => ({ default: m.TemplatesView })));
@@ -206,7 +205,6 @@ function App() {
                   <ViewSlot id="conversation" active={currentView === "conversation"}><ConversationView /></ViewSlot>
                   <ViewSlot id="command-center" active={currentView === "command-center"}><CommandCenterView /></ViewSlot>
                   <ViewSlot id="agents" active={currentView === "agents"}><AgentsView /></ViewSlot>
-                  <ViewSlot id="marketplace" active={currentView === "marketplace"}><MarketplaceView /></ViewSlot>
                   <ViewSlot id="models" active={currentView === "models"}><ModelsView /></ViewSlot>
                   <ViewSlot id="sessions" active={currentView === "sessions"}><SessionsView /></ViewSlot>
                   <ViewSlot id="templates" active={currentView === "templates"}><TemplatesView /></ViewSlot>

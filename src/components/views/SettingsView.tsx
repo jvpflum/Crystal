@@ -1405,7 +1405,9 @@ function ApiKeysSection() {
       const profileKey = `${providerId}:default`;
       const profs = (data.profiles || {}) as Record<string, unknown>;
 
-      if (providerId === "ollama") {
+      if (providerId === "vllm") {
+        profs[profileKey] = { type: "api_key", provider: providerId, key: "vllm", baseUrl: "http://127.0.0.1:8000/v1" };
+      } else if (providerId === "ollama") {
         profs[profileKey] = { type: "api_key", provider: providerId, key: "ollama", baseUrl: "http://127.0.0.1:11434" };
       } else {
         profs[profileKey] = { type: "api_key", provider: providerId, key: apiKey };
@@ -1421,7 +1423,7 @@ function ApiKeysSection() {
 
       const verify = await invoke<string>("read_file", { path });
       const verifyData = JSON.parse(verify);
-      if (verifyData.profiles?.[profileKey]?.key === apiKey || providerId === "ollama") {
+      if (verifyData.profiles?.[profileKey]?.key === apiKey || providerId === "ollama" || providerId === "vllm") {
         setFeedback({ type: "success", msg: `${providerId} key saved successfully` });
         await loadProfiles();
         setEditingProvider(null);

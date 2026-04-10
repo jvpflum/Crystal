@@ -5,7 +5,7 @@ const NUM_KEY_VIEWS: AppView[] = [
   "home",
   "conversation",
   "agents",
-  "marketplace",
+  "tools",
   "models",
   "sessions",
   "memory",

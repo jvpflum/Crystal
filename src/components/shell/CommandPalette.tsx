@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useAppStore, type AppView, type CommandCenterTabId } from "@/stores/appStore";
 import { askCrystalAI, type AiSearchResult } from "@/lib/search-ai";
 import {
-  Home, MessageSquare, LayoutDashboard, Bot, Store, Cpu, Radio, Brain,
+  Home, MessageSquare, LayoutDashboard, Bot, Cpu, Radio, Brain,
   Clock, Anchor, Wrench, Shield, Stethoscope, Activity, Settings,
   Trash2, HeartPulse, ShieldCheck, Thermometer, RotateCcw, Search,
   Network, Globe, FolderOpen, Mail, Users, GitBranch, Factory,
@@ -65,7 +65,6 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
     { id: "memory",       icon: Brain,     label: "Memory",     description: "Knowledge store, vector DB & embeddings",          category: "Navigation", action: () => setView("memory" as AppView) },
     { id: "models",       icon: Cpu,       label: "Models",     description: "LLM model management & status",                    category: "Navigation", action: () => setView("models" as AppView) },
     { id: "channels",     icon: Radio,     label: "Channels",   description: "Telegram channel configuration",                   category: "Navigation", action: () => setView("channels" as AppView) },
-    { id: "skills",       icon: Store,     label: "Skills",     description: "Browse & enable/disable OpenClaw skills",           category: "Navigation", action: () => setView("marketplace" as AppView) },
     { id: "hooks",        icon: Anchor,    label: "Hooks",      description: "Agent lifecycle hooks & triggers",                  category: "Navigation", action: () => setView("hooks" as AppView) },
 
     // System section

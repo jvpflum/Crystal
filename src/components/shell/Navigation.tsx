@@ -16,7 +16,6 @@ import {
   ChevronDown,
   Anchor,
   BarChart3,
-  Store,
 } from "lucide-react";
 import { useAppStore, AppView } from "@/stores/appStore";
 
@@ -39,7 +38,6 @@ const OPENCLAW: NavItem[] = [
   { id: "memory",      icon: Brain,   label: "Memory" },
   { id: "models",      icon: Cpu,     label: "Models" },
   { id: "channels",    icon: Radio,   label: "Channels" },
-  { id: "marketplace", icon: Store,   label: "Skills" },
   { id: "hooks",       icon: Anchor,  label: "Hooks" },
   { id: "tools",       icon: Wrench,  label: "Tools" },
 ];

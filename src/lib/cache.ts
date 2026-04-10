@@ -13,7 +13,7 @@ const DEFAULT_TTL = 120_000;
 // Concurrency limiter: at most MAX_CONCURRENT CLI commands running at once.
 // Each `openclaw` CLI call opens a WS connection to the gateway; flooding it
 // causes handshake timeouts and lane wait stalls.
-const MAX_CONCURRENT = 5;
+const MAX_CONCURRENT = 6;
 let running = 0;
 const waiting: (() => void)[] = [];
 
@@ -39,6 +39,7 @@ const COMMAND_TIMEOUT = 15_000;
 async function throttledInvoke(
   command: string,
   cwd: string | null,
+  timeout = COMMAND_TIMEOUT,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   await acquireSlot();
   try {
@@ -48,7 +49,7 @@ async function throttledInvoke(
         { command, cwd },
       ),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`Command timed out after ${COMMAND_TIMEOUT / 1000}s: ${command.slice(0, 60)}`)), COMMAND_TIMEOUT),
+        setTimeout(() => reject(new Error(`Command timed out after ${timeout / 1000}s: ${command.slice(0, 60)}`)), timeout),
       ),
     ]);
     return result;
@@ -59,7 +60,7 @@ async function throttledInvoke(
 
 export async function cachedCommand(
   command: string,
-  opts?: { cwd?: string | null; ttl?: number },
+  opts?: { cwd?: string | null; ttl?: number; timeout?: number },
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   const ttl = opts?.ttl ?? DEFAULT_TTL;
   const key = opts?.cwd ? `${command}@${opts.cwd}` : command;
@@ -72,7 +73,7 @@ export async function cachedCommand(
   const existing = inflight.get(key);
   if (existing) return existing;
 
-  const promise = throttledInvoke(command, opts?.cwd ?? null)
+  const promise = throttledInvoke(command, opts?.cwd ?? null, opts?.timeout)
     .then(result => {
       cache.set(key, { result, ts: Date.now() });
       inflight.delete(key);

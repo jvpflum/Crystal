@@ -36,6 +36,7 @@ export const TOKEN_MILESTONES: TokenMilestone[] = [
 export type ProviderId =
   | "openai"
   | "anthropic"
+  | "vllm"
   | "ollama"
   | "elevenlabs"
   | "nvidia-stt"
@@ -67,6 +68,7 @@ export interface ProviderMeta {
 export const PROVIDER_META: Record<ProviderId, ProviderMeta> = {
   openai:      { id: "openai",      name: "OpenAI",       color: "#10a37f", costPerMillionInput: 2.50,  costPerMillionOutput: 10.00,  isLocal: false },
   anthropic:   { id: "anthropic",   name: "Anthropic",    color: "#d4a27f", costPerMillionInput: 3.00,  costPerMillionOutput: 15.00,  isLocal: false },
+  vllm:        { id: "vllm",        name: "vLLM",         color: "#6366f1", costPerMillionInput: 0.01,  costPerMillionOutput: 0.07,   isLocal: true },
   ollama:      { id: "ollama",      name: "Ollama",       color: "#a855f7", costPerMillionInput: 0.01,  costPerMillionOutput: 0.07,   isLocal: true },
   elevenlabs:  { id: "elevenlabs",  name: "ElevenLabs",   color: "#ff6b35", costPerMillionInput: 0,     costPerMillionOutput: 960.00, isLocal: false },
   "nvidia-stt":{ id: "nvidia-stt",  name: "NVIDIA STT",   color: "#76b900", costPerMillionInput: 0.002, costPerMillionOutput: 0.005,  isLocal: true },

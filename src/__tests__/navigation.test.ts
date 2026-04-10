@@ -8,7 +8,7 @@ const NAV_ITEMS: { id: AppView; label: string; group: string }[] = [
   { id: "agents", label: "Agents", group: "openclaw" },
   { id: "factory", label: "Factory", group: "openclaw" },
   { id: "office", label: "Office", group: "openclaw" },
-  { id: "marketplace", label: "Skills", group: "openclaw" },
+  { id: "tools", label: "Tools", group: "openclaw" },
   { id: "models", label: "Models", group: "openclaw" },
   { id: "channels", label: "Channels", group: "openclaw" },
   { id: "memory", label: "Memory", group: "openclaw" },
