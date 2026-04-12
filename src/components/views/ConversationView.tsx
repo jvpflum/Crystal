@@ -701,8 +701,8 @@ export function ConversationView() {
 
       const _est = roughTokenPairEstimate(messageToSend, finalContent);
       const _mk = (openclawClient.getModel() || "").toLowerCase();
-      const _pid = _mk.includes("ollama") || _mk.includes("llama") || _mk.includes("qwen") || _mk.includes("mistral") || _mk.includes("gemma") || _mk.includes("phi")
-        ? "ollama" as const
+      const _pid = _mk.includes("vllm") || _mk.includes("llama") || _mk.includes("qwen") || _mk.includes("mistral") || _mk.includes("gemma") || _mk.includes("phi")
+        ? "vllm" as const
         : _mk.includes("claude") || _mk.includes("anthropic") ? "anthropic" as const
         : _mk.includes("deepseek") ? "deepseek" as const
         : _mk.includes("grok") || _mk.includes("xai") ? "xai" as const

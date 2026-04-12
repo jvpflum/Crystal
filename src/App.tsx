@@ -1,6 +1,7 @@
 import "@/stores/themeStore";
 import { useEffect, useState, useCallback, useRef, lazy, Suspense } from "react";
 import { TitleBar } from "@/components/shell/TitleBar";
+import { ResizeHandles } from "@/components/shell/ResizeHandles";
 import { Navigation } from "@/components/shell/Navigation";
 import { CommandPalette } from "@/components/shell/CommandPalette";
 import { LobsterIcon } from "@/components/LobsterIcon";
@@ -193,6 +194,7 @@ function App() {
     <ToastProvider>
       <TokenMilestoneListener />
       <div className="app-root h-screen w-screen overflow-hidden">
+        <ResizeHandles />
         <div className="app-atmosphere" aria-hidden />
         <div className="app-chrome" style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <TitleBar />

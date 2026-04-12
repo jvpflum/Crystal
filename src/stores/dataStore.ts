@@ -324,7 +324,7 @@ async function fetchSkills(): Promise<Record<string, unknown>[]> {
 const getSkillsBase = makeGetter("skills", fetchSkills);
 
 async function fetchSessions(): Promise<Record<string, unknown>[]> {
-  const r = await cachedCommand("openclaw sessions --json", { ttl: 30_000 });
+  const r = await cachedCommand("openclaw sessions --json", { ttl: 30_000, timeout: 45_000 });
   if (r.code === 0 && r.stdout.trim()) {
     try {
       const p = JSON.parse(r.stdout);

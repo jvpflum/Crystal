@@ -48,55 +48,32 @@ function formatContext(tokens: number) {
   return `${tokens}`;
 }
 
-function parseOllamaTable(stdout: string): { cols: string[][] } {
-  const lines = stdout.trim().split("\n");
-  if (lines.length < 2) return { cols: [] };
-  const headerLine = lines[0];
-  const colStarts: number[] = [];
-  const headers = headerLine.match(/\S+/g) || [];
-  for (const h of headers) colStarts.push(headerLine.indexOf(h));
-  const rows = lines.slice(1).filter(l => l.trim()).map(line => {
-    const cells: string[] = [];
-    for (let i = 0; i < colStarts.length; i++) {
-      const start = colStarts[i];
-      const end = i + 1 < colStarts.length ? colStarts[i + 1] : line.length;
-      cells.push(line.substring(start, end).trim());
-    }
-    return cells;
-  });
-  return { cols: rows };
-}
-
-function parseSizeString(sizeRaw: string): { val: number; unit: string; bytes: number } {
-  const match = sizeRaw.trim().match(/^([\d.]+)\s*(GB|MB|KB|B)?$/i);
-  const val = match ? parseFloat(match[1]) : 0;
-  const unit = match ? (match[2] || "B").toUpperCase() : "B";
-  const mult: Record<string, number> = { B: 1, KB: 1024, MB: 1048576, GB: 1073741824 };
-  return { val, unit, bytes: val * (mult[unit] || 1) };
-}
-
-function parseOllamaPs(stdout: string): RunningModel[] {
-  const { cols } = parseOllamaTable(stdout);
-  return cols.map(cells => {
-    const name = cells[0] || "";
-    const { val, unit, bytes } = parseSizeString(cells[2] || "0 B");
-    return { name, size: `${val} ${unit}`, sizeBytes: bytes, processor: cells[3] || "" };
-  });
-}
-
-function parseOllamaList(stdout: string): Model[] {
-  const { cols } = parseOllamaTable(stdout);
-  return cols.map(cells => {
-    const name = cells[0] || "";
-    return {
-      key: `ollama/${name}`,
-      name,
+function parseVllmModels(stdout: string): Model[] {
+  try {
+    const data = JSON.parse(stdout);
+    const models = data?.data ?? (Array.isArray(data) ? data : []);
+    return models.map((m: Record<string, unknown>) => ({
+      key: `vllm/${m.id ?? m.model ?? "unknown"}`,
+      name: String(m.id ?? m.model ?? "unknown"),
       local: true,
       available: true,
       tags: [],
       contextWindow: 0,
-    };
-  });
+    }));
+  } catch { return []; }
+}
+
+function parseVllmRunning(stdout: string): RunningModel[] {
+  try {
+    const data = JSON.parse(stdout);
+    const models = data?.data ?? (Array.isArray(data) ? data : []);
+    return models.map((m: Record<string, unknown>) => ({
+      name: String(m.id ?? m.model ?? "unknown"),
+      size: "—",
+      sizeBytes: 0,
+      processor: "GPU",
+    }));
+  } catch { return []; }
 }
 
 interface AgentDefaults {
@@ -116,7 +93,7 @@ async function loadModelsFromConfig(): Promise<{ models: Model[]; primary: strin
   const models: Model[] = Object.entries(modelMap).map(([key, cfg]) => ({
     key,
     name: cfg.alias || key.split("/").pop() || key,
-    local: key.startsWith("ollama/"),
+    local: key.startsWith("vllm/"),
     available: true,
     tags: key === primary ? ["default"] : [],
     contextWindow: 0,
@@ -127,7 +104,7 @@ async function loadModelsFromConfig(): Promise<{ models: Model[]; primary: strin
 
 function providerInfo(key: string): { provider: string; color: string; icon: "cloud" | "local" } {
   const p = key.split("/")[0].toLowerCase();
-  if (p === "ollama") return { provider: "Ollama (Local)", color: "#4ade80", icon: "local" };
+  if (p === "vllm") return { provider: "vLLM (Local)", color: "#6366f1", icon: "local" };
   if (p === "anthropic") return { provider: "Anthropic", color: "#d4a574", icon: "cloud" };
   if (p === "openai") return { provider: "OpenAI", color: "#10a37f", icon: "cloud" };
   if (p === "google") return { provider: "Google", color: "#4285f4", icon: "cloud" };
@@ -181,19 +158,18 @@ export function ModelsView() {
       // timed out or errored — fall through to config-based approach
     }
 
-    // Fallback: build model list from config + ollama list
+    // Fallback: build model list from config + vLLM API
     try {
-      const [configData, ollamaResult] = await Promise.all([
+      const [configData, vllmResult] = await Promise.all([
         loadModelsFromConfig().catch(() => ({ models: [] as Model[], primary: null, fallbacks: [] as string[] })),
-        cachedCommand("ollama list", { ttl: 15_000 }).catch(() => ({ stdout: "", stderr: "", code: 1 })),
+        cachedCommand("powershell -Command \"(Invoke-RestMethod http://127.0.0.1:8000/v1/models) | ConvertTo-Json -Depth 5\"", { ttl: 15_000, timeout: 5000 }).catch(() => ({ stdout: "", stderr: "", code: 1 })),
       ]);
 
-      const ollamaModels = ollamaResult.code === 0 ? parseOllamaList(ollamaResult.stdout) : [];
+      const vllmModels = vllmResult.code === 0 ? parseVllmModels(vllmResult.stdout) : [];
 
-      // Merge: config models + any ollama models not already in config
       const merged = new Map<string, Model>();
       for (const m of configData.models) merged.set(m.key, m);
-      for (const m of ollamaModels) {
+      for (const m of vllmModels) {
         if (!merged.has(m.key)) merged.set(m.key, m);
         else {
           const existing = merged.get(m.key)!;
@@ -227,9 +203,10 @@ export function ModelsView() {
 
   const loadRunning = useCallback(async () => {
     try {
-      const result = await cachedCommand("ollama ps", { ttl: 8_000 });
-      if (result.code === 0) setRunning(parseOllamaPs(result.stdout));
-    } catch { /* ignore */ }
+      const result = await cachedCommand("powershell -Command \"(Invoke-RestMethod http://127.0.0.1:8000/v1/models) | ConvertTo-Json -Depth 5\"", { ttl: 8_000, timeout: 5000 });
+      if (result.code === 0) setRunning(parseVllmRunning(result.stdout));
+      else setRunning([]);
+    } catch { setRunning([]); }
   }, []);
 
   const scanModels = useCallback(async () => {
@@ -378,15 +355,15 @@ export function ModelsView() {
     setPullOutput(`Pulling ${name}...`);
     try {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `ollama pull ${name}`, cwd: null,
+        command: `openclaw models add vllm/${name}`, cwd: null,
       });
       if (result.code === 0) {
-        setPullOutput(`Successfully pulled ${name}`);
+        setPullOutput(`Added ${name} to model config`);
         setPullInput("");
         await loadModels();
         await loadRunning();
       } else {
-        setPullOutput(result.stderr || "Pull failed");
+        setPullOutput(result.stderr || "Failed to add model");
       }
     } catch (e) {
       setPullOutput(e instanceof Error ? e.message : "Pull failed");
@@ -397,7 +374,7 @@ export function ModelsView() {
   const deleteModel = async (name: string) => {
     setDeleting(name);
     try {
-      await invoke("execute_command", { command: `ollama rm ${name}`, cwd: null });
+      await invoke("execute_command", { command: `openclaw models remove vllm/${name}`, cwd: null });
       setFeedback({ type: "success", msg: `Removed ${name}` });
       await loadModels();
     } catch { /* ignore */ }
@@ -754,7 +731,7 @@ export function ModelsView() {
                       </>
                     )}
                     {showDelete && (
-                      <button onClick={() => setDeleteConfirm(modelBaseName)} title="Delete from Ollama"
+                      <button onClick={() => setDeleteConfirm(modelBaseName)} title="Remove model"
                         style={{ padding: "5px 8px", borderRadius: 6, border: "none", background: "var(--bg-hover)", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center" }}>
                         <Trash2 style={{ width: 12, height: 12 }} />
                       </button>

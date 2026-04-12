@@ -21,7 +21,7 @@ interface PrereqResult {
   loading: boolean;
 }
 
-interface OllamaModel {
+interface LocalModel {
   name: string;
   size: string;
 }
@@ -103,7 +103,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
     { label: "NVIDIA GPU", ok: false, detail: "", loading: true },
   ]);
 
-  const [models, setModels] = useState<OllamaModel[]>([]);
+  const [models, setModels] = useState<LocalModel[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [pullInput, setPullInput] = useState("");
   const [pulling, setPulling] = useState(false);
@@ -115,7 +115,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
   const checkPrereqs = useCallback(async () => {
     const cmds = [
       { cmd: "node --version", idx: 0 },
-      { cmd: "ollama --version", idx: 1 },
+      { cmd: "powershell -Command \"try { (Invoke-RestMethod http://127.0.0.1:8000/v1/models).data[0].id } catch { '' }\"", idx: 1 },
       { cmd: "openclaw --version", idx: 2 },
       { cmd: "nvidia-smi --query-gpu=name --format=csv,noheader", idx: 3 },
     ];
@@ -144,22 +144,24 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
   }, []);
 
   const loadModels = useCallback(async () => {
-    const raw = await runCmd("ollama list");
+    const raw = await runCmd("powershell -Command \"(Invoke-RestMethod http://127.0.0.1:8000/v1/models) | ConvertTo-Json -Depth 5\"");
     if (!raw) {
       setModels([]);
       return;
     }
-    const lines = raw.split("\n").filter((l) => l.trim());
-    const parsed: OllamaModel[] = [];
-    for (let i = 1; i < lines.length; i++) {
-      const parts = lines[i].split(/\s+/);
-      if (parts.length >= 2) {
-        parsed.push({ name: parts[0], size: parts[2] ?? "" });
+    try {
+      const data = JSON.parse(raw);
+      const list = data?.data ?? (Array.isArray(data) ? data : []);
+      const parsed: LocalModel[] = list.map((m: Record<string, unknown>) => ({
+        name: String(m.id ?? m.model ?? "unknown"),
+        size: "—",
+      }));
+      setModels(parsed);
+      if (parsed.length > 0 && !selectedModel) {
+        setSelectedModel(parsed[0].name);
       }
-    }
-    setModels(parsed);
-    if (parsed.length > 0 && !selectedModel) {
-      setSelectedModel(parsed[0].name);
+    } catch {
+      setModels([]);
     }
   }, [selectedModel]);
 
@@ -167,7 +169,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
     if (!pullInput.trim()) return;
     setPulling(true);
     setPullMsg(`Pulling ${pullInput}...`);
-    const out = await runCmd(`ollama pull ${pullInput.trim()}`);
+    const out = await runCmd(`openclaw models add vllm/${pullInput.trim()}`);
     setPulling(false);
     setPullMsg(out || "Done");
     await loadModels();
@@ -405,7 +407,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
                 onClick={async () => {
                   if (selectedModel) {
                     openclawClient.setModel(selectedModel);
-                    runCmd(`openclaw models set ollama/${selectedModel}`).catch(() => {});
+                    runCmd(`openclaw models set vllm/${selectedModel}`).catch(() => {});
                   }
                   setStep(3);
                 }}

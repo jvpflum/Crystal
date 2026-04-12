@@ -170,7 +170,7 @@ Skills define how tools work. This file is for your specifics.
 ## AI Stack
 
 - **Primary Model:** [Cloud model via OpenClaw]
-- **Local Model:** [Ollama model if any]
+- **Local Model:** [vLLM model if any]
 - **Gateway:** OpenClaw on port 18789
 
 ## Formatting Notes

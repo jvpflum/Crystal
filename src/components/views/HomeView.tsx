@@ -37,9 +37,7 @@ interface MetaInfo {
   heartbeatInterval: string;
   llmModel: string;
   vllmRunning: boolean;
-  ollamaReachable: boolean | null;
-  ollamaModel: string;
-  ollamaRunning: boolean;
+  vllmModel: string;
 }
 
 interface SysStats {
@@ -87,7 +85,7 @@ function parseVectorStoreInfo(mem: Record<string, unknown> | null | undefined): 
 
 const META_INITIAL: MetaInfo = {
   openclawVersion: "—", telegramStatus: "unknown", telegramBot: "",
-  heartbeatInterval: "—", llmModel: "—", vllmRunning: false, ollamaReachable: null, ollamaModel: "", ollamaRunning: false,
+  heartbeatInterval: "—", llmModel: "—", vllmRunning: false, vllmModel: "",
 };
 
 /* ═══════════════════════════════════════════════════════════════
@@ -531,37 +529,44 @@ export function HomeView() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const [agents, cron, skills, sessions] = await Promise.all([
-          getAgents(), getCronJobs(), getSkills(), getSessions(),
-        ]);
-        getMemoryStatus(true);
-        if (cancelled) return;
-        if (Array.isArray(agents)) setAgentCount(agents.length);
-        if (Array.isArray(cron)) {
-          const enabled = cron.filter((c: Record<string, unknown>) => c.enabled !== false);
-          setCronCount(enabled.length);
-          setCronTotal(cron.length);
-          let failed = 0;
-          for (const job of cron) {
-            const state = (job as Record<string, unknown>).state as Record<string, unknown> | undefined;
-            if (state?.lastRunStatus && state.lastRunStatus !== "ok") failed++;
-          }
-          setCronFailed(failed);
+      const [agentsR, cronR, skillsR, sessionsR] = await Promise.allSettled([
+        getAgents(), getCronJobs(), getSkills(), getSessions(),
+      ]);
+      getMemoryStatus(true);
+      if (cancelled) return;
+
+      if (agentsR.status === "fulfilled" && Array.isArray(agentsR.value))
+        setAgentCount(agentsR.value.length);
+
+      if (cronR.status === "fulfilled" && Array.isArray(cronR.value)) {
+        const cron = cronR.value;
+        const enabled = cron.filter((c: Record<string, unknown>) => c.enabled !== false);
+        setCronCount(enabled.length);
+        setCronTotal(cron.length);
+        let failed = 0;
+        for (const job of cron) {
+          const state = (job as Record<string, unknown>).state as Record<string, unknown> | undefined;
+          if (state?.lastRunStatus && state.lastRunStatus !== "ok") failed++;
         }
-        if (Array.isArray(skills)) setSkillCount(skills.length);
-        if (Array.isArray(sessions)) {
-          setSessionCount(sessions.length);
-          let gwTotal = 0;
-          for (const s of sessions) {
-            const rec = s as Record<string, unknown>;
-            const t = Number(rec.totalTokens ?? 0);
-            if (Number.isFinite(t) && t > 0) gwTotal += t;
-          }
-          setGwTokenTotal(gwTotal);
-          if (gwTotal > localLifetimeTokens) recordTokens(gwTotal - localLifetimeTokens);
+        setCronFailed(failed);
+      }
+
+      if (skillsR.status === "fulfilled" && Array.isArray(skillsR.value))
+        setSkillCount(skillsR.value.length);
+
+      if (sessionsR.status === "fulfilled" && Array.isArray(sessionsR.value)) {
+        const sessions = sessionsR.value;
+        setSessionCount(sessions.length);
+        let gwTotal = 0;
+        for (const s of sessions) {
+          const rec = s as Record<string, unknown>;
+          const t = Number(rec.totalTokens ?? 0);
+          if (Number.isFinite(t) && t > 0) gwTotal += t;
         }
-      } catch { /* degrade gracefully */ }
+        setGwTokenTotal(gwTotal);
+        if (gwTotal > localLifetimeTokens) recordTokens(gwTotal - localLifetimeTokens);
+      }
+
       if (!cancelled) setStatsLoaded(true);
     })();
     return () => { cancelled = true; };
@@ -578,52 +583,25 @@ export function HomeView() {
         const settled = await Promise.allSettled([
           cachedCommand("openclaw --version", { ttl: 300_000 }),
           cachedCommand("openclaw health", { ttl: 60_000 }),
-          cachedCommand("ollama ps", { ttl: 30_000 }),
-          cachedCommand("ollama list", { ttl: 60_000 }),
         ]);
         if (cancelled) return;
         const versionR = settled[0].status === "fulfilled" ? settled[0].value : { stdout: "", stderr: "", code: -1 };
         const healthR = settled[1].status === "fulfilled" ? settled[1].value : { stdout: "", stderr: "", code: -1 };
-        const ollamaR = settled[2].status === "fulfilled" ? settled[2].value : { stdout: "", stderr: "", code: -1 };
-        const ollamaListR = settled[3].status === "fulfilled" ? settled[3].value : { stdout: "", stderr: "", code: -1 };
         const healthText = healthR.stdout || "";
         const versionMatch = (versionR.stdout || "").match(/OpenClaw\s+([\d.]+\S*)/i);
         const telegramMatch = healthText.match(/Telegram:\s*(\w+)(?:\s*\((@\w+)\))?/i);
         const heartbeatMatch = healthText.match(/Heartbeat interval:\s*(\S+)/i);
         const modelMatch = healthText.match(/agent model:\s*(\S+)/i);
-        let ollamaReachable: boolean | null = null;
-        let ollamaModel = "";
-        let ollamaRunning = false;
-        if (settled[2].status === "fulfilled") {
-          ollamaReachable = ollamaR.code === 0;
-          const psLines = (ollamaR.stdout || "").split("\n").filter(l => l.trim());
-          if (psLines.length > 1) {
-            const modelLine = psLines[1].trim();
-            const modelName = modelLine.split(/\s+/)[0];
-            if (modelName && !modelName.toLowerCase().startsWith("name")) {
-              ollamaModel = modelName;
-              ollamaRunning = true;
-            }
-          }
-        }
-        if (!ollamaModel && ollamaListR.code === 0) {
-          ollamaReachable = true;
-          const listLines = (ollamaListR.stdout || "").split("\n").filter(l => l.trim());
-          if (listLines.length > 1) {
-            const firstModel = listLines[1].trim().split(/\s+/)[0];
-            if (firstModel && !firstModel.toLowerCase().startsWith("name")) {
-              ollamaModel = firstModel;
-            }
-          }
-        }
-        if (!ollamaModel && ollamaReachable) {
-          ollamaModel = "no models";
-        }
-        // Check vLLM availability via server status
+
         let vllmRunning = false;
+        let vllmModel = "";
         try {
           const srvStatus = await invoke<{ vllm_running: boolean }>("get_server_status");
           vllmRunning = srvStatus.vllm_running;
+          if (vllmRunning) {
+            const modelsR = await cachedCommand("powershell -Command \"(Invoke-RestMethod http://127.0.0.1:8000/v1/models).data[0].id\"", { ttl: 60_000, timeout: 5000 });
+            if (modelsR.code === 0 && modelsR.stdout.trim()) vllmModel = modelsR.stdout.trim();
+          }
         } catch { /* non-fatal */ }
 
         const newMeta: MetaInfo = {
@@ -633,9 +611,7 @@ export function HomeView() {
           heartbeatInterval: heartbeatMatch?.[1] ?? "—",
           llmModel: modelMatch?.[1] ?? openclawClient.getModel() ?? "—",
           vllmRunning,
-          ollamaReachable,
-          ollamaModel,
-          ollamaRunning,
+          vllmModel,
         };
         _metaCache = { data: newMeta, ts: Date.now() };
         setMeta(newMeta);
@@ -993,28 +969,26 @@ export function HomeView() {
               background: "color-mix(in srgb, #76b900 10%, transparent)",
               display: "flex", alignItems: "center", justifyContent: "center",
             }}>
-              <NvidiaLogo size={15} color={meta.ollamaReachable ? "#76b900" : "var(--text-muted)"} />
+              <NvidiaLogo size={15} color={meta.vllmRunning ? "#76b900" : "var(--text-muted)"} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{
                 margin: 0, fontSize: 11, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                color: meta.ollamaReachable ? "var(--text)" : "var(--text-muted)",
+                color: meta.vllmRunning ? "var(--text)" : "var(--text-muted)",
               }}>
-                {meta.ollamaModel && meta.ollamaModel !== "no models"
-                  ? meta.ollamaModel
-                  : meta.ollamaReachable ? "No models installed" : "Offline"}
+                {meta.vllmRunning
+                  ? (meta.vllmModel || "vLLM Active")
+                  : "Offline"}
               </p>
               <p style={{ margin: "2px 0 0", fontSize: 8, color: "var(--text-muted)", letterSpacing: "0.04em" }}>
-                Local · {meta.vllmRunning ? "vLLM · Running" : `Ollama${meta.ollamaModel && meta.ollamaModel !== "no models" && meta.ollamaReachable
-                  ? (meta.ollamaRunning ? " · Running" : " · Installed")
-                  : ""}`}
+                Local · vLLM{meta.vllmRunning ? " · Running" : ""}
               </p>
             </div>
             <span style={{
               width: 5, height: 5, borderRadius: "50%", flexShrink: 0,
-              background: meta.ollamaReachable === true ? "var(--success)" : meta.ollamaReachable === false ? "var(--error)" : "var(--text-muted)",
-              boxShadow: meta.ollamaReachable === true ? "0 0 6px var(--success)" : meta.ollamaReachable === false ? "0 0 6px var(--error)" : "none",
-              animation: meta.ollamaReachable === false ? "pulse-dot 2s ease-in-out infinite" : "none",
+              background: meta.vllmRunning ? "var(--success)" : "var(--error)",
+              boxShadow: meta.vllmRunning ? "0 0 6px var(--success)" : "0 0 6px var(--error)",
+              animation: meta.vllmRunning ? "none" : "pulse-dot 2s ease-in-out infinite",
             }} />
           </div>
         </div>

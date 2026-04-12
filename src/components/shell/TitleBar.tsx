@@ -9,29 +9,30 @@ export function TitleBar() {
 
   return (
     <div
-      data-tauri-drag-region
       className="glass-titlebar"
       style={{
-        height: 38, padding: "0 12px 0 16px", display: "flex",
-        alignItems: "center", justifyContent: "space-between", flexShrink: 0,
-        WebkitAppRegion: "drag" as unknown as string,
-        appRegion: "drag",
-      } as React.CSSProperties}
+        height: 38, display: "flex",
+        alignItems: "center", flexShrink: 0,
+      }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+      <div
+        data-tauri-drag-region
+        style={{
+          flex: 1, height: "100%", display: "flex", alignItems: "center",
+          gap: 7, paddingLeft: 16, minWidth: 0,
+        }}
+      >
         <div style={{
           width: 22, height: 22, borderRadius: 6, overflow: "hidden",
           display: "flex", alignItems: "center", justifyContent: "center",
+          pointerEvents: "none",
         }}>
           <LobsterIcon size={22} />
         </div>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", letterSpacing: "-0.01em" }}>Crystal</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", letterSpacing: "-0.01em", pointerEvents: "none" }}>Crystal</span>
       </div>
 
-      <div style={{
-        display: "flex", alignItems: "center", gap: 1,
-        WebkitAppRegion: "no-drag", appRegion: "no-drag",
-      } as React.CSSProperties}>
+      <div style={{ display: "flex", alignItems: "center", gap: 1, paddingRight: 12 }}>
         <TitleButton onClick={() => setMinimized(true)} title="Float Mode">
           <Minimize2 style={{ width: 13, height: 13 }} />
         </TitleButton>

@@ -28,6 +28,52 @@
 
 ## What's New
 
+### April 2026 — Local LLM: 237 tok/s on RTX 5090
+
+Crystal now ships with a fully optimized local LLM inference stack via [vLLM](https://github.com/vllm-project/vllm) and Docker — no cloud API needed.
+
+**Model:** `nvidia/Qwen3-30B-A3B-NVFP4` (30B total / 3B active MoE, NVFP4 quantized)
+
+| Benchmark | Result |
+|-----------|--------|
+| Peak generation | **237 tok/s** |
+| Sustained generation | **196–235 tok/s** |
+| Tool call (auto) | **150 ms** |
+| Tool call (required) | **728 ms** |
+| Multi-tool (2 tools) | **638 ms** |
+| VRAM usage | ~17 GB of 32 GB |
+| KV cache | 259K tokens (FP8) |
+
+**Speed optimizations applied:**
+
+- **Marlin GEMM backend** (`VLLM_NVFP4_GEMM_BACKEND=marlin`) — Marlin kernels for NVFP4 weight decompression, significantly faster than default FlashInfer CUTLASS
+- **Marlin MoE** (`VLLM_USE_FLASHINFER_MOE_FP4=0`) — Routes MoE FP4 operations through Marlin instead of FlashInfer
+- **FP8 KV cache** (`--kv-cache-dtype fp8`) — Halves KV cache memory, doubles context capacity
+- **CUDA graphs** (`--performance-mode interactivity`) — Fine-grained CUDA graphs optimized for low single-request latency
+- **Prefix caching** (`--enable-prefix-caching`) — Caches repeated system prompts for instant reuse
+- **Chunked prefill** (`--max-num-batched-tokens 4096`) — Caps prefill batch size for lower latency
+- **Memory profiler** (`VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`) — Accurate CUDA graph memory accounting for maximum KV cache allocation
+- **Expandable segments** (`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`) — Reduces CUDA memory fragmentation
+- **Hermes tool parser** — Reliable tool call extraction for function calling workflows
+- **Barubary attuned chat template** — Community-fixed Jinja template with 21 bug fixes over the official Qwen3 template (tool call bleed, parallel tools, streaming compat, thinking/tools conflict)
+
+**Quick start:**
+
+```bash
+# Set your HuggingFace token (for gated model access)
+echo "HF_TOKEN=hf_your_token_here" > .env
+
+# Start vLLM (first run downloads ~15 GB model)
+docker compose up -d
+
+# Check status
+.\scripts\vllm-docker.ps1 status
+```
+
+The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects it on startup.
+
+---
+
 ### April 2026 — v0.8.0 Chat Settings, GPU HUD, Voice Gateway, Forge Pipeline
 
 #### World-Class Chat Experience
@@ -354,7 +400,7 @@ Centralized management hub with four tabs:
 Comprehensive token usage analytics and cost estimation:
 
 - **Per-Provider Breakdown** — Tracks tokens across Anthropic, OpenAI, Ollama, Eleven Labs, NVIDIA STT/TTS, and other connected APIs.
-- **Estimated Costs** — Cloud APIs priced at published per-million-token rates; local GPU priced at electricity costs (~350W RTX 5090, $0.32/kWh California rate, ~60 tok/s).
+- **Estimated Costs** — Cloud APIs priced at published per-million-token rates; local GPU priced at electricity costs (~350W RTX 5090, $0.32/kWh California rate, ~237 tok/s with vLLM Marlin backend).
 - **Local Compute Savings** — Side-by-side comparison showing hypothetical cloud cost vs. actual electricity cost with savings multiplier badge.
 - **Token Split Table** — Input/Output breakdown per provider with $/M Tok column and GPU badges for local providers.
 - **Pricing Methodology** — Transparent footer explaining how all costs are estimated.
@@ -634,13 +680,14 @@ Crystal is engineered to feel instant:
 | Requirement | Details |
 |-------------|---------|
 | **OS** | Windows 10/11 (macOS/Linux planned) |
-| **GPU** | NVIDIA RTX with 16 GB+ VRAM recommended (for local LLM + voice) |
+| **GPU** | NVIDIA RTX 5090 (32 GB) recommended; any RTX with 16 GB+ VRAM for local LLM + voice |
 | **Node.js** | v18+ |
 | **Package Manager** | pnpm |
 | **Rust** | Latest stable toolchain |
-| **Ollama** | Installed with at least one model pulled |
+| **Docker** | Docker Desktop with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) *(for vLLM local inference)* |
+| **Ollama** | Installed with at least one model pulled *(fallback if no Docker/GPU)* |
 | **Python** | 3.10+ *(optional, for Whisper/Kokoro voice servers)* |
-| **Docker** | Docker Desktop *(optional, required for OpenShell sandbox mode)* |
+| **Docker** | Docker Desktop with NVIDIA Container Toolkit *(required for vLLM and OpenShell sandbox)* |
 
 > **Cloud-only mode:** If you don't have an NVIDIA GPU, you can still use Crystal with cloud LLM providers and browser-based voice. Set your API keys in Settings and you're good to go.
 
@@ -737,7 +784,10 @@ Crystal/
 │   │   └── main.rs                   # Entry point
 │   ├── icons/                        # App icons (all sizes + .ico + .icns)
 │   └── tauri.conf.json               # Tauri configuration
+├── docker-compose.yml                # vLLM Docker config (Qwen3 NVFP4 + Marlin)
+├── chat_template.jinja               # Barubary attuned chat template (21 fixes)
 ├── scripts/                          # Voice & inference server scripts
+│   ├── vllm-docker.ps1               # vLLM Docker management (start/stop/status/logs)
 │   ├── voice_gateway.py              # Unified voice gateway (FastAPI, port 6500)
 │   ├── nvidia_stt_worker.py          # NVIDIA STT worker (FastAPI, port 8090)
 │   ├── start_voice_servers.py        # Voice server launcher
