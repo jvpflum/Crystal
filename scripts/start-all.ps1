@@ -1,9 +1,9 @@
 # Crystal Full Stack Startup Script
-# Starts voice services: Whisper STT, TTS
-# LLM is handled by Ollama (auto-detected by Crystal)
+# Starts vLLM (Docker), voice services: Whisper STT, TTS
 
 param(
-    [switch]$SkipVoice
+    [switch]$SkipVoice,
+    [switch]$SkipLLM
 )
 
 Write-Host "========================================" -ForegroundColor Magenta
@@ -12,6 +12,7 @@ Write-Host "========================================" -ForegroundColor Magenta
 Write-Host ""
 
 $scriptDir = $PSScriptRoot
+$composeFile = Join-Path (Split-Path $scriptDir -Parent) "docker-compose.yml"
 
 function Start-Server {
     param(
@@ -25,16 +26,28 @@ function Start-Server {
     Start-Sleep -Seconds 2
 }
 
-# Check Ollama
-$ollamaRunning = $false
-try {
-    $null = Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/tags" -TimeoutSec 3
-    $ollamaRunning = $true
-    Write-Host "Ollama: Already running" -ForegroundColor Green
-} catch {
-    Write-Host "Ollama: Not running - starting..." -ForegroundColor Yellow
-    Start-Process "ollama" -ArgumentList "serve" -WindowStyle Hidden
-    Start-Sleep -Seconds 3
+function Test-Port([int]$Port) {
+    try {
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        $tcp.Connect("127.0.0.1", $Port)
+        $tcp.Close()
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+# Start vLLM via Docker
+if (-not $SkipLLM) {
+    if (Test-Port 8000) {
+        Write-Host "vLLM: Already running on port 8000" -ForegroundColor Green
+    } elseif (Test-Path $composeFile) {
+        Write-Host "vLLM: Starting Docker container (Qwen3-30B-A3B-NVFP4)..." -ForegroundColor Cyan
+        docker compose -f $composeFile up -d vllm
+        Write-Host "vLLM: Container started, model loading in background" -ForegroundColor Green
+    } else {
+        Write-Host "vLLM: docker-compose.yml not found at $composeFile" -ForegroundColor Red
+    }
 }
 
 # Start Voice servers
@@ -56,7 +69,9 @@ Write-Host "  All servers starting!" -ForegroundColor Magenta
 Write-Host "========================================" -ForegroundColor Magenta
 Write-Host ""
 Write-Host "Services:" -ForegroundColor White
-Write-Host "  - Ollama:  http://127.0.0.1:11434 (LLM inference)" -ForegroundColor Blue
+if (-not $SkipLLM) {
+    Write-Host "  - vLLM:    http://127.0.0.1:8000  (Qwen3-30B-A3B-NVFP4, Docker)" -ForegroundColor Blue
+}
 if (-not $SkipVoice) {
     Write-Host "  - Whisper: http://127.0.0.1:8080 (Speech-to-Text)" -ForegroundColor Cyan
     Write-Host "  - TTS:     http://127.0.0.1:8081 (Text-to-Speech)" -ForegroundColor Green

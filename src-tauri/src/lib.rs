@@ -28,7 +28,6 @@ struct CommandResult {
 struct ServerStatus {
     whisper_running: bool,
     tts_running: bool,
-    ollama_running: bool,
     vllm_running: bool,
     openclaw_running: bool,
     nvidia_stt_running: bool,
@@ -710,7 +709,6 @@ fn get_server_status() -> ServerStatus {
     ServerStatus {
         whisper_running: check_port_in_use(8080),
         tts_running: check_port_in_use(8081),
-        ollama_running: check_port_in_use(11434),
         vllm_running: check_port_in_use(8000),
         openclaw_running: check_port_in_use(18789),
         nvidia_stt_running: check_port_in_use(8090),
@@ -787,6 +785,116 @@ fn stop_nvidia_speech_servers(state: tauri::State<AppState>) -> Result<String, S
     } else {
         Ok(format!("Stopped: {}", stopped.join(", ")))
     }
+}
+
+fn find_compose_file() -> Option<String> {
+    // Try cwd first (dev mode)
+    if let Ok(cwd) = std::env::current_dir() {
+        let compose = cwd.join("docker-compose.yml");
+        if compose.exists() {
+            return Some(compose.to_string_lossy().to_string());
+        }
+    }
+    // Walk up from the executable
+    if let Ok(exe) = std::env::current_exe() {
+        let mut current = exe;
+        for _ in 0..5 {
+            if let Some(parent) = current.parent() {
+                current = parent.to_path_buf();
+                let compose = current.join("docker-compose.yml");
+                if compose.exists() {
+                    return Some(compose.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command]
+async fn start_vllm_docker() -> Result<String, String> {
+    if check_port_in_use(8000) {
+        return Ok("vLLM already running on port 8000".to_string());
+    }
+
+    let compose_file = find_compose_file()
+        .ok_or("docker-compose.yml not found")?;
+
+    tokio::task::spawn_blocking(move || {
+        #[cfg(target_os = "windows")]
+        let output = {
+            let mut cmd = Command::new("cmd");
+            cmd.args(["/C", "docker", "compose", "-f", &compose_file, "up", "-d", "vllm"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .stdin(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW);
+            cmd.output()
+        };
+        #[cfg(not(target_os = "windows"))]
+        let output = Command::new("docker")
+            .args(["compose", "-f", &compose_file, "up", "-d", "vllm"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null())
+            .output();
+
+        match output {
+            Ok(out) => {
+                let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                if out.status.success() {
+                    Ok(format!("vLLM container started. Model loading may take a few minutes.\n{}{}", stdout, stderr))
+                } else {
+                    Err(format!("docker compose failed (exit {}): {}{}", out.status.code().unwrap_or(-1), stdout, stderr))
+                }
+            }
+            Err(e) => Err(format!("Failed to run docker compose: {}", e)),
+        }
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+async fn stop_vllm_docker() -> Result<String, String> {
+    let compose_file = find_compose_file()
+        .ok_or("docker-compose.yml not found")?;
+
+    tokio::task::spawn_blocking(move || {
+        #[cfg(target_os = "windows")]
+        let output = {
+            let mut cmd = Command::new("cmd");
+            cmd.args(["/C", "docker", "compose", "-f", &compose_file, "down"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .stdin(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW);
+            cmd.output()
+        };
+        #[cfg(not(target_os = "windows"))]
+        let output = Command::new("docker")
+            .args(["compose", "-f", &compose_file, "down"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null())
+            .output();
+
+        match output {
+            Ok(out) => {
+                let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                if out.status.success() {
+                    Ok(format!("vLLM container stopped.\n{}{}", stdout, stderr))
+                } else {
+                    Err(format!("docker compose down failed: {}{}", stdout, stderr))
+                }
+            }
+            Err(e) => Err(format!("Failed to run docker compose: {}", e)),
+        }
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
 }
 
 fn find_openclaw_bin() -> String {
@@ -1186,24 +1294,40 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
     
     start_gateway_resilient(app);
 
-    // LLM backend detection: prefer vLLM (:8000), fall back to Ollama (:11434)
+    // LLM backend: auto-start vLLM Docker container if not already running
     if check_port_in_use(8000) {
         println!("vLLM detected on port 8000 (OpenAI-compatible API)");
-    } else if check_port_in_use(11434) {
-        println!("Ollama detected on port 11434 (fallback LLM)");
-    } else {
-        // Try starting Ollama as fallback if no LLM server is running
-        println!("No LLM server detected. Attempting to start Ollama as fallback...");
-        match spawn_hidden("ollama", &["serve"]) {
-            Ok(child) => {
-                if let Some(state) = app.try_state::<AppState>() {
-                    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
-                    servers.llm = Some(child);
-                }
-                println!("Ollama started on port 11434 (fallback LLM)");
+    } else if let Some(compose_file) = find_compose_file() {
+        println!("vLLM not on port 8000 — starting Docker container...");
+        #[cfg(target_os = "windows")]
+        let output = {
+            let mut cmd = Command::new("cmd");
+            cmd.args(["/C", "docker", "compose", "-f", &compose_file, "up", "-d", "vllm"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .stdin(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW);
+            cmd.output()
+        };
+        #[cfg(not(target_os = "windows"))]
+        let output = Command::new("docker")
+            .args(["compose", "-f", &compose_file, "up", "-d", "vllm"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null())
+            .output();
+        match output {
+            Ok(out) if out.status.success() => {
+                println!("vLLM Docker container started (model may still be loading)");
             }
-            Err(e) => eprintln!("No LLM server available. Start vLLM or Ollama manually. ({})", e),
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                eprintln!("vLLM Docker start failed: {}", stderr);
+            }
+            Err(e) => eprintln!("Could not launch vLLM Docker container: {}", e),
         }
+    } else {
+        eprintln!("vLLM not detected on port 8000 and no docker-compose.yml found.");
     }
 
     if let Some(ref scripts_path) = scripts_dir {
@@ -1451,6 +1575,8 @@ pub fn run() {
             start_nvidia_speech_servers,
             stop_nvidia_speech_servers,
             start_openclaw_daemon,
+            start_vllm_docker,
+            stop_vllm_docker,
             http_proxy,
             get_openclaw_token
         ])
