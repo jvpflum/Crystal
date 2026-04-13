@@ -4,7 +4,6 @@
  * Owns:
  *   - Microphone input (AudioInputManager)
  *   - Speech-to-text (SpeechToTextProvider — NVIDIA Nemotron primary)
- *   - Intent routing (IntentRouter)
  *   - OpenClaw delegation (OpenClawAdapter)
  *   - Text-to-speech (TextToSpeechProvider — NVIDIA Magpie primary)
  *   - Audio playback (AudioOutputManager)
@@ -30,7 +29,6 @@ import type {
 import { DEFAULT_VOICE_CONFIG } from "./types";
 import { VoiceStateMachine } from "./state-machine";
 import { SessionStateStore } from "./session-store";
-import { IntentRouter } from "./intent-router";
 import { OpenClawAdapter } from "./openclaw-adapter";
 import { AudioInputManager } from "./audio-input";
 import { AudioOutputManager } from "./audio-output";
@@ -41,8 +39,6 @@ import type { TextToSpeechProvider } from "./providers/tts-provider";
 
 import { NvidiaNemotronSpeechProvider } from "./providers/nvidia-nemotron-stt";
 import { NvidiaMagpieTtsProvider } from "./providers/nvidia-magpie-tts";
-import { WhisperSttProvider } from "./providers/whisper-stt";
-import { KokoroTtsProvider } from "./providers/kokoro-tts";
 import { BrowserSttProvider } from "./providers/browser-stt";
 import { BrowserTtsProvider } from "./providers/browser-tts";
 
@@ -52,7 +48,6 @@ export class ConversationAgent {
   // Core components
   readonly stateMachine: VoiceStateMachine;
   readonly session: SessionStateStore;
-  readonly intentRouter: IntentRouter;
   readonly openClaw: OpenClawAdapter;
   readonly audioInput: AudioInputManager;
   readonly audioOutput: AudioOutputManager;
@@ -81,7 +76,6 @@ export class ConversationAgent {
 
     this.stateMachine = new VoiceStateMachine();
     this.session = new SessionStateStore();
-    this.intentRouter = new IntentRouter();
     this.openClaw = new OpenClawAdapter();
     this.audioInput = new AudioInputManager(this._config.sampleRate);
     this.audioOutput = new AudioOutputManager();
@@ -97,13 +91,11 @@ export class ConversationAgent {
 
     this._sttProviders = [
       new NvidiaNemotronSpeechProvider(),
-      new WhisperSttProvider(),
       new BrowserSttProvider(),
     ];
 
     this._ttsProviders = [
       new NvidiaMagpieTtsProvider(),
-      new KokoroTtsProvider(),
       new BrowserTtsProvider(),
     ];
   }

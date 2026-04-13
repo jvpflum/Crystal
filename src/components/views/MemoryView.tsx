@@ -59,7 +59,7 @@ const FILE_CATEGORIES: Record<string, string> = {
   "WEEKLY-REVIEW.md": "ops", "WORKING-QUEUE.md": "ops",
   "CODING-AGENT-POLICY.md": "ops",
   "DEVICES.md": "infra", "HUE-BRIDGES.md": "infra", "HUE-SCENES.md": "infra",
-  "MIGRATION-TO-CHROMEDOME.md": "infra", "JARROD-HQ-SYSTEM.md": "infra",
+  "MIGRATION-TO-CHROMEDOME.md": "infra", "HOME-SYSTEM.md": "infra",
   "TESLA-API-SETUP.md": "infra", "NOTION-SETUP.md": "infra",
   "GMAIL-RULES.md": "infra",
   "SECURITY.md": "security", "DISASTER-RECOVERY.md": "security",

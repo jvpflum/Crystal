@@ -12,7 +12,7 @@
 <p align="center">
   <a href="#-features"><img src="https://img.shields.io/badge/30-Views-6366f1?style=flat-square" /></a>
   <a href="#-ai-chat"><img src="https://img.shields.io/badge/70+-Slash%20Commands-3b82f6?style=flat-square" /></a>
-  <a href="#-voice-engine"><img src="https://img.shields.io/badge/6-Voice%20Providers-10b981?style=flat-square" /></a>
+  <a href="#-voice-engine"><img src="https://img.shields.io/badge/NVIDIA%2BBrowser-Voice-10b981?style=flat-square" /></a>
   <a href="#-multi-provider-llm"><img src="https://img.shields.io/badge/8-LLM%20Providers-f59e0b?style=flat-square" /></a>
   <a href="#-tech-stack"><img src="https://img.shields.io/badge/Tauri-2.0-24c8db?style=flat-square&logo=tauri" /></a>
   <a href="#-voice-engine"><img src="https://img.shields.io/badge/NVIDIA-RTX%20Voice-76b900?style=flat-square&logo=nvidia" /></a>
@@ -28,7 +28,7 @@
 
 ## What's New
 
-### April 2026 — Local LLM: 237 tok/s on RTX 5090
+### April 2026 — Local LLM via vLLM + Docker
 
 Crystal now ships with a fully optimized local LLM inference stack via [vLLM](https://github.com/vllm-project/vllm) and Docker — no cloud API needed.
 
@@ -36,9 +36,9 @@ Crystal now ships with a fully optimized local LLM inference stack via [vLLM](ht
 
 | Benchmark | Result |
 |-----------|--------|
-| Peak generation | **237 tok/s** |
-| Sustained generation | **196–235 tok/s** |
-| Tool call (auto) | **150 ms** |
+| Peak generation | **237 tok/s** (RTX 5090 reference) |
+| Sustained generation | **196–235 tok/s** (varies by GPU) |
+| Tool call (auto) | **~150 ms** |
 | Tool call (required) | **728 ms** |
 | Multi-tool (2 tools) | **638 ms** |
 | VRAM usage | ~17 GB of 32 GB |
@@ -98,7 +98,7 @@ The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects
 - **HUD Section Label** — "01//GPU MONITOR" numbering style with cyan monospace font replaces generic section label in HomeView.
 
 #### Unified Voice Gateway
-- **Voice Gateway Service** — New `voice_gateway.py` FastAPI service on port 6500 that unifies STT and TTS backends. Normalizes HTTP (`/stt/transcribe`, `/tts/speak`) and WebSocket (`/stt/realtime`, `/tts/realtime`) endpoints. Auto-discovers and routes to the best available backend (NVIDIA, Whisper, Kokoro).
+- **Voice Gateway Service** — New `voice_gateway.py` FastAPI service on port 6500 that unifies STT and TTS backends. Normalizes HTTP (`/stt/transcribe`, `/tts/speak`) and WebSocket (`/stt/realtime`, `/tts/realtime`) endpoints. Routes to NVIDIA Parakeet STT (`nvidia_stt_worker.py`, port 8090) and NVIDIA Magpie TTS (`nvidia_tts_worker.py`, port 8091), with the browser Web Speech API as an emergency fallback when local services are unavailable.
 - **vLLM Integration** — vLLM added as the preferred local LLM backend (port 8000). Rust backend prioritizes vLLM over Ollama for auto-start. New provider in Settings, token usage store, and secrets management.
 - **STT Worker FastAPI Rewrite** — `nvidia_stt_worker.py` rewritten from aiohttp to FastAPI with `/transcribe`, `/ws`, `/health`, and auto-generated `/docs` endpoints.
 - **Voice Pipeline Optimization** — 20ms audio chunking, Web Audio API playback (replacing HTMLAudioElement), parallel provider initialization, warm-mic pause/resume, health check caching (5s TTL), and pre-connection audio buffering.
@@ -136,7 +136,7 @@ The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects
 - **OpenShell Sandbox in Tools** — Full sandbox management (install, enable/disable, Docker detection, sandbox listing, logs) duplicated from Settings into the Tools → Sandbox tab for easier access.
 
 #### Token Usage & Cost Estimation
-- **Estimated Costs** — Usage page now calculates estimated dollar costs for all providers: cloud APIs (OpenAI, Anthropic, DeepSeek, xAI, Google) use published per-million-token rates; local GPU (Ollama, NVIDIA STT/TTS) uses electricity-based estimates (~350W, $0.32/kWh, ~60 tok/s for RTX 5090).
+- **Estimated Costs** — Usage page now calculates estimated dollar costs for all providers: cloud APIs (OpenAI, Anthropic, DeepSeek, xAI, Google) use published per-million-token rates; local GPU (Ollama, NVIDIA STT/TTS) uses electricity-based estimates (configurable wattage and $/kWh).
 - **Local Compute Savings** — Prominent comparison card showing "If sent to cloud API" vs. "Actual electricity cost" with a savings multiplier badge.
 - **$/M Tok Column** — Input/Output token breakdown table now includes a blended cost-per-million-tokens column and GPU badges for local providers.
 - **Pricing Methodology** — Detailed footer explaining how cloud and local costs are estimated.
@@ -189,7 +189,7 @@ The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects
 
 ### April 2026 — v0.5.0 Full OpenClaw Alignment
 
-- **Live Agent Office** — OfficeView rebuilt with real-time agent monitoring. Shows all OpenClaw agents (main/JC, research, home, finance) with live sessions, running tasks, token counts, and dispatch functionality — no more fake preset agents.
+- **Live Agent Office** — OfficeView rebuilt with real-time agent monitoring. Shows all OpenClaw agents with live sessions, running tasks, token counts, and dispatch functionality — no more fake preset agents.
 - **Skill Launcher Factory** — FactoryView rebuilt with a searchable Skills tab showing all 18+ workspace skills (bill-sweep, bounty-hunter, car-broker, etc.) with eligibility status, missing dependency details, and one-click launch. Projects tab preserved for autonomous code builds with any agent ID.
 - **Skill-Based Workflows** — 12 real workflows mapped to OpenClaw skills: Bill Sweep, Bounty Scout, Car Deal Finder, Home Service Quote, Market Research, VC Evaluation, Code Review, and more — across Finance, Home, Development, System, Research, and Productivity categories.
 - **AI-Powered Command Palette** — Ctrl+K now detects questions and answers them with GPT-4o-mini. Shows inline AI responses with navigation suggestions and a "Deep Dive in Chat" button for deeper exploration.
@@ -228,7 +228,7 @@ Crystal wraps [OpenClaw](https://github.com/nichochar/open-claw) — an open-sou
 | Server management | Start services manually | Auto-starts Ollama, gateway, and voice servers |
 | Model management | `ollama pull/rm` | Visual model browser with VRAM charts |
 | Skills & plugins | `npx openclaw skills list` | Toggle switches, ClawHub, one-click Power Up |
-| Voice | Separate setup | 6 built-in voice providers with NVIDIA RTX acceleration |
+| Voice | Separate setup | NVIDIA Parakeet STT and Magpie TTS via Voice Gateway (browser fallback) |
 | System monitoring | None | Live GPU, CPU, RAM, disk dashboards |
 | Coding agents | Separate tools | Built-in Factory with skill launcher + any agent |
 | Agent identity | Edit files manually | Visual workspace editor with presets |
@@ -241,7 +241,7 @@ Crystal wraps [OpenClaw](https://github.com/nichochar/open-claw) — an open-sou
 - **Local-First, Cloud-Optional.** Run everything on your own GPU with Ollama, or connect to OpenAI, Anthropic, Google, Groq, OpenRouter, or Mistral when you need it. Your data stays on your machine unless you choose otherwise.
 - **Zero Configuration.** Crystal auto-starts Ollama, the OpenClaw gateway, and all voice servers on launch. The onboarding wizard handles the rest.
 - **Actually Useful.** Crystal isn't a chatbot wrapper. It creates files, runs shell commands, manages your system, automates workflows, generates images, controls a browser, monitors hardware, and manages distributed agent nodes — through natural language or voice.
-- **NVIDIA-Accelerated Voice.** GPU-powered speech recognition (Nemotron/Parakeet) and synthesis (Magpie) with automatic fallback to Whisper, Kokoro, or browser APIs.
+- **NVIDIA-Accelerated Voice.** GPU-powered speech recognition (Parakeet STT) and synthesis (Magpie TTS) through the Voice Gateway, with the browser Web Speech API as an emergency fallback when local NVIDIA services are unavailable.
 
 ---
 
@@ -295,23 +295,21 @@ Futuristic bird's-eye view of your entire system with Apple-level polish and mic
 
 ### Voice Engine
 
-Crystal ships with a multi-provider voice architecture that automatically selects the best available engine.
+Crystal ships with an NVIDIA-first voice stack. The desktop app talks to the **Voice Gateway** (`voice_gateway.py`, port **6500**), which proxies HTTP and WebSocket traffic to **NVIDIA Parakeet STT** (`nvidia_stt_worker.py`, port **8090**) and **NVIDIA Magpie TTS** (`nvidia_tts_worker.py`, port **8091**). If those services are unreachable, **Browser** (Web Speech API) is used as an emergency fallback.
 
-**Speech-to-Text (3 providers):**
-
-| Provider | Engine | Details |
-|----------|--------|---------|
-| **NVIDIA Nemotron** | Parakeet ASR | GPU-accelerated, port 8090, lowest latency |
-| **Whisper** | OpenAI Whisper | Local, configurable model (tiny → large-v3) |
-| **Browser** | Web Speech API | Zero-setup fallback |
-
-**Text-to-Speech (3 providers):**
+**Speech-to-Text (2 providers):**
 
 | Provider | Engine | Details |
 |----------|--------|---------|
-| **NVIDIA Magpie** | Magpie TTS | GPU-accelerated, port 8091, natural voice |
-| **Kokoro** | Kokoro TTS | Local, port 8081 |
-| **Browser** | Web Speech API | Zero-setup fallback |
+| **NVIDIA Parakeet** | Parakeet ASR | GPU-accelerated via `nvidia_stt_worker.py`, port 8090 (via gateway 6500), lowest latency |
+| **Browser** | Web Speech API | Zero-setup emergency fallback |
+
+**Text-to-Speech (2 providers):**
+
+| Provider | Engine | Details |
+|----------|--------|---------|
+| **NVIDIA Magpie** | Magpie TTS | GPU-accelerated via `nvidia_tts_worker.py`, port 8091 (via gateway 6500), natural voice |
+| **Browser** | Web Speech API | Zero-setup emergency fallback |
 
 **Voice Orb** — Animated button with state-aware gradients and ring animations across 9 states: idle, listening, processing, thinking, transcribing, awaiting confirmation, executing, speaking, and error.
 
@@ -400,7 +398,7 @@ Centralized management hub with four tabs:
 Comprehensive token usage analytics and cost estimation:
 
 - **Per-Provider Breakdown** — Tracks tokens across Anthropic, OpenAI, Ollama, Eleven Labs, NVIDIA STT/TTS, and other connected APIs.
-- **Estimated Costs** — Cloud APIs priced at published per-million-token rates; local GPU priced at electricity costs (~350W RTX 5090, $0.32/kWh California rate, ~237 tok/s with vLLM Marlin backend).
+- **Estimated Costs** — Cloud APIs priced at published per-million-token rates; local GPU priced at electricity costs (configurable wattage, $/kWh rate, and throughput).
 - **Local Compute Savings** — Side-by-side comparison showing hypothetical cloud cost vs. actual electricity cost with savings multiplier badge.
 - **Token Split Table** — Input/Output breakdown per provider with $/M Tok column and GPU badges for local providers.
 - **Pricing Methodology** — Transparent footer explaining how all costs are estimated.
@@ -665,8 +663,9 @@ Crystal is engineered to feel instant:
 | AI Agent | [OpenClaw](https://github.com/nichochar/open-claw) |
 | LLM (Local) | [vLLM](https://github.com/vllm-project/vllm) (preferred), [Ollama](https://ollama.com/) (fallback) |
 | LLM (Cloud) | OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral |
-| Voice STT | NVIDIA Nemotron, Whisper, Web Speech API |
-| Voice TTS | NVIDIA Magpie, Kokoro, Web Speech API |
+| Voice Gateway | FastAPI (`voice_gateway.py`, port 6500) |
+| Voice STT | NVIDIA Parakeet (`nvidia_stt_worker.py`, port 8090 via gateway 6500), Web Speech API (fallback) |
+| Voice TTS | NVIDIA Magpie (`nvidia_tts_worker.py`, port 8091 via gateway 6500), Web Speech API (fallback) |
 | Image Gen | OpenAI DALL·E (via OpenClaw skill) |
 | Sandbox | [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) *(optional)* |
 | Icons | Lucide React |
@@ -680,13 +679,13 @@ Crystal is engineered to feel instant:
 | Requirement | Details |
 |-------------|---------|
 | **OS** | Windows 10/11 (macOS/Linux planned) |
-| **GPU** | NVIDIA RTX 5090 (32 GB) recommended; any RTX with 16 GB+ VRAM for local LLM + voice |
+| **GPU** | Any NVIDIA RTX with 16 GB+ VRAM for local LLM + voice (24 GB+ recommended) |
 | **Node.js** | v18+ |
 | **Package Manager** | pnpm |
 | **Rust** | Latest stable toolchain |
 | **Docker** | Docker Desktop with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) *(for vLLM local inference)* |
 | **Ollama** | Installed with at least one model pulled *(fallback if no Docker/GPU)* |
-| **Python** | 3.10+ *(optional, for Whisper/Kokoro voice servers)* |
+| **Python** | 3.10+ *(optional, for Voice Gateway and NVIDIA STT/TTS workers)* |
 | **Docker** | Docker Desktop with NVIDIA Container Toolkit *(required for vLLM and OpenShell sandbox)* |
 
 > **Cloud-only mode:** If you don't have an NVIDIA GPU, you can still use Crystal with cloud LLM providers and browser-based voice. Set your API keys in Settings and you're good to go.
@@ -709,7 +708,7 @@ ollama pull qwen2.5:32b
 ### 2. Clone and install
 
 ```bash
-git clone https://github.com/jvpflum/Crystal.git
+git clone https://github.com/your-org/Crystal.git
 cd Crystal
 pnpm install
 ```
@@ -728,7 +727,7 @@ Crystal auto-starts Ollama, the OpenClaw gateway, and voice servers on launch. T
 pip install -r scripts/requirements.txt
 ```
 
-Crystal auto-launches Whisper STT and Kokoro TTS servers on startup when Python is available. NVIDIA Nemotron/Magpie servers start automatically if an RTX GPU is detected.
+Crystal auto-launches the Voice Gateway plus NVIDIA Parakeet STT and Magpie TTS workers on startup when Python and GPU prerequisites are satisfied. If those processes fail to start or are unreachable, the app uses the browser Web Speech API as an emergency fallback.
 
 ### 5. Cloud LLM setup *(optional)*
 
@@ -759,7 +758,7 @@ Crystal/
 │   │   ├── workflows.ts              # 12 skill-based workflow definitions
 │   │   ├── voice.ts                  # Voice service orchestration
 │   │   ├── voice/                    # Voice provider architecture
-│   │   │   ├── providers/            # NVIDIA Nemotron, Whisper, Kokoro, Magpie, Browser
+│   │   │   ├── providers/            # NVIDIA Parakeet STT, Magpie TTS, Browser
 │   │   │   ├── bridge/               # Speech bridge
 │   │   │   ├── state-machine.ts      # 9-state voice FSM
 │   │   │   ├── intent-router.ts      # Voice intent classification
@@ -789,10 +788,9 @@ Crystal/
 ├── scripts/                          # Voice & inference server scripts
 │   ├── vllm-docker.ps1               # vLLM Docker management (start/stop/status/logs)
 │   ├── voice_gateway.py              # Unified voice gateway (FastAPI, port 6500)
-│   ├── nvidia_stt_worker.py          # NVIDIA STT worker (FastAPI, port 8090)
-│   ├── start_voice_servers.py        # Voice server launcher
-│   ├── whisper_server.py             # Whisper STT server
-│   ├── tts_server.py                 # Kokoro TTS server
+│   ├── nvidia_stt_worker.py          # NVIDIA Parakeet STT worker (FastAPI, port 8090)
+│   ├── nvidia_tts_worker.py          # NVIDIA Magpie TTS worker (FastAPI, port 8091)
+│   ├── start_voice_servers.py        # Voice server launcher (gateway + NVIDIA workers)
 │   ├── requirements.txt              # Python dependencies
 │   ├── setup.ps1                     # Full setup script
 │   └── start-all.ps1                 # Manual service launcher
@@ -808,7 +806,7 @@ Crystal/
 |---|---|
 | Views | 30 |
 | Slash commands | 70+ |
-| Voice providers | 6 (3 STT + 3 TTS) |
+| Voice providers | 4 (2 STT + 2 TTS: NVIDIA + browser fallback each) |
 | LLM providers | 8 (incl. vLLM) |
 | Themes | 6 |
 | Tools | 6 |

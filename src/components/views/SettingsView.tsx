@@ -39,10 +39,8 @@ const dot = (color: string): CSSProperties => ({
 
 const VOICE_PROVIDER_META: Record<string, { label: string; port?: string }> = {
   "nvidia-nemotron": { label: "NVIDIA Nemotron/Parakeet", port: "8090" },
-  "whisper":         { label: "Whisper STT", port: "8080" },
   "browser-stt":     { label: "Browser Speech API" },
   "nvidia-magpie":   { label: "NVIDIA Magpie TTS", port: "8091" },
-  "kokoro":          { label: "Kokoro TTS", port: "8081" },
   "browser-tts":     { label: "Browser TTS" },
 };
 
@@ -119,7 +117,6 @@ export function SettingsView() {
   const [configSaved, setConfigSaved] = useState(false);
   const [configPath] = useState("~/.openclaw/openclaw.json");
 
-  const [whisperModel, setWhisperModel] = useState("base.en");
 
   const [daemonInstalled, setDaemonInstalled] = useState(false);
   const [daemonBusy, setDaemonBusy] = useState(false);
@@ -782,14 +779,6 @@ export function SettingsView() {
               preferredId={preferredTts}
               onSelect={setTtsProvider}
             />
-            {preferredStt === "whisper" && (
-              <div style={rowStyle}>
-                <span style={LABEL}>Whisper Model</span>
-                <select value={whisperModel} onChange={(e) => setWhisperModel(e.target.value)} style={{ ...inputStyle, appearance: "none", paddingRight: 24, backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.4)' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center" }}>
-                  {["tiny.en", "base.en", "small.en", "medium.en", "large-v3"].map((m) => <option key={m} value={m} style={{ background: "var(--bg-elevated)", color: "var(--text)" }}>{m}</option>)}
-                </select>
-              </div>
-            )}
             <div style={{ padding: "8px 14px 10px", display: "flex", gap: 8, borderTop: "1px solid var(--border)" }}>
               <button onClick={handleRefreshVoice} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}><IconRefresh spin={checkingVoice} /> Test Connections</button>
             </div>
@@ -1407,8 +1396,6 @@ function ApiKeysSection() {
 
       if (providerId === "vllm") {
         profs[profileKey] = { type: "api_key", provider: providerId, key: "vllm", baseUrl: "http://127.0.0.1:8000/v1" };
-      } else if (providerId === "ollama") {
-        profs[profileKey] = { type: "api_key", provider: providerId, key: "ollama", baseUrl: "http://127.0.0.1:11434" };
       } else {
         profs[profileKey] = { type: "api_key", provider: providerId, key: apiKey };
       }
@@ -1423,7 +1410,7 @@ function ApiKeysSection() {
 
       const verify = await invoke<string>("read_file", { path });
       const verifyData = JSON.parse(verify);
-      if (verifyData.profiles?.[profileKey]?.key === apiKey || providerId === "ollama" || providerId === "vllm") {
+      if (verifyData.profiles?.[profileKey]?.key === apiKey || providerId === "vllm") {
         setFeedback({ type: "success", msg: `${providerId} key saved successfully` });
         await loadProfiles();
         setEditingProvider(null);

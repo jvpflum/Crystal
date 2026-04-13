@@ -57,7 +57,7 @@ const PROVIDER_PRESETS = [
 ] as const;
 
 function maskKey(key: string): string {
-  if (!key || key === "ollama" || key === "vllm" || key === "vllm-local") return key || "—";
+  if (!key || key === "vllm" || key === "vllm-local") return key || "—";
   if (key.length <= 12) return "••••••••";
   return `${key.slice(0, 6)}••••••••${key.slice(-4)}`;
 }

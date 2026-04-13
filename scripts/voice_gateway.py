@@ -1,18 +1,15 @@
 """
 Crystal Voice Gateway — Unified voice API that sits between OpenClaw/UI and
-the underlying speech services (NVIDIA Parakeet STT, Magpie TTS, Whisper, Kokoro).
+the NVIDIA speech services (Parakeet STT, Magpie TTS).
 
 Architecture:
   OpenClaw / UI  ──HTTP/WS──▶  Voice Gateway (:6500)  ──HTTP/WS──▶  NVIDIA STT (:8090)
                                                         ──HTTP────▶  NVIDIA TTS (:8091)
-                                                        ──HTTP────▶  Whisper    (:8080)
-                                                        ──HTTP────▶  Kokoro     (:8081)
 
 The gateway:
   - Exposes a single clean API surface for all voice operations
   - Hides backend-specific protocols and ports
   - Provides a normalized event model with provider/latency metadata
-  - Handles resilience: graceful degradation when backends are down
   - Reports capabilities and readiness
 
 Endpoints:
@@ -56,8 +53,6 @@ class BackendConfig:
 
     NVIDIA_STT_URL = os.environ.get("NVIDIA_STT_URL", "http://127.0.0.1:8090")
     NVIDIA_TTS_URL = os.environ.get("NVIDIA_TTS_URL", "http://127.0.0.1:8091")
-    WHISPER_URL = os.environ.get("WHISPER_STT_URL", "http://127.0.0.1:8080")
-    KOKORO_URL = os.environ.get("KOKORO_TTS_URL", "http://127.0.0.1:8081")
 
     NVIDIA_STT_WS = os.environ.get(
         "NVIDIA_STT_WS_URL",
@@ -68,12 +63,10 @@ class BackendConfig:
 
 class SttProvider(str, Enum):
     nvidia_parakeet = "nvidia-parakeet"
-    whisper = "whisper"
     none = "none"
 
 class TtsProvider(str, Enum):
     nvidia_magpie = "nvidia-magpie"
-    kokoro = "kokoro"
     none = "none"
 
 class SttEvent(BaseModel):
@@ -178,8 +171,6 @@ class BackendRegistry:
         results = await asyncio.gather(
             self.check_backend("nvidia-stt", BackendConfig.NVIDIA_STT_URL),
             self.check_backend("nvidia-tts", BackendConfig.NVIDIA_TTS_URL),
-            self.check_backend("whisper", BackendConfig.WHISPER_URL),
-            self.check_backend("kokoro", BackendConfig.KOKORO_URL),
             return_exceptions=True,
         )
 
@@ -192,40 +183,17 @@ class BackendRegistry:
         return self._statuses
 
     def resolve_stt(self) -> tuple[str, str]:
-        """Return (provider_name, base_url) for the best available STT backend."""
-        for name, url in [
-            ("nvidia-stt", BackendConfig.NVIDIA_STT_URL),
-            ("whisper", BackendConfig.WHISPER_URL),
-        ]:
-            s = self._statuses.get(name)
-            if s and s.available and s.ready:
-                return name, url
-        # Return first available even if not ready
-        for name, url in [
-            ("nvidia-stt", BackendConfig.NVIDIA_STT_URL),
-            ("whisper", BackendConfig.WHISPER_URL),
-        ]:
-            s = self._statuses.get(name)
-            if s and s.available:
-                return name, url
+        """Return (provider_name, base_url) for the NVIDIA STT backend."""
+        s = self._statuses.get("nvidia-stt")
+        if s and s.available:
+            return "nvidia-stt", BackendConfig.NVIDIA_STT_URL
         return "none", ""
 
     def resolve_tts(self) -> tuple[str, str]:
-        """Return (provider_name, base_url) for the best available TTS backend."""
-        for name, url in [
-            ("nvidia-tts", BackendConfig.NVIDIA_TTS_URL),
-            ("kokoro", BackendConfig.KOKORO_URL),
-        ]:
-            s = self._statuses.get(name)
-            if s and s.available and s.ready:
-                return name, url
-        for name, url in [
-            ("nvidia-tts", BackendConfig.NVIDIA_TTS_URL),
-            ("kokoro", BackendConfig.KOKORO_URL),
-        ]:
-            s = self._statuses.get(name)
-            if s and s.available:
-                return name, url
+        """Return (provider_name, base_url) for the NVIDIA TTS backend."""
+        s = self._statuses.get("nvidia-tts")
+        if s and s.available:
+            return "nvidia-tts", BackendConfig.NVIDIA_TTS_URL
         return "none", ""
 
 
@@ -276,7 +244,7 @@ async def ready():
     stt_name, _ = registry.resolve_stt()
     tts_name, _ = registry.resolve_tts()
     return GatewayReadiness(
-        ready=stt_name != "none",
+        ready=stt_name != "none" and tts_name != "none",
         stt_available=stt_name != "none",
         tts_available=tts_name != "none",
         preferred_stt=stt_name,
@@ -289,29 +257,27 @@ async def capabilities():
     statuses = await registry.refresh()
 
     stt_providers = []
-    for name in ["nvidia-stt", "whisper"]:
-        s = statuses.get(name)
-        stt_providers.append({
-            "id": name,
-            "name": "NVIDIA Parakeet" if "nvidia" in name else "Whisper",
-            "available": bool(s and s.available),
-            "ready": bool(s and s.ready),
-            "model": s.model if s else None,
-            "streaming": name == "nvidia-stt",
-        })
+    s = statuses.get("nvidia-stt")
+    stt_providers.append({
+        "id": "nvidia-stt",
+        "name": "NVIDIA Parakeet",
+        "available": bool(s and s.available),
+        "ready": bool(s and s.ready),
+        "model": s.model if s else None,
+        "streaming": True,
+    })
 
     tts_providers = []
     voices: list[dict] = []
-    for name in ["nvidia-tts", "kokoro"]:
-        s = statuses.get(name)
-        tts_providers.append({
-            "id": name,
-            "name": "NVIDIA Magpie" if "nvidia" in name else "Kokoro",
-            "available": bool(s and s.available),
-            "ready": bool(s and s.ready),
-            "model": s.model if s else None,
-            "streaming": name == "nvidia-tts",
-        })
+    s = statuses.get("nvidia-tts")
+    tts_providers.append({
+        "id": "nvidia-tts",
+        "name": "NVIDIA Magpie",
+        "available": bool(s and s.available),
+        "ready": bool(s and s.ready),
+        "model": s.model if s else None,
+        "streaming": True,
+    })
 
     # Fetch voices from the active TTS backend
     tts_name, tts_url = registry.resolve_tts()
@@ -338,7 +304,7 @@ async def capabilities():
 async def stt_transcribe(file: UploadFile = File(...)):
     """
     Batch STT: upload an audio file, receive a normalized transcript event.
-    Routes to the best available STT backend (NVIDIA Parakeet → Whisper).
+    Routes to NVIDIA Parakeet STT backend.
     """
     await registry.refresh()
     stt_name, stt_url = registry.resolve_stt()
@@ -354,8 +320,7 @@ async def stt_transcribe(file: UploadFile = File(...)):
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # NVIDIA STT and Whisper both accept multipart file upload
-            endpoint = "/transcribe" if "nvidia" in stt_name else "/inference"
+            endpoint = "/transcribe"
             files = {"file": (file.filename or "audio.wav", audio_data, file.content_type or "audio/wav")}
             resp = await client.post(f"{stt_url}{endpoint}", files=files)
 
@@ -378,6 +343,8 @@ async def stt_transcribe(file: UploadFile = File(...)):
 
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"STT backend error: {e}")
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=502, detail=f"STT backend returned invalid JSON: {e}")
 
 
 @app.websocket("/stt/realtime")
@@ -428,15 +395,19 @@ async def stt_realtime(ws: WebSocket):
                             await backend_ws.send(message["text"])
                 except WebSocketDisconnect:
                     pass
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning(f"STT client→backend relay error: {e}")
 
             async def backend_to_client():
                 """Forward NVIDIA STT responses to client as normalized SttEvents."""
                 try:
                     async for raw in backend_ws:
                         if isinstance(raw, str):
-                            data = json.loads(raw)
+                            try:
+                                data = json.loads(raw)
+                            except json.JSONDecodeError as e:
+                                log.warning(f"STT backend sent invalid JSON: {e}")
+                                continue
                             msg_type = data.get("type", "")
 
                             if msg_type in ("partial", "final"):
@@ -464,8 +435,15 @@ async def stt_realtime(ws: WebSocket):
                                     error_code="BACKEND_ERROR",
                                 )
                                 await ws.send_json(event.model_dump())
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning(f"STT backend→client relay error: {e}")
+                    try:
+                        await ws.send_json(SttEvent(
+                            provider="nvidia-stt", text="", is_final=True,
+                            error=str(e), error_code="RELAY_ERROR",
+                        ).model_dump())
+                    except Exception:
+                        pass
 
             await asyncio.gather(client_to_backend(), backend_to_client())
 
@@ -489,7 +467,7 @@ async def stt_realtime(ws: WebSocket):
 async def tts_speak(request: TtsRequest):
     """
     Batch TTS: send text, receive WAV audio.
-    Routes to the best available TTS backend (NVIDIA Magpie → Kokoro).
+    Routes to NVIDIA Magpie TTS backend.
     """
     await registry.refresh()
     tts_name, tts_url = registry.resolve_tts()
@@ -502,19 +480,14 @@ async def tts_speak(request: TtsRequest):
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            if "nvidia" in tts_name:
-                payload = {
-                    "text": request.text,
-                    "voice": request.voice,
-                    "language": request.language,
-                    "speed": request.speed,
-                    "sample_rate": request.sample_rate,
-                }
-                resp = await client.post(f"{tts_url}/synthesize", json=payload)
-            else:
-                # Kokoro uses /tts endpoint
-                payload = {"text": request.text, "voice": request.voice}
-                resp = await client.post(f"{tts_url}/tts", json=payload)
+            payload = {
+                "text": request.text,
+                "voice": request.voice,
+                "language": request.language,
+                "speed": request.speed,
+                "sample_rate": request.sample_rate,
+            }
+            resp = await client.post(f"{tts_url}/synthesize", json=payload)
 
             if resp.status_code != 200:
                 raise HTTPException(status_code=resp.status_code, detail=resp.text)

@@ -227,6 +227,109 @@ class OpenClawClient {
     this._currentModel = localStorage.getItem("crystal_openclaw_model") || null;
   }
 
+  private normalizeThinkingLevel(thinking?: string): string | undefined {
+    // gpt-5.4-mini rejects "minimal"; map to closest supported level.
+    if (thinking === "minimal") return "low";
+    return thinking;
+  }
+
+  /* ── Direct Chat (bypasses CLI for speed) ── */
+
+  private _openaiKeyCache: string | null = null;
+
+  private async getDirectChatConfig(): Promise<{ baseUrl: string; apiKey: string; model: string } | null> {
+    const model = this._currentModel || "";
+    const lower = model.toLowerCase();
+    if (lower.includes("vllm") || lower.includes("qwen") || lower.includes("nvfp4")) {
+      return { baseUrl: "http://127.0.0.1:8000/v1", apiKey: "vllm-local", model: model.replace(/^vllm\//, "") };
+    }
+    if (lower.includes("gpt") || lower.includes("openai")) {
+      if (!this._openaiKeyCache) {
+        try {
+          const { resolveOpenAiApiKeyForCrystal } = await import("@/lib/openclawSecrets");
+          this._openaiKeyCache = await resolveOpenAiApiKeyForCrystal();
+        } catch { /* key resolution failed */ }
+      }
+      if (this._openaiKeyCache) {
+        return { baseUrl: "https://api.openai.com/v1", apiKey: this._openaiKeyCache, model: model.replace(/^openai\//, "") };
+      }
+    }
+    return null;
+  }
+
+  private stripThinkTags(text: string): string {
+    return text.replace(/<think>[\s\S]*?<\/think>\s*/g, "").replace(/<think>[\s\S]*/g, "").trim();
+  }
+
+  async *directStreamingChat(text: string): AsyncGenerator<string> {
+    const config = await this.getDirectChatConfig();
+    if (!config) return;
+
+    const messages = [
+      { role: "system", content: "You are Crystal, a helpful AI desktop assistant. Be concise and helpful." },
+      ...this._sessionMessages.slice(-10).map(m => ({ role: m.role, content: m.text })),
+      { role: "user", content: text },
+    ];
+
+    const streamId = await invoke<string>("start_direct_chat", {
+      messages,
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model: config.model,
+      maxTokens: 4096,
+    });
+
+    const startTime = Date.now();
+    const TIMEOUT = 120_000;
+    const POLL_INTERVAL = 100;
+    let rawOutput = "";
+    let yieldedLen = 0;
+
+    try {
+      while (true) {
+        await new Promise(r => setTimeout(r, POLL_INTERVAL));
+        const poll = await invoke<{ new_output: string; new_stderr: string; done: boolean; exit_code: number | null }>(
+          "poll_streaming_command", { id: streamId }
+        );
+        if (poll.new_output) {
+          rawOutput += poll.new_output;
+          const cleaned = this.stripThinkTags(rawOutput);
+          const newPart = cleaned.slice(yieldedLen);
+          if (newPart) {
+            yield newPart;
+            yieldedLen = cleaned.length;
+          }
+        }
+        if (poll.done) {
+          const finalCleaned = this.stripThinkTags(rawOutput);
+          const remaining = finalCleaned.slice(yieldedLen);
+          if (remaining) yield remaining;
+          if (!finalCleaned.trim() && poll.new_stderr?.trim()) {
+            yield poll.new_stderr.trim();
+            rawOutput += poll.new_stderr;
+          }
+          break;
+        }
+        if (Date.now() - startTime > TIMEOUT) {
+          await invoke("kill_streaming_command", { id: streamId }).catch(() => {});
+          yield "\n\n*[Timed out]*";
+          break;
+        }
+      }
+    } finally {
+      await invoke("cleanup_streaming_command", { id: streamId }).catch(() => {});
+    }
+
+    const fullOutput = this.stripThinkTags(rawOutput);
+    const elapsed = (Date.now() - startTime) / 1000;
+    const wordCount = fullOutput.trim().split(/\s+/).length;
+    if (elapsed > 0) this.emitTps(Math.round(wordCount / elapsed * 4));
+
+    this._sessionMessages.push({ role: "user", text, ts: Date.now() });
+    this._sessionMessages.push({ role: "assistant", text: fullOutput.trim().slice(0, 500), ts: Date.now() });
+    if (this._sessionMessages.length > 40) this._sessionMessages = this._sessionMessages.slice(-30);
+  }
+
   /* ── TPS tracking ── */
 
   onTps(cb: (tps: number) => void) { this._tpsCallbacks.push(cb); return () => { this._tpsCallbacks = this._tpsCallbacks.filter(c => c !== cb); }; }
@@ -366,8 +469,9 @@ class OpenClawClient {
     const startTime = Date.now();
 
     let cmd = `${OPENCLAW_CMD} agent --agent main`;
+    const normalizedThinking = this.normalizeThinkingLevel(thinking);
     if (sessionId) cmd += ` --session-id ${sessionId}`;
-    if (thinking) cmd += ` --thinking ${thinking}`;
+    if (normalizedThinking) cmd += ` --thinking ${normalizedThinking}`;
     cmd += ` --message "${escaped}"`;
 
     const cmdPromise = invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
@@ -387,11 +491,16 @@ class OpenClawClient {
       throw e;
     }
 
-    let output = result.stdout || "";
+    let output = (result.stdout || "")
+      .split("\n")
+      .filter(l => !l.startsWith("[plugins]") && !l.includes("could not be reached at http://127.0.0.1:11434"))
+      .join("\n")
+      .trim();
     const stderr = result.stderr || "";
-    if (!output.trim() && stderr.trim()) {
+    if (!output && stderr.trim()) {
       const errorLines = stderr.split("\n").filter(l =>
         !l.includes("[plugins]") && !l.includes("Require stack") && !l.includes("npm warn")
+        && !l.includes("could not be reached at http://127.0.0.1:11434")
       ).join("\n").trim();
       output = errorLines || "No response from OpenClaw";
     }
@@ -414,6 +523,9 @@ class OpenClawClient {
   /**
    * Streaming chat via background process. Yields incremental output chunks
    * and emits tool_call / tool_result events as the agent works.
+   *
+   * Tries the direct HTTP path first (sub-second latency) and falls back
+   * to the OpenClaw CLI if no direct config is available.
    */
   async *streamingChat(
     text: string,
@@ -421,13 +533,24 @@ class OpenClawClient {
     thinking?: string,
     onToolEvent?: (event: ToolCallEvent) => void,
   ): AsyncGenerator<string> {
+    const directConfig = await this.getDirectChatConfig();
+    if (directConfig) {
+      let gotOutput = false;
+      for await (const chunk of this.directStreamingChat(text)) {
+        gotOutput = true;
+        yield chunk;
+      }
+      if (gotOutput) return;
+    }
+
     this.logActivity({ type: "chat", payload: { text } });
     this._seenToolKeys.clear();
 
     const escaped = text.replace(/"/g, '\\"').replace(/\n/g, ' ');
-    let cmd = `$env:NODE_NO_READLINE=1; $env:PYTHONUNBUFFERED=1; ${OPENCLAW_CMD} agent --agent main`;
+    let cmd = `${OPENCLAW_CMD} agent --agent main`;
+    const normalizedThinking = this.normalizeThinkingLevel(thinking);
     if (sessionId) cmd += ` --session-id ${sessionId}`;
-    if (thinking) cmd += ` --thinking ${thinking}`;
+    if (normalizedThinking) cmd += ` --thinking ${normalizedThinking}`;
     cmd += ` --message "${escaped}"`;
 
     const streamId = await invoke<string>("start_streaming_command", { command: cmd, cwd: null });
@@ -446,14 +569,20 @@ class OpenClawClient {
         );
 
         if (poll.new_output) {
-          fullOutput += poll.new_output;
-          yield poll.new_output;
+          const cleaned = poll.new_output
+            .split("\n")
+            .filter(line => !line.startsWith("[plugins]") && !line.includes("could not be reached at http://127.0.0.1:11434"))
+            .join("\n");
+          fullOutput += cleaned;
+          if (cleaned.trim()) yield cleaned;
+        }
+        if (poll.new_stderr) {
+          fullStderr += poll.new_stderr;
         }
 
         if (onToolEvent) {
           const combined = (poll.new_output || "") + (poll.new_stderr || "");
           if (combined) {
-            fullStderr += (poll.new_stderr || "");
             const events = this.parseToolEvents(combined);
             for (const ev of events) {
               onToolEvent(ev);
@@ -463,19 +592,22 @@ class OpenClawClient {
         }
 
         if (poll.done) {
-          if (poll.new_stderr) {
-            const errorLines = poll.new_stderr.split("\n").filter(l =>
-              !l.includes("[plugins]") && !l.includes("Require stack") && !l.includes("npm warn") && l.trim()
-            ).join("\n").trim();
-            if (!fullOutput.trim() && errorLines) {
-              yield errorLines;
-              fullOutput += errorLines;
-            }
+          const errorLines = fullStderr.split("\n").filter(l =>
+            !l.includes("[plugins]") &&
+            !l.includes("Require stack") &&
+            !l.includes("npm warn") &&
+            !l.toLowerCase().includes("could not be reached at http://127.0.0.1:11434") &&
+            l.trim()
+          ).join("\n").trim();
+          if (!fullOutput.trim() && errorLines) {
+            yield errorLines;
+            fullOutput += errorLines;
           }
           break;
         }
 
         if (Date.now() - startTime > TIMEOUT) {
+          console.log("[streamingChat] TIMEOUT after 3 min");
           await invoke("kill_streaming_command", { id: streamId });
           yield "\n\n*[Timed out after 3 minutes]*";
           break;
@@ -879,20 +1011,13 @@ class OpenClawClient {
     await this.updateConfig({ agents } as Partial<OpenClawConfig>);
   }
 
-  private _lastAppliedOverrides = "";
-
-  async applySessionOverrides(overrides: { temperature?: number; maxTokens?: number; topP?: number }): Promise<void> {
-    const key = JSON.stringify(overrides);
-    if (key === this._lastAppliedOverrides) return;
-    const existing = await this.getConfig(true);
-    const agents = { ...((existing.agents as Record<string, unknown>) || {}) };
-    const defaults = { ...((agents.defaults as Record<string, unknown>) || {}) };
-    if (overrides.temperature !== undefined) defaults.temperature = overrides.temperature;
-    if (overrides.maxTokens !== undefined) defaults.maxTokens = overrides.maxTokens;
-    if (overrides.topP !== undefined) defaults.topP = overrides.topP;
-    agents.defaults = defaults;
-    await this.updateConfig({ agents } as Partial<OpenClawConfig>);
-    this._lastAppliedOverrides = key;
+  /**
+   * @deprecated OpenClaw does not support temperature/maxTokens/topP in
+   * agents.defaults. Writing them there corrupts the config and triggers
+   * "Unrecognized keys" validation errors. This method is now a no-op.
+   */
+  async applySessionOverrides(_overrides: { temperature?: number; maxTokens?: number; topP?: number }): Promise<void> {
+    // no-op: OpenClaw schema rejects these keys in agents.defaults
   }
 
   /* ── Channels ── */
@@ -965,6 +1090,7 @@ class OpenClawClient {
   }
 
   async setModel(m: string): Promise<void> {
+    const prev = this._currentModel;
     this._currentModel = m;
     localStorage.setItem("crystal_openclaw_model", m);
     this._modelsCache = null;
@@ -973,7 +1099,12 @@ class OpenClawClient {
         command: `${OPENCLAW_CMD} models set "${m}"`,
         cwd: null,
       });
-    } catch { /* best effort */ }
+    } catch (err) {
+      console.error("[OpenClaw] Failed to set model:", err);
+      this._currentModel = prev;
+      if (prev) localStorage.setItem("crystal_openclaw_model", prev);
+      throw err;
+    }
   }
 
   getModel(): string { return this._currentModel || "default"; }

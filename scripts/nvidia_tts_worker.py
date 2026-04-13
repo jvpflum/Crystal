@@ -14,8 +14,6 @@ Endpoints:
 """
 
 import os
-import sys
-import io
 import re
 import struct
 import logging
@@ -249,6 +247,7 @@ async def synthesize_stream(request: SynthesizeRequest):
         raise HTTPException(status_code=400, detail="Empty text")
 
     def generate():
+        all_audio = []
         sentences = split_sentences(request.text)
         for sentence in sentences:
             if not sentence.strip():
@@ -264,10 +263,14 @@ async def synthesize_stream(request: SynthesizeRequest):
                 else:
                     audio_np = generate_placeholder(sentence, request.sample_rate)
 
-                sr = sample_rate if model_ready else request.sample_rate
-                yield audio_to_wav_bytes(audio_np, sr)
+                all_audio.append(audio_np)
             except Exception as e:
                 log.error(f"Stream chunk error: {e}")
+
+        if all_audio:
+            sr = sample_rate if model_ready else request.sample_rate
+            combined = np.concatenate(all_audio)
+            yield audio_to_wav_bytes(combined, sr)
 
     return StreamingResponse(generate(), media_type="audio/wav")
 

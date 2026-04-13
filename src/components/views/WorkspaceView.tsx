@@ -50,7 +50,7 @@ const FILE_DESCRIPTIONS: Record<WorkspaceFile, string> = {
   "AGENTS.md": "Crystal's workspace rules, memory system & behavioral guidelines",
   "SOUL.md": "Personality, tone, humor style & core values",
   "IDENTITY.md": "Crystal's name, nature, character & emoji",
-  "USER.md": "About Jarro — preferences, working style & context",
+  "USER.md": "About you — preferences, working style & context",
   "TOOLS.md": "Local config — platform, AI stack, device notes",
   "MEMORY.md": "Long-term curated memory & lessons learned",
   "BOOT.md": "Session startup checklist — what to read first",

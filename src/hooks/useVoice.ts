@@ -5,7 +5,7 @@ import type { ProviderStatuses } from "@/lib/voice/types";
 export function useVoice() {
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [transcript, setTranscript] = useState<string>("");
-  const [isWhisperConnected, setIsWhisperConnected] = useState(false);
+  const [isSttConnected, setIsSttConnected] = useState(false);
   const [isTTSConnected, setIsTTSConnected] = useState(false);
   const [hasStt, setHasStt] = useState(false);
   const [hasTts, setHasTts] = useState(false);
@@ -29,27 +29,27 @@ export function useVoice() {
       try {
         if (sttPref) await voiceService.setPreferredSttProvider(sttPref);
         if (ttsPref) await voiceService.setPreferredTtsProvider(ttsPref);
-      } catch { /* may fail during init */ }
+      } catch (e) { console.warn("[useVoice] Provider pref init failed:", e); }
       await checkServersInternal();
     };
 
     /**
-     * Single combined check — checkWhisperConnection and checkTTSConnection
+     * Single combined check — checkSttConnection and checkTTSConnection
      * share the same underlying refreshProviders() call via dedup in VoiceService.
      */
     const checkServersInternal = async () => {
-      const [whisper, tts] = await Promise.all([
-        voiceService.checkWhisperConnection(),
+      const [stt, tts] = await Promise.all([
+        voiceService.checkSttConnection(),
         voiceService.checkTTSConnection(),
       ]);
-      setIsWhisperConnected(whisper);
+      setIsSttConnected(stt);
       setIsTTSConnected(tts);
       setHasStt(voiceService.hasSpeechRecognition());
       setHasTts(voiceService.hasTTS());
       try {
         const statuses = await voiceService.getProviderStatuses();
         setProviderStatuses(statuses);
-      } catch { /* provider check may fail during init */ }
+      } catch (e) { console.warn("[useVoice] Provider status check failed:", e); }
     };
 
     applyPrefsAndCheck();
@@ -94,19 +94,19 @@ export function useVoice() {
   }, []);
 
   const checkConnections = useCallback(async () => {
-    const [whisper, tts] = await Promise.all([
-      voiceService.checkWhisperConnection(),
+    const [stt, tts] = await Promise.all([
+      voiceService.checkSttConnection(),
       voiceService.checkTTSConnection(),
     ]);
-    setIsWhisperConnected(whisper);
+    setIsSttConnected(stt);
     setIsTTSConnected(tts);
     setHasStt(voiceService.hasSpeechRecognition());
     setHasTts(voiceService.hasTTS());
     try {
       const statuses = await voiceService.getProviderStatuses();
       setProviderStatuses(statuses);
-    } catch { /* provider check may fail during init */ }
-    return { whisper, tts };
+    } catch (e) { console.warn("[useVoice] Provider status check failed:", e); }
+    return { stt, tts };
   }, []);
 
   const setSttProvider = useCallback(async (id: string) => {
@@ -116,7 +116,7 @@ export function useVoice() {
     try {
       const statuses = await voiceService.getProviderStatuses();
       setProviderStatuses(statuses);
-    } catch { /* ignore */ }
+    } catch (e) { console.warn("[useVoice] STT provider status update failed:", e); }
   }, []);
 
   const setTtsProvider = useCallback(async (id: string) => {
@@ -126,13 +126,13 @@ export function useVoice() {
     try {
       const statuses = await voiceService.getProviderStatuses();
       setProviderStatuses(statuses);
-    } catch { /* ignore */ }
+    } catch (e) { console.warn("[useVoice] TTS provider status update failed:", e); }
   }, []);
 
   return {
     voiceState,
     transcript,
-    isWhisperConnected,
+    isSttConnected,
     isTTSConnected,
     hasSpeechRecognition: hasStt,
     hasTTS: hasTts,

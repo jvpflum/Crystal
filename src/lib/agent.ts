@@ -154,6 +154,14 @@ class AgentService {
       yield chunk;
     }
 
+    if (!fullResponse.trim()) {
+      const fallback = await openclawClient.openclawChat(userMessage, sessionId, thinking);
+      if (fallback.trim()) {
+        fullResponse = fallback;
+        yield fallback;
+      }
+    }
+
     if (!gotToolEvents && fullResponse.length > 50) {
       this.extractToolsFromResponse(fullResponse);
     }

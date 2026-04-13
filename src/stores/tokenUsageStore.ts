@@ -37,7 +37,6 @@ export type ProviderId =
   | "openai"
   | "anthropic"
   | "vllm"
-  | "ollama"
   | "elevenlabs"
   | "nvidia-stt"
   | "nvidia-tts"
@@ -58,7 +57,7 @@ export interface ProviderMeta {
 /**
  * Pricing notes:
  *  - Cloud: published API rates (blended across common models per provider).
- *  - Local (Ollama, NVIDIA): electricity-only estimate for an RTX 5090 (575 W TDP,
+ *  - Local (vLLM, NVIDIA): electricity-only estimate for an RTX 5090 (575 W TDP,
  *    ~350 W avg during inference) at California residential rates (~$0.32/kWh).
  *    At ~60 tok/s output throughput the marginal electricity cost is ≈$0.07/M output
  *    tokens — roughly 100-200× cheaper than cloud APIs.
@@ -69,7 +68,6 @@ export const PROVIDER_META: Record<ProviderId, ProviderMeta> = {
   openai:      { id: "openai",      name: "OpenAI",       color: "#10a37f", costPerMillionInput: 2.50,  costPerMillionOutput: 10.00,  isLocal: false },
   anthropic:   { id: "anthropic",   name: "Anthropic",    color: "#d4a27f", costPerMillionInput: 3.00,  costPerMillionOutput: 15.00,  isLocal: false },
   vllm:        { id: "vllm",        name: "vLLM",         color: "#6366f1", costPerMillionInput: 0.01,  costPerMillionOutput: 0.07,   isLocal: true },
-  ollama:      { id: "ollama",      name: "Ollama",       color: "#a855f7", costPerMillionInput: 0.01,  costPerMillionOutput: 0.07,   isLocal: true },
   elevenlabs:  { id: "elevenlabs",  name: "ElevenLabs",   color: "#ff6b35", costPerMillionInput: 0,     costPerMillionOutput: 960.00, isLocal: false },
   "nvidia-stt":{ id: "nvidia-stt",  name: "NVIDIA STT",   color: "#76b900", costPerMillionInput: 0.002, costPerMillionOutput: 0.005,  isLocal: true },
   "nvidia-tts":{ id: "nvidia-tts",  name: "NVIDIA TTS",   color: "#76b900", costPerMillionInput: 0.003, costPerMillionOutput: 0.008,  isLocal: true },

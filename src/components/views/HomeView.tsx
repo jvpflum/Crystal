@@ -36,6 +36,8 @@ interface MetaInfo {
   telegramBot: string;
   heartbeatInterval: string;
   llmModel: string;
+  hostedModel: string;
+  localConfiguredModel: string;
   vllmRunning: boolean;
   vllmModel: string;
 }
@@ -85,8 +87,34 @@ function parseVectorStoreInfo(mem: Record<string, unknown> | null | undefined): 
 
 const META_INITIAL: MetaInfo = {
   openclawVersion: "—", telegramStatus: "unknown", telegramBot: "",
-  heartbeatInterval: "—", llmModel: "—", vllmRunning: false, vllmModel: "",
+  heartbeatInterval: "—", llmModel: "—", hostedModel: "—", localConfiguredModel: "", vllmRunning: false, vllmModel: "",
 };
+
+function modelProvider(modelKey: string): string {
+  const raw = (modelKey || "").trim().toLowerCase();
+  if (!raw) return "unknown";
+  if (raw.startsWith("openai/")) return "openai";
+  if (raw.startsWith("anthropic/")) return "anthropic";
+  if (raw.startsWith("google/")) return "google";
+  if (raw.startsWith("deepseek/")) return "deepseek";
+  if (raw.startsWith("xai/")) return "xai";
+  if (raw.startsWith("vllm/")) return "vllm";
+  return raw.split("/")[0] || "unknown";
+}
+
+function isCloudProvider(provider: string): boolean {
+  return provider !== "vllm" && provider !== "unknown";
+}
+
+function providerLabel(provider: string): string {
+  if (provider === "openai") return "OpenAI";
+  if (provider === "anthropic") return "Anthropic";
+  if (provider === "google") return "Google";
+  if (provider === "deepseek") return "DeepSeek";
+  if (provider === "xai") return "xAI";
+  if (provider === "vllm") return "vLLM";
+  return provider;
+}
 
 /* ═══════════════════════════════════════════════════════════════
    OpenAI Logo (official hexapetal shape)
@@ -583,15 +611,40 @@ export function HomeView() {
         const settled = await Promise.allSettled([
           cachedCommand("openclaw --version", { ttl: 300_000 }),
           cachedCommand("openclaw health", { ttl: 60_000 }),
+          cachedCommand("openclaw models status", { ttl: 60_000 }),
         ]);
         if (cancelled) return;
         const versionR = settled[0].status === "fulfilled" ? settled[0].value : { stdout: "", stderr: "", code: -1 };
         const healthR = settled[1].status === "fulfilled" ? settled[1].value : { stdout: "", stderr: "", code: -1 };
+        const modelsStatusR = settled[2].status === "fulfilled" ? settled[2].value : { stdout: "", stderr: "", code: -1 };
         const healthText = healthR.stdout || "";
+        const modelsStatusText = `${modelsStatusR.stdout || ""}\n${modelsStatusR.stderr || ""}`;
         const versionMatch = (versionR.stdout || "").match(/OpenClaw\s+([\d.]+\S*)/i);
         const telegramMatch = healthText.match(/Telegram:\s*(\w+)(?:\s*\((@\w+)\))?/i);
         const heartbeatMatch = healthText.match(/Heartbeat interval:\s*(\S+)/i);
         const modelMatch = healthText.match(/agent model:\s*(\S+)/i);
+        const defaultModelMatch = modelsStatusText.match(/Default\s*:\s*([^\r\n]+)/i);
+        const fallbackMatch = modelsStatusText.match(/Fallbacks.*:\s*([^\r\n]+)/i);
+
+        const modelCandidates: string[] = [];
+        const pushCandidate = (v?: string) => {
+          const value = (v || "").trim();
+          if (!value) return;
+          if (!modelCandidates.includes(value)) modelCandidates.push(value);
+        };
+        pushCandidate(defaultModelMatch?.[1]);
+        const fallbacks = (fallbackMatch?.[1] || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        for (const fb of fallbacks) pushCandidate(fb);
+
+        const cloudModel =
+          modelCandidates.find((m) => isCloudProvider(modelProvider(m))) ||
+          "";
+        const localConfiguredModel =
+          modelCandidates.find((m) => modelProvider(m) === "vllm") ||
+          "";
 
         let vllmRunning = false;
         let vllmModel = "";
@@ -610,6 +663,8 @@ export function HomeView() {
           telegramBot: telegramMatch?.[2] ?? "",
           heartbeatInterval: heartbeatMatch?.[1] ?? "—",
           llmModel: modelMatch?.[1] ?? openclawClient.getModel() ?? "—",
+          hostedModel: cloudModel || "—",
+          localConfiguredModel,
           vllmRunning,
           vllmModel,
         };
@@ -654,7 +709,15 @@ export function HomeView() {
 
   const llmModelKey = meta.llmModel !== "—" && String(meta.llmModel).trim() !== ""
     ? String(meta.llmModel).trim() : openclawClient.getModel();
-  const llmDisplayValue = openclawClient.getModelDisplayName(llmModelKey);
+  const hostedModelKey = meta.hostedModel !== "—" && String(meta.hostedModel).trim() !== ""
+    ? String(meta.hostedModel).trim()
+    : (isCloudProvider(modelProvider(llmModelKey)) ? llmModelKey : "openai/gpt-5.4-mini");
+  const hostedProvider = modelProvider(hostedModelKey);
+  const hostedDisplayValue = openclawClient.getModelDisplayName(hostedModelKey);
+  const localDisplayValue = meta.vllmModel
+    || (meta.localConfiguredModel
+      ? openclawClient.getModelDisplayName(meta.localConfiguredModel)
+      : "");
   const llmColor = !gwConnected ? "var(--error)" : "var(--accent)";
 
   const cpuPct = sysStats.cpuUsage ?? 0;
@@ -941,10 +1004,10 @@ export function HomeView() {
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ margin: 0, fontSize: 11, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {llmDisplayValue}
+                {hostedDisplayValue}
               </p>
               <p style={{ margin: "2px 0 0", fontSize: 8, color: "var(--text-muted)", letterSpacing: "0.04em" }}>
-                Hosted · OpenAI
+                {`Hosted · ${providerLabel(hostedProvider)}`}
               </p>
             </div>
             <span style={{
@@ -977,7 +1040,7 @@ export function HomeView() {
                 color: meta.vllmRunning ? "var(--text)" : "var(--text-muted)",
               }}>
                 {meta.vllmRunning
-                  ? (meta.vllmModel || "vLLM Active")
+                  ? (localDisplayValue || "vLLM Active")
                   : "Offline"}
               </p>
               <p style={{ margin: "2px 0 0", fontSize: 8, color: "var(--text-muted)", letterSpacing: "0.04em" }}>

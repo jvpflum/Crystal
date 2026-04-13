@@ -1,5 +1,5 @@
 # Crystal Full Stack Startup Script
-# Starts vLLM (Docker), voice services: Whisper STT, TTS
+# Starts vLLM (Docker), NVIDIA voice services (Parakeet STT, Magpie TTS)
 
 param(
     [switch]$SkipVoice,
@@ -13,18 +13,6 @@ Write-Host ""
 
 $scriptDir = $PSScriptRoot
 $composeFile = Join-Path (Split-Path $scriptDir -Parent) "docker-compose.yml"
-
-function Start-Server {
-    param(
-        [string]$Name,
-        [string]$Script,
-        [string]$Color
-    )
-    
-    Write-Host "Starting $Name..." -ForegroundColor $Color
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "& '$Script'" -WindowStyle Normal
-    Start-Sleep -Seconds 2
-}
 
 function Test-Port([int]$Port) {
     try {
@@ -50,16 +38,27 @@ if (-not $SkipLLM) {
     }
 }
 
-# Start Voice servers
+# Start NVIDIA Voice servers
 if (-not $SkipVoice) {
-    $whisperScript = Join-Path $scriptDir "start-whisper.ps1"
-    if (Test-Path $whisperScript) {
-        Start-Server -Name "Whisper STT Server" -Script $whisperScript -Color "Cyan"
+    $sttScript = Join-Path $scriptDir "nvidia_stt_worker.py"
+    if (Test-Path $sttScript) {
+        Write-Host "Starting NVIDIA Parakeet STT worker..." -ForegroundColor Cyan
+        Start-Process python -ArgumentList $sttScript -WindowStyle Normal
+        Start-Sleep -Seconds 2
     }
-    
-    $ttsScript = Join-Path $scriptDir "start-tts.ps1"
+
+    $ttsScript = Join-Path $scriptDir "nvidia_tts_worker.py"
     if (Test-Path $ttsScript) {
-        Start-Server -Name "TTS Server" -Script $ttsScript -Color "Green"
+        Write-Host "Starting NVIDIA Magpie TTS worker..." -ForegroundColor Green
+        Start-Process python -ArgumentList $ttsScript -WindowStyle Normal
+        Start-Sleep -Seconds 2
+    }
+
+    $gwScript = Join-Path $scriptDir "voice_gateway.py"
+    if (Test-Path $gwScript) {
+        Write-Host "Starting Voice Gateway..." -ForegroundColor Yellow
+        Start-Process python -ArgumentList $gwScript -WindowStyle Normal
+        Start-Sleep -Seconds 1
     }
 }
 
@@ -73,8 +72,9 @@ if (-not $SkipLLM) {
     Write-Host "  - vLLM:    http://127.0.0.1:8000  (Qwen3-30B-A3B-NVFP4, Docker)" -ForegroundColor Blue
 }
 if (-not $SkipVoice) {
-    Write-Host "  - Whisper: http://127.0.0.1:8080 (Speech-to-Text)" -ForegroundColor Cyan
-    Write-Host "  - TTS:     http://127.0.0.1:8081 (Text-to-Speech)" -ForegroundColor Green
+    Write-Host "  - NVIDIA STT: http://127.0.0.1:8090 (Parakeet ASR)" -ForegroundColor Cyan
+    Write-Host "  - NVIDIA TTS: http://127.0.0.1:8091 (Magpie TTS)" -ForegroundColor Green
+    Write-Host "  - Gateway:    http://127.0.0.1:6500 (Voice Gateway)" -ForegroundColor Yellow
 }
 Write-Host ""
 Write-Host "Crystal auto-starts all services. This script is for manual debugging only." -ForegroundColor Yellow

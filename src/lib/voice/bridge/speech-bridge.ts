@@ -314,7 +314,7 @@ export class TtsBridge {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        yield value.buffer;
+        yield value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
       }
     } finally {
       reader.releaseLock();

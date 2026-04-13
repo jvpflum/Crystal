@@ -79,6 +79,7 @@ Write-Host "Voice servers will start automatically when you run Crystal." -Foreg
 Write-Host ""
 Write-Host "To test the servers manually:" -ForegroundColor Gray
 Write-Host "  cd crystal" -ForegroundColor Gray
-Write-Host "  .\scripts\start-whisper.ps1  # STT on port 8080" -ForegroundColor Gray
-Write-Host "  .\scripts\start-tts.ps1      # TTS on port 8081" -ForegroundColor Gray
+Write-Host "  python scripts/nvidia_stt_worker.py  # NVIDIA STT on port 8090" -ForegroundColor Gray
+Write-Host "  python scripts/nvidia_tts_worker.py  # NVIDIA TTS on port 8091" -ForegroundColor Gray
+Write-Host "  python scripts/voice_gateway.py      # Voice Gateway on port 6500" -ForegroundColor Gray
 Write-Host ""

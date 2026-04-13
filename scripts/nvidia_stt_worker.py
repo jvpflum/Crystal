@@ -1,7 +1,7 @@
 """
 Crystal NVIDIA STT Worker — FastAPI server for streaming speech-to-text.
 
-Model:  nvidia/parakeet-ctc-0.6b (Nemotron/Parakeet-family ASR)
+Model:  nvidia/parakeet-ctc-0.6b (Parakeet-family ASR)
 Method: NeMo ASR — streaming via WebSocket, batch via POST /transcribe
 
 Endpoints:
@@ -86,7 +86,11 @@ def transcribe_audio(audio_np: np.ndarray, sample_rate: int = 16000) -> dict:
             import torch
             with torch.no_grad():
                 hypotheses = asr_model.transcribe([audio_np])
-                text = hypotheses[0] if hypotheses else ""
+                if hypotheses:
+                    h = hypotheses[0]
+                    text = h.text if hasattr(h, "text") else str(h)
+                else:
+                    text = ""
                 return {"text": text.strip(), "confidence": 0.9}
         except Exception as e:
             log.error(f"Transcription error: {e}")
@@ -169,6 +173,10 @@ async def transcribe(file: UploadFile = File(...)):
         data, sr = sf.read(tmp_path, dtype="float32")
         os.unlink(tmp_path)
 
+        # Convert stereo to mono
+        if data.ndim > 1:
+            data = data.mean(axis=1)
+
         # Resample to 16kHz if needed
         if sr != 16000:
             ratio = 16000 / sr
@@ -228,12 +236,13 @@ async def websocket_stt(ws: WebSocket):
                     continue
                 audio_buffer.extend(raw)
 
-                # Emit partial transcript every ~1s of audio
-                chunk_threshold = sample_rate * 2  # 1 second of int16 audio
+                # Emit partial transcript every ~2s of new audio
+                chunk_threshold = sample_rate * 4  # 2 seconds of int16 audio
                 if len(audio_buffer) >= chunk_threshold:
-                    audio_np = np.frombuffer(
-                        bytes(audio_buffer), dtype=np.int16
-                    ).astype(np.float32) / 32768.0
+                    # Only transcribe the latest window (last ~4s) for partials
+                    window_bytes = sample_rate * 8  # 4 seconds of int16
+                    window = bytes(audio_buffer[-window_bytes:]) if len(audio_buffer) > window_bytes else bytes(audio_buffer)
+                    audio_np = np.frombuffer(window, dtype=np.int16).astype(np.float32) / 32768.0
 
                     result = transcribe_audio(audio_np, sample_rate)
                     await ws.send_json({

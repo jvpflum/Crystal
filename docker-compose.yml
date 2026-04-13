@@ -4,6 +4,12 @@ services:
     container_name: crystal-vllm
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
     volumes:
       - huggingface-cache:/root/.cache/huggingface
     environment:
@@ -19,10 +25,10 @@ services:
       --kv-cache-dtype fp8
       --host 0.0.0.0
       --port 8000
-      --max-model-len 8192
+      --max-model-len 40960
       --gpu-memory-utilization 0.94
       --max-num-seqs 4
-      --max-num-batched-tokens 4096
+      --max-num-batched-tokens 40960
       --performance-mode interactivity
       --enable-prefix-caching
       --enable-auto-tool-choice

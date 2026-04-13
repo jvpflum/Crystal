@@ -1,9 +1,9 @@
 /**
- * Voice service — local GPU voice pipeline with NVIDIA primary, local fallbacks.
+ * Voice service — local GPU voice pipeline using NVIDIA Parakeet STT + Magpie TTS.
  *
  * Pipeline:
- *   STT: NVIDIA Nemotron/Parakeet (8090) → Whisper (8080) → Browser API
- *   TTS: NVIDIA Magpie (8091) → Kokoro (8081) → Browser API
+ *   STT: NVIDIA Nemotron/Parakeet (8090) → Browser API
+ *   TTS: NVIDIA Magpie (8091) → Browser API
  *
  * Optimizations:
  *   - Event-based init wait (no polling)
@@ -58,7 +58,7 @@ class VoiceService {
 
   private _agent: ConversationAgent;
   private _initPromise: Promise<void>;
-  private _whisperAvailable = false;
+  private _sttAvailable = false;
   private _ttsAvailable = false;
 
   // Dedup concurrent refreshProvider calls
@@ -88,7 +88,7 @@ class VoiceService {
   private async _initAsync(): Promise<void> {
     try {
       await this._agent.initialize();
-      this._whisperAvailable = this._agent.hasStt;
+      this._sttAvailable = this._agent.hasStt;
       this._ttsAvailable = this._agent.hasTts;
     } catch (err) {
       console.error("[VoiceService] Initialization error:", err);
@@ -129,14 +129,16 @@ class VoiceService {
     await this._agent.speak(text);
   }
 
-  setWhisperEndpoint(_endpoint: string) {}
-  setTTSEndpoint(_endpoint: string) {}
-
-  async checkWhisperConnection(): Promise<boolean> {
+  async checkSttConnection(): Promise<boolean> {
     await this._waitForInit();
     const result = await this._refreshProvidersDedup();
-    this._whisperAvailable = result.stt !== "None";
-    return this._whisperAvailable;
+    this._sttAvailable = result.stt !== "None";
+    return this._sttAvailable;
+  }
+
+  /** @deprecated Use checkSttConnection */
+  async checkWhisperConnection(): Promise<boolean> {
+    return this.checkSttConnection();
   }
 
   async checkTTSConnection(): Promise<boolean> {

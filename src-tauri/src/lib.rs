@@ -26,8 +26,6 @@ struct CommandResult {
 
 #[derive(Serialize, Clone)]
 struct ServerStatus {
-    whisper_running: bool,
-    tts_running: bool,
     vllm_running: bool,
     openclaw_running: bool,
     nvidia_stt_running: bool,
@@ -36,9 +34,6 @@ struct ServerStatus {
 }
 
 struct ServerProcesses {
-    llm: Option<Child>,
-    whisper: Option<Child>,
-    tts: Option<Child>,
     openclaw: Option<Child>,
     nvidia_stt: Option<Child>,
     nvidia_tts: Option<Child>,
@@ -75,15 +70,13 @@ struct AppState {
     servers: Mutex<ServerProcesses>,
     scripts_dir: Mutex<Option<String>>,
     streaming: Mutex<HashMap<String, Arc<StreamingProcess>>>,
+    openclaw_cli_lock: Arc<Mutex<()>>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
             servers: Mutex::new(ServerProcesses {
-                llm: None,
-                whisper: None,
-                tts: None,
                 openclaw: None,
                 nvidia_stt: None,
                 nvidia_tts: None,
@@ -92,8 +85,90 @@ impl Default for AppState {
             }),
             scripts_dir: Mutex::new(None),
             streaming: Mutex::new(HashMap::new()),
+            openclaw_cli_lock: Arc::new(Mutex::new(())),
         }
     }
+}
+
+fn run_shell_command(command: &str, working_dir: &str) -> Result<CommandResult, String> {
+    #[cfg(target_os = "windows")]
+    let output = {
+        let mut cmd = Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", command])
+            .current_dir(working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null());
+
+        let sys_path = std::env::var("PATH").unwrap_or_default();
+        let extra_dirs = [r"C:\Program Files\nodejs", r"C:\Program Files\Git\cmd"];
+        let user_appdata = std::env::var("APPDATA")
+            .map(|a| format!(r"{}\npm", a))
+            .unwrap_or_default();
+        let mut full_path = String::new();
+        for d in &extra_dirs {
+            if Path::new(d).exists() && !sys_path.contains(d) {
+                full_path.push_str(d);
+                full_path.push(';');
+            }
+        }
+        if !user_appdata.is_empty()
+            && Path::new(&user_appdata).exists()
+            && !sys_path.contains(&user_appdata)
+        {
+            full_path.push_str(&user_appdata);
+            full_path.push(';');
+        }
+        full_path.push_str(&sys_path);
+        cmd.env("PATH", &full_path);
+        cmd.creation_flags(CREATE_NO_WINDOW).output()
+    };
+
+    #[cfg(not(target_os = "windows"))]
+    let output = Command::new("sh")
+        .args(["-c", command])
+        .current_dir(working_dir)
+        .output();
+
+    fn strip_provider_noise(text: &str) -> String {
+        text.lines()
+            .filter(|line| {
+                let lower = line.to_lowercase();
+                !lower.contains("could not be reached at http://127.0.0.1:11434")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    match output {
+        Ok(out) => Ok(CommandResult {
+            stdout: strip_provider_noise(&String::from_utf8_lossy(&out.stdout)),
+            stderr: strip_provider_noise(&String::from_utf8_lossy(&out.stderr)),
+            code: out.status.code().unwrap_or(-1),
+        }),
+        Err(e) => Err(format!("Failed to execute command: {}", e)),
+    }
+}
+
+fn looks_like_gateway_timeout(result: &CommandResult) -> bool {
+    let combined = format!("{}\n{}", result.stdout, result.stderr).to_lowercase();
+    combined.contains("gateway timeout")
+        || combined.contains("gateway not reachable")
+        || combined.contains("gateway closed")
+        || combined.contains("rpc probe: failed")
+}
+
+fn openclaw_retry_safe(command: &str) -> bool {
+    let c = command.to_lowercase();
+    if !c.trim_start().starts_with("openclaw") {
+        return false;
+    }
+    // Retry only read-only/status commands to avoid duplicate side effects.
+    c.contains(" list")
+        || c.contains(" status")
+        || c.contains(" health")
+        || c.contains(" config get")
+        || c.contains(" --json")
 }
 
 /// GPU stats via nvidia-smi — routed through cmd.exe to prevent console flash.
@@ -187,63 +262,34 @@ Write-Output "UPTIME:$upStr"
 }
 
 #[tauri::command]
-async fn execute_command(command: String, cwd: Option<String>) -> Result<CommandResult, String> {
-    tokio::task::spawn_blocking(move || {
-        let working_dir = cwd.unwrap_or_else(|| {
-            std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string())
-        });
-
-        #[cfg(target_os = "windows")]
-        let output = {
-            let mut cmd = Command::new("powershell");
-            cmd.args(["-NoProfile", "-NonInteractive", "-Command", &command])
-                .current_dir(&working_dir)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .stdin(Stdio::null());
-
-            let sys_path = std::env::var("PATH").unwrap_or_default();
-            let extra_dirs = [
-                r"C:\Program Files\nodejs",
-                r"C:\Program Files\Git\cmd",
-            ];
-            let user_appdata = std::env::var("APPDATA")
-                .map(|a| format!(r"{}\npm", a))
-                .unwrap_or_default();
-            let mut full_path = String::new();
-            for d in &extra_dirs {
-                if Path::new(d).exists() && !sys_path.contains(d) {
-                    full_path.push_str(d);
-                    full_path.push(';');
-                }
+async fn execute_command(
+    state: tauri::State<'_, AppState>,
+    command: String,
+    cwd: Option<String>,
+) -> Result<CommandResult, String> {
+    let working_dir =
+        cwd.unwrap_or_else(|| std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string()));
+    let is_openclaw = command.trim_start().to_lowercase().starts_with("openclaw");
+    if is_openclaw {
+        let command_clone = command.clone();
+        let working_dir_clone = working_dir.clone();
+        let lock = state.openclaw_cli_lock.clone();
+        return tokio::task::spawn_blocking(move || {
+            let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+            let first = run_shell_command(&command_clone, &working_dir_clone)?;
+            if openclaw_retry_safe(&command_clone) && looks_like_gateway_timeout(&first) {
+                let _ = run_shell_command("openclaw gateway restart", &working_dir_clone);
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                return run_shell_command(&command_clone, &working_dir_clone);
             }
-            if !user_appdata.is_empty() && Path::new(&user_appdata).exists() && !sys_path.contains(&user_appdata) {
-                full_path.push_str(&user_appdata);
-                full_path.push(';');
-            }
-            full_path.push_str(&sys_path);
-            cmd.env("PATH", &full_path);
-
-            cmd.creation_flags(CREATE_NO_WINDOW).output()
-        };
-
-        #[cfg(not(target_os = "windows"))]
-        let output = Command::new("sh")
-            .args(["-c", &command])
-            .current_dir(&working_dir)
-            .output();
-
-        match output {
-            Ok(out) => Ok(CommandResult {
-                stdout: String::from_utf8_lossy(&out.stdout).to_string(),
-                stderr: String::from_utf8_lossy(&out.stderr).to_string(),
-                code: out.status.code().unwrap_or(-1),
-            }),
-            Err(e) => Err(format!("Failed to execute command: {}", e)),
-        }
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
+            Ok(first)
+        })
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?;
+    }
+    tokio::task::spawn_blocking(move || run_shell_command(&command, &working_dir))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -593,6 +639,119 @@ async fn http_proxy(state: tauri::State<'_, AppState>, method: String, url: Stri
     Ok(serde_json::json!({ "status": status, "body": text }).to_string())
 }
 
+/// Direct OpenAI-compatible chat streaming – bypasses the OpenClaw CLI entirely.
+/// Connects to vLLM (local) or OpenAI (hosted) and streams SSE chunks back
+/// through the existing StreamingProcess mechanism so the frontend can poll.
+#[tauri::command]
+fn start_direct_chat(
+    state: tauri::State<AppState>,
+    messages: Vec<serde_json::Value>,
+    base_url: String,
+    api_key: String,
+    model: String,
+    max_tokens: Option<u32>,
+) -> Result<String, String> {
+    let id = format!("stream-{}", STREAM_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
+    let proc = Arc::new(StreamingProcess {
+        stdout_buf: Mutex::new(String::new()),
+        stderr_buf: Mutex::new(String::new()),
+        read_cursor: Mutex::new(0),
+        stderr_cursor: Mutex::new(0),
+        done: Mutex::new(false),
+        exit_code: Mutex::new(None),
+        pid: 0,
+        stdout_trimmed: Mutex::new(0),
+        stderr_trimmed: Mutex::new(0),
+    });
+
+    let proc_clone = Arc::clone(&proc);
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let max_tok = max_tokens.unwrap_or(4096);
+
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            let client = reqwest::Client::new();
+            let is_local = api_key == "vllm-local";
+            let mut body = serde_json::json!({
+                "model": model,
+                "messages": messages,
+                "max_tokens": max_tok,
+                "stream": true,
+            });
+            if is_local {
+                body["chat_template_kwargs"] = serde_json::json!({"enable_thinking": false});
+            }
+
+            let resp = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", api_key))
+                .json(&body)
+                .send()
+                .await;
+
+            match resp {
+                Ok(r) if r.status().is_success() => {
+                    use futures_util::StreamExt;
+                    let mut stream = r.bytes_stream();
+                    let mut buf = String::new();
+                    while let Some(chunk) = stream.next().await {
+                        match chunk {
+                            Ok(bytes) => {
+                                buf.push_str(&String::from_utf8_lossy(&bytes));
+                                while let Some(pos) = buf.find('\n') {
+                                    let line = buf[..pos].to_string();
+                                    buf = buf[pos + 1..].to_string();
+                                    if let Some(data) = line.strip_prefix("data: ") {
+                                        if data.trim() == "[DONE]" { continue; }
+                                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                                            if let Some(content) = parsed
+                                                .get("choices")
+                                                .and_then(|c| c.get(0))
+                                                .and_then(|c| c.get("delta"))
+                                                .and_then(|d| d.get("content"))
+                                                .and_then(|c| c.as_str())
+                                            {
+                                                let mut out = proc_clone.stdout_buf.lock().unwrap();
+                                                out.push_str(content);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                let mut err = proc_clone.stderr_buf.lock().unwrap();
+                                err.push_str(&format!("Stream error: {}\n", e));
+                                break;
+                            }
+                        }
+                    }
+                }
+                Ok(r) => {
+                    let status = r.status();
+                    let body = r.text().await.unwrap_or_default();
+                    let mut err = proc_clone.stderr_buf.lock().unwrap();
+                    err.push_str(&format!("API error {}: {}\n", status, body));
+                }
+                Err(e) => {
+                    let mut err = proc_clone.stderr_buf.lock().unwrap();
+                    err.push_str(&format!("Connection failed: {}\n", e));
+                }
+            }
+
+            *proc_clone.exit_code.lock().unwrap() = Some(0);
+            *proc_clone.done.lock().unwrap() = true;
+        });
+    });
+
+    state.streaming.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), proc);
+    Ok(id)
+}
+
 #[tauri::command]
 fn get_openclaw_token() -> Result<String, String> {
     let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
@@ -707,8 +866,6 @@ fn spawn_hidden(program: &str, args: &[&str]) -> std::io::Result<Child> {
 #[tauri::command]
 fn get_server_status() -> ServerStatus {
     ServerStatus {
-        whisper_running: check_port_in_use(8080),
-        tts_running: check_port_in_use(8081),
         vllm_running: check_port_in_use(8000),
         openclaw_running: check_port_in_use(18789),
         nvidia_stt_running: check_port_in_use(8090),
@@ -758,6 +915,22 @@ fn start_nvidia_speech_servers(state: tauri::State<AppState>) -> Result<String, 
         started.push("NVIDIA TTS (already running)");
     }
 
+    if !check_port_in_use(6500) {
+        let gw_script = Path::new(scripts_path).join("voice_gateway.py");
+        if gw_script.exists() {
+            let script_str = gw_script.to_string_lossy().to_string();
+            match spawn_hidden(&python_cmd, &[&script_str]) {
+                Ok(child) => {
+                    servers.voice_gateway = Some(child);
+                    started.push("Voice Gateway");
+                }
+                Err(e) => eprintln!("Failed to start Voice Gateway: {}", e),
+            }
+        }
+    } else {
+        started.push("Voice Gateway (already running)");
+    }
+
     if started.is_empty() {
         Ok("No NVIDIA speech servers needed to start".to_string())
     } else {
@@ -778,6 +951,11 @@ fn stop_nvidia_speech_servers(state: tauri::State<AppState>) -> Result<String, S
     if let Some(mut child) = servers.nvidia_tts.take() {
         kill_process_tree(&mut child);
         stopped.push("NVIDIA TTS");
+    }
+
+    if let Some(mut child) = servers.voice_gateway.take() {
+        kill_process_tree(&mut child);
+        stopped.push("Voice Gateway");
     }
 
     if stopped.is_empty() {
@@ -920,108 +1098,28 @@ fn start_openclaw_daemon(state: tauri::State<AppState>) -> Result<String, String
 
     // First attempt
     match spawn_hidden(&openclaw_bin, &["gateway", "--port", "18789"]) {
-        Ok(child) => {
+        Ok(mut child) => {
             std::thread::sleep(std::time::Duration::from_secs(2));
             if check_port_in_use(18789) {
                 servers.openclaw = Some(child);
                 return Ok("OpenClaw daemon started".to_string());
             }
-            // Didn't bind — try doctor --fix
+            kill_process_tree(&mut child);
         }
         Err(_) => {}
     }
 
-    // Attempt auto-repair
-    let _ = Command::new(&openclaw_bin)
-        .args(["doctor", "--fix"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .stdin(Stdio::null())
-        .output();
-
-    // Retry after repair
-    match spawn_hidden(&openclaw_bin, &["gateway", "--port", "18789"]) {
-        Ok(child) => {
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            if check_port_in_use(18789) {
-                servers.openclaw = Some(child);
-                Ok("OpenClaw daemon started (after auto-repair)".to_string())
-            } else {
-                Err("Gateway started but not listening — check openclaw config".to_string())
-            }
-        }
-        Err(e) => Err(format!("Failed to start OpenClaw daemon: {}", e)),
-    }
+    Err("Gateway started but not listening — check openclaw config".to_string())
 }
 
 #[tauri::command]
 fn start_voice_servers(state: tauri::State<AppState>) -> Result<String, String> {
-    let scripts_dir = state.scripts_dir.lock().unwrap_or_else(|e| e.into_inner());
-    let scripts_path = scripts_dir.as_ref().ok_or("Scripts directory not set")?;
-    
-    let python_cmd = find_python().unwrap_or_else(|| "python".to_string());
-    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
-    let mut started = Vec::new();
-    
-    if !check_port_in_use(8080) {
-        let whisper_script = Path::new(scripts_path).join("whisper_server.py");
-        if whisper_script.exists() {
-            let script_str = whisper_script.to_string_lossy().to_string();
-            match spawn_hidden(&python_cmd, &[&script_str]) {
-                Ok(child) => {
-                    servers.whisper = Some(child);
-                    started.push("Whisper STT");
-                }
-                Err(e) => eprintln!("Failed to start Whisper: {}", e),
-            }
-        }
-    } else {
-        started.push("Whisper STT (already running)");
-    }
-    
-    if !check_port_in_use(8081) {
-        let tts_script = Path::new(scripts_path).join("tts_server.py");
-        if tts_script.exists() {
-            let script_str = tts_script.to_string_lossy().to_string();
-            match spawn_hidden(&python_cmd, &[&script_str]) {
-                Ok(child) => {
-                    servers.tts = Some(child);
-                    started.push("TTS");
-                }
-                Err(e) => eprintln!("Failed to start TTS: {}", e),
-            }
-        }
-    } else {
-        started.push("TTS (already running)");
-    }
-    
-    if started.is_empty() {
-        Ok("No servers needed to start".to_string())
-    } else {
-        Ok(format!("Started: {}", started.join(", ")))
-    }
+    start_nvidia_speech_servers(state)
 }
 
 #[tauri::command]
 fn stop_voice_servers(state: tauri::State<AppState>) -> Result<String, String> {
-    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
-    let mut stopped = Vec::new();
-    
-    if let Some(mut child) = servers.whisper.take() {
-        kill_process_tree(&mut child);
-        stopped.push("Whisper");
-    }
-    
-    if let Some(mut child) = servers.tts.take() {
-        kill_process_tree(&mut child);
-        stopped.push("TTS");
-    }
-    
-    if stopped.is_empty() {
-        Ok("No servers were running".to_string())
-    } else {
-        Ok(format!("Stopped: {}", stopped.join(", ")))
-    }
+    stop_nvidia_speech_servers(state)
 }
 
 fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
@@ -1113,7 +1211,6 @@ fn sanitize_openclaw_config() {
     // Provider defaults for missing baseUrl
     let provider_defaults: HashMap<&str, &str> = [
         ("vllm", "http://127.0.0.1:8000/v1"),
-        ("ollama", "http://127.0.0.1:11434"),
         ("anthropic", "https://api.anthropic.com"),
         ("xai", "https://api.x.ai/v1"),
         ("openai", "https://api.openai.com/v1"),
@@ -1177,21 +1274,42 @@ fn sanitize_openclaw_config() {
 /// Try to start the gateway, retrying once after running `openclaw doctor --fix`
 /// if the first attempt fails (config validation error).
 fn start_gateway_resilient<R: Runtime>(app: &AppHandle<R>) {
-    if check_port_in_use(18789) {
-        println!("OpenClaw gateway already running on port 18789 — reusing existing instance");
-        return;
-    }
-
     // Pre-flight: sanitize config before first attempt
     sanitize_openclaw_config();
-
     let openclaw_bin = find_openclaw_bin();
+    if check_port_in_use(18789) {
+        let status = Command::new(&openclaw_bin)
+            .args(["gateway", "status"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null())
+            .output();
+        if let Ok(out) = status {
+            let text = format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            )
+            .to_lowercase();
+            if text.contains("rpc probe: ok") {
+                println!("OpenClaw gateway already healthy on port 18789 — reusing instance");
+                return;
+            }
+        }
+        eprintln!("OpenClaw gateway port is up but RPC is unhealthy — restarting gateway");
+        let _ = Command::new(&openclaw_bin)
+            .args(["gateway", "restart"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .stdin(Stdio::null())
+            .output();
+        std::thread::sleep(std::time::Duration::from_secs(3));
+    }
 
     // First attempt
     println!("Starting OpenClaw daemon...");
     match spawn_hidden(&openclaw_bin, &["gateway", "--port", "18789"]) {
-        Ok(child) => {
-            // Give the gateway a moment to either start or crash
+        Ok(mut child) => {
             std::thread::sleep(std::time::Duration::from_secs(2));
             if check_port_in_use(18789) {
                 if let Some(state) = app.try_state::<AppState>() {
@@ -1201,48 +1319,12 @@ fn start_gateway_resilient<R: Runtime>(app: &AppHandle<R>) {
                 println!("OpenClaw gateway started on port 18789");
                 return;
             }
-            // Gateway process exited — config is probably still invalid
-            eprintln!("OpenClaw gateway spawned but not listening — attempting doctor --fix");
+            kill_process_tree(&mut child);
+            eprintln!("OpenClaw gateway spawned but not listening — running without gateway");
         }
         Err(e) => {
-            eprintln!("OpenClaw gateway spawn failed: {} — attempting doctor --fix", e);
+            eprintln!("OpenClaw daemon not available: {} (agent will use direct LLM)", e);
         }
-    }
-
-    // Retry: run `openclaw doctor --fix` then try again
-    let doctor_result = Command::new(&openclaw_bin)
-        .args(["doctor", "--fix"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .stdin(Stdio::null())
-        .output();
-
-    match doctor_result {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            println!("openclaw doctor --fix: {}{}", stdout, stderr);
-        }
-        Err(e) => {
-            eprintln!("Failed to run openclaw doctor: {}", e);
-        }
-    }
-
-    // Second attempt after doctor
-    match spawn_hidden(&openclaw_bin, &["gateway", "--port", "18789"]) {
-        Ok(child) => {
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            if check_port_in_use(18789) {
-                if let Some(state) = app.try_state::<AppState>() {
-                    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
-                    servers.openclaw = Some(child);
-                }
-                println!("OpenClaw gateway started on port 18789 (after doctor --fix)");
-            } else {
-                eprintln!("OpenClaw gateway still not listening after doctor --fix — running without gateway");
-            }
-        }
-        Err(e) => eprintln!("OpenClaw daemon not available: {} (agent will use direct LLM)", e),
     }
 }
 
@@ -1252,7 +1334,7 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
         // First, try current working directory (most common in dev)
         std::env::current_dir().ok().and_then(|cwd| {
             let scripts = cwd.join("scripts");
-            if scripts.exists() && scripts.join("whisper_server.py").exists() {
+            if scripts.exists() && scripts.join("nvidia_stt_worker.py").exists() {
                 println!("Found scripts in cwd: {:?}", scripts);
                 Some(scripts)
             } else {
@@ -1263,7 +1345,7 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
         // Check bundled resources (production)
         if let Ok(resource_path) = app.path().resource_dir() {
             let bundled = resource_path.join("scripts");
-            if bundled.exists() && bundled.join("whisper_server.py").exists() {
+            if bundled.exists() && bundled.join("nvidia_stt_worker.py").exists() {
                 println!("Found scripts in resources: {:?}", bundled);
                 Some(bundled)
             } else {
@@ -1282,7 +1364,7 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
                 if let Some(parent) = current.parent() {
                     current = parent.to_path_buf();
                     let scripts = current.join("scripts");
-                    if scripts.exists() && scripts.join("whisper_server.py").exists() {
+                    if scripts.exists() && scripts.join("nvidia_stt_worker.py").exists() {
                         println!("Found scripts relative to exe: {:?}", scripts);
                         return Some(scripts);
                     }
@@ -1339,9 +1421,6 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
                 *dir = Some(scripts_path.to_string_lossy().to_string());
             }
             
-            let whisper_script = scripts_path.join("whisper_server.py");
-            let tts_script = scripts_path.join("tts_server.py");
-            
             let python_cmd = find_python();
             
             if let Some(ref python) = python_cmd {
@@ -1353,7 +1432,7 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
                     // Kill orphaned voice servers from previous sessions
                     #[cfg(target_os = "windows")]
                     {
-                        for port in [8080u16, 8081, 8090, 8091, 6500] {
+                        for port in [8090u16, 8091, 6500] {
                             if check_port_in_use(port) {
                                 let kill_cmd = format!("Get-NetTCPConnection -LocalPort {} -ErrorAction SilentlyContinue | ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}", port);
                                 let mut cmd = Command::new("powershell");
@@ -1391,31 +1470,6 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
                                 println!("NVIDIA TTS worker started on port 8091");
                             }
                             Err(e) => eprintln!("Failed to start NVIDIA TTS: {}", e),
-                        }
-                    }
-
-                    // Start fallback Whisper/Kokoro servers
-                    if whisper_script.exists() {
-                        println!("Starting Whisper STT server (fallback)...");
-                        let script_str = whisper_script.to_string_lossy().to_string();
-                        match spawn_hidden(python, &[&script_str]) {
-                            Ok(child) => {
-                                servers.whisper = Some(child);
-                                println!("Whisper server started");
-                            }
-                            Err(e) => eprintln!("Failed to start Whisper: {}", e),
-                        }
-                    }
-                    
-                    if tts_script.exists() {
-                        println!("Starting TTS server (fallback)...");
-                        let script_str = tts_script.to_string_lossy().to_string();
-                        match spawn_hidden(python, &[&script_str]) {
-                            Ok(child) => {
-                                servers.tts = Some(child);
-                                println!("TTS server started");
-                            }
-                            Err(e) => eprintln!("Failed to start TTS: {}", e),
                         }
                     }
 
@@ -1464,21 +1518,6 @@ fn cleanup_servers(app: &AppHandle<impl Runtime>) {
     if let Some(state) = app.try_state::<AppState>() {
         let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
         
-        if let Some(mut child) = servers.llm.take() {
-            println!("Stopping LLM server...");
-            kill_process_tree(&mut child);
-        }
-        
-        if let Some(mut child) = servers.whisper.take() {
-            println!("Stopping Whisper server...");
-            kill_process_tree(&mut child);
-        }
-        
-        if let Some(mut child) = servers.tts.take() {
-            println!("Stopping TTS server...");
-            kill_process_tree(&mut child);
-        }
-
         if let Some(mut child) = servers.nvidia_stt.take() {
             println!("Stopping NVIDIA STT worker...");
             kill_process_tree(&mut child);
@@ -1489,6 +1528,11 @@ fn cleanup_servers(app: &AppHandle<impl Runtime>) {
             kill_process_tree(&mut child);
         }
         
+        if let Some(mut child) = servers.voice_gateway.take() {
+            println!("Stopping Voice Gateway...");
+            kill_process_tree(&mut child);
+        }
+
         if let Some(mut child) = servers.openclaw.take() {
             println!("Stopping OpenClaw daemon...");
             kill_process_tree(&mut child);
@@ -1518,7 +1562,7 @@ fn cleanup_servers(app: &AppHandle<impl Runtime>) {
     // Kill any orphaned processes on Crystal-managed ports
     #[cfg(target_os = "windows")]
     {
-        let ports = [8080u16, 8081, 8090, 8091];
+        let ports = [8090u16, 8091, 6500];
         for port in ports {
             if check_port_in_use(port) {
                 println!("Killing orphan on port {}...", port);
@@ -1542,19 +1586,30 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // Second instance tried to launch — focus the existing window instead
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .manage(AppState::default())
         .setup(|app| {
             create_tray(app.handle())?;
-            
+
             // Start voice servers automatically
             setup_and_start_servers(app.handle());
-            
+
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Closing the window exits the app fully (cleanup + quit)
                 println!("Window close requested – shutting down all services...");
+                api.prevent_close();
                 cleanup_servers(window.app_handle());
+                window.app_handle().exit(0);
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -1578,7 +1633,8 @@ pub fn run() {
             start_vllm_docker,
             stop_vllm_docker,
             http_proxy,
-            get_openclaw_token
+            get_openclaw_token,
+            start_direct_chat
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

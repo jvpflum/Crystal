@@ -195,15 +195,15 @@ export function ConversationView() {
   const [isListening, setIsListening] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
 
-  // Local STT/TTS pipeline via useVoice (NVIDIA Nemotron → Whisper → browser fallback)
+  // Local STT/TTS pipeline via useVoice (NVIDIA Nemotron/Parakeet → browser fallback)
   const {
     voiceState, transcript: voiceTranscript,
-    isWhisperConnected,
+    isSttConnected,
     hasSpeechRecognition: hasLocalStt,
     startListening: localStartListening, stopListening: localStopListening,
     speak: localSpeak,
   } = useVoice();
-  const localSttAvailable = hasLocalStt || isWhisperConnected;
+  const localSttAvailable = hasLocalStt || isSttConnected;
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
@@ -219,9 +219,40 @@ export function ConversationView() {
   const setView = useAppStore(s => s.setView);
   const thinkingLevel = useAppStore(s => s.thinkingLevel);
   const cycleThinkingLevel = useAppStore(s => s.cycleThinkingLevel);
-  const modelKey = openclawClient.getModel();
+  const [modelKey, setModelKey] = useState(() => openclawClient.getModel());
   const model = openclawClient.getModelDisplayName(modelKey);
   const [liveTps, setLiveTps] = useState(0);
+  const isLocalModel = modelKey.includes("vllm/");
+
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+
+  useEffect(() => {
+    openclawClient.getModels().then(setAvailableModels).catch(() => {});
+  }, []);
+
+  const toggleModel = useCallback(async () => {
+    const localModel = availableModels.find(m => m.startsWith("vllm/"));
+    const cloudModel = availableModels.find(m => m.startsWith("openai/") || m.startsWith("anthropic/"));
+    if (!localModel || !cloudModel) return;
+    const next = isLocalModel ? cloudModel : localModel;
+    setModelKey(next);
+    try {
+      await openclawClient.setModel(next);
+    } catch {
+      setModelKey(modelKey);
+    }
+  }, [isLocalModel, modelKey, availableModels]);
+
+  useEffect(() => {
+    const sync = () => {
+      const current = openclawClient.getModel();
+      if (current && current !== "default" && current !== modelKey) {
+        setModelKey(current);
+      }
+    };
+    const interval = setInterval(sync, 10_000);
+    return () => clearInterval(interval);
+  }, [modelKey]);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1759,6 +1790,42 @@ export function ConversationView() {
                   flexShrink: 0,
                   boxShadow: "0 0 4px rgba(118,185,0,0.6)",
                 }} />
+              )}
+            </button>
+            <button
+              onClick={toggleModel}
+              title={isLocalModel
+                ? "Using LOCAL model — click to switch to cloud"
+                : "Using cloud model — click to switch to local"
+              }
+              style={{
+                padding: "3px 8px", borderRadius: 6, flexShrink: 0,
+                border: `1px solid ${isLocalModel ? "rgba(118,185,0,0.3)" : "rgba(59,130,246,0.3)"}`,
+                cursor: "pointer",
+                background: isLocalModel ? "rgba(118,185,0,0.1)" : "rgba(59,130,246,0.08)",
+                color: isLocalModel ? "#76b900" : "rgba(96,165,250,0.9)",
+                display: "flex", alignItems: "center", gap: 4,
+                transition: `all 0.2s ${EASE}`,
+                fontSize: 9, fontWeight: 700, fontFamily: MONO,
+                letterSpacing: 0.4,
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = isLocalModel ? "rgba(118,185,0,0.18)" : "rgba(59,130,246,0.15)";
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = isLocalModel ? "rgba(118,185,0,0.1)" : "rgba(59,130,246,0.08)";
+              }}
+            >
+              {isLocalModel ? (
+                <>
+                  <Cpu style={{ width: 11, height: 11 }} />
+                  LOCAL
+                </>
+              ) : (
+                <>
+                  <Globe style={{ width: 11, height: 11 }} />
+                  GPT
+                </>
               )}
             </button>
             <button
