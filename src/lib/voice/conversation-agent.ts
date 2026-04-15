@@ -180,8 +180,9 @@ export class ConversationAgent {
         );
       });
 
-      this._activeStreamHandle.onFinalTranscript((text) => {
-        this._handleFinalTranscript(text);
+      this._activeStreamHandle.onFinalTranscript((_text) => {
+        // Final transcript is handled via endStream() in stopListening
+        // to avoid duplicate processing. This callback is intentionally a no-op.
       });
 
       this._activeStreamHandle.onError((err) => {

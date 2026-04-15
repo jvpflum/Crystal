@@ -1,8 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { register, unregister, ShortcutEvent } from "@tauri-apps/plugin-global-shortcut";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export function useGlobalShortcut(shortcut: string, callback: () => void) {
+  const callbackRef = useRef(callback);
+  callbackRef.current = callback;
+
   useEffect(() => {
     let isRegistered = false;
 
@@ -10,7 +13,7 @@ export function useGlobalShortcut(shortcut: string, callback: () => void) {
       try {
         await register(shortcut, async (event: ShortcutEvent) => {
           if (event.state === "Pressed") {
-            callback();
+            callbackRef.current();
           }
         });
         isRegistered = true;
@@ -27,21 +30,22 @@ export function useGlobalShortcut(shortcut: string, callback: () => void) {
         unregister(shortcut).catch(console.error);
       }
     };
-  }, [shortcut, callback]);
+  }, [shortcut]);
 }
 
 export function useToggleWindowShortcut() {
-  useGlobalShortcut("CommandOrControl+Space", async () => {
+  const toggle = useCallback(async () => {
     const window = getCurrentWindow();
     const isVisible = await window.isVisible();
-    
     if (isVisible) {
       await window.hide();
     } else {
       await window.show();
       await window.setFocus();
     }
-  });
+  }, []);
+
+  useGlobalShortcut("CommandOrControl+Space", toggle);
 }
 
 export function useActivateVoiceShortcut(onActivate: () => void) {

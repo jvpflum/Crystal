@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { escapeShellArg } from "@/lib/tools";
 import { cachedCommand } from "@/lib/cache";
+import { memoryPalaceClient } from "@/lib/memory-palace";
 
 /* ─── Types ─── */
 
@@ -84,7 +85,7 @@ export interface SkillInfo {
 
 export interface ActivityEntry {
   id: string;
-  type: "chat" | "tool_call" | "tool_result" | "skill_invoke" | "error" | "heartbeat";
+  type: "chat" | "tool_call" | "tool_result" | "skill_invoke" | "error" | "heartbeat" | "response";
   timestamp: Date;
   channel?: string;
   content: string;
@@ -222,6 +223,8 @@ class OpenClawClient {
   /* Session memory tracking */
   private _sessionMessages: { role: "user" | "assistant"; text: string; ts: number }[] = [];
   private _lastMemoryCapture = 0;
+  private _messagesSinceLastPalaceSave = 0;
+  private static PALACE_SAVE_INTERVAL = 15;
 
   constructor() {
     this._currentModel = localStorage.getItem("crystal_openclaw_model") || null;
@@ -258,15 +261,21 @@ class OpenClawClient {
   }
 
   private stripThinkTags(text: string): string {
-    return text.replace(/<think>[\s\S]*?<\/think>\s*/g, "").replace(/<think>[\s\S]*/g, "").trim();
+    return text.replace(/<think>[\s\S]*?<\/think>\s*/g, "").replace(/<think>[\s\S]*$/g, "").trim();
   }
 
   async *directStreamingChat(text: string): AsyncGenerator<string> {
     const config = await this.getDirectChatConfig();
     if (!config) return;
 
+    let systemPrompt = "You are Crystal, a helpful AI desktop assistant. Be concise and helpful.";
+    try {
+      const wakeUp = await memoryPalaceClient.getWakeUpContext();
+      if (wakeUp) systemPrompt += `\n\n--- MEMORY CONTEXT ---\n${wakeUp}`;
+    } catch { /* palace unavailable */ }
+
     const messages = [
-      { role: "system", content: "You are Crystal, a helpful AI desktop assistant. Be concise and helpful." },
+      { role: "system", content: systemPrompt },
       ...this._sessionMessages.slice(-10).map(m => ({ role: m.role, content: m.text })),
       { role: "user", content: text },
     ];
@@ -356,6 +365,7 @@ class OpenClawClient {
   async connectGateway(): Promise<boolean> {
     if (this._connectLock) return this.gwStatus === "connected";
     this._connectLock = true;
+    this.setGwStatus("connecting");
     try {
       const status = await invoke<{ openclaw_running: boolean }>("get_server_status");
       if (!status.openclaw_running) {
@@ -446,6 +456,9 @@ class OpenClawClient {
         : `# Daily Log: ${date}\n\n${entry}`;
 
       await invoke("write_file", { path: dailyPath, content: updated });
+
+      // Re-mine memory directory into Palace (background, best-effort)
+      memoryPalaceClient.mine(dir).catch(() => {});
     } catch { /* best effort */ }
   }
 
@@ -464,22 +477,38 @@ class OpenClawClient {
   async openclawChat(text: string, sessionId?: string, thinking?: string): Promise<string> {
     this.logActivity({ type: "chat", payload: { text } });
 
-    const escaped = text.replace(/"/g, '\\"').replace(/\n/g, ' ');
+    const escaped = escapeShellArg(text);
     const timeoutMs = 120_000;
     const startTime = Date.now();
 
     let cmd = `${OPENCLAW_CMD} agent --agent main`;
     const normalizedThinking = this.normalizeThinkingLevel(thinking);
-    if (sessionId) cmd += ` --session-id ${sessionId}`;
+    if (sessionId) cmd += ` --session-id "${escapeShellArg(sessionId)}"`;
     if (normalizedThinking) cmd += ` --thinking ${normalizedThinking}`;
     cmd += ` --message "${escaped}"`;
 
-    const cmdPromise = invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-      command: cmd,
-      cwd: null,
-    });
+    const streamId = await invoke<string>("start_streaming_command", { command: cmd, cwd: null });
+    const cmdPromise = (async () => {
+      const POLL_INTERVAL = 300;
+      let fullOutput = "";
+      let fullStderr = "";
+      while (true) {
+        await new Promise(r => setTimeout(r, POLL_INTERVAL));
+        const poll = await invoke<{ new_output: string; new_stderr: string; done: boolean; exit_code: number | null }>(
+          "poll_streaming_command", { id: streamId }
+        );
+        if (poll.new_output) fullOutput += poll.new_output;
+        if (poll.new_stderr) fullStderr += poll.new_stderr;
+        if (poll.done) {
+          return { stdout: fullOutput, stderr: fullStderr, code: poll.exit_code ?? 1 };
+        }
+      }
+    })();
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("OpenClaw timed out after 120s")), timeoutMs)
+      setTimeout(() => {
+        invoke("kill_streaming_command", { id: streamId }).catch(() => {});
+        reject(new Error("OpenClaw timed out after 120s"));
+      }, timeoutMs)
     );
 
     let result;
@@ -488,7 +517,10 @@ class OpenClawClient {
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
       this.logActivity({ type: "error", payload: { text: errMsg } });
+      invoke("cleanup_streaming_command", { id: streamId }).catch(() => {});
       throw e;
+    } finally {
+      invoke("cleanup_streaming_command", { id: streamId }).catch(() => {});
     }
 
     let output = (result.stdout || "")
@@ -546,10 +578,10 @@ class OpenClawClient {
     this.logActivity({ type: "chat", payload: { text } });
     this._seenToolKeys.clear();
 
-    const escaped = text.replace(/"/g, '\\"').replace(/\n/g, ' ');
+    const escaped = escapeShellArg(text);
     let cmd = `${OPENCLAW_CMD} agent --agent main`;
     const normalizedThinking = this.normalizeThinkingLevel(thinking);
-    if (sessionId) cmd += ` --session-id ${sessionId}`;
+    if (sessionId) cmd += ` --session-id "${escapeShellArg(sessionId)}"`;
     if (normalizedThinking) cmd += ` --thinking ${normalizedThinking}`;
     cmd += ` --message "${escaped}"`;
 
@@ -751,6 +783,8 @@ class OpenClawClient {
   }
 
   private async _maybeFlushMemory(): Promise<void> {
+    this._messagesSinceLastPalaceSave++;
+
     const MIN_INTERVAL = 10 * 60 * 1000;
     const MIN_MESSAGES = 6;
     if (this._sessionMessages.length < MIN_MESSAGES) return;
@@ -761,6 +795,15 @@ class OpenClawClient {
       .map(m => `- [${m.role}] ${m.text.slice(0, 200)}`)
       .join("\n");
     this.captureDailyMemory(summary);
+
+    // Auto-extraction: re-mine into Palace every N messages
+    if (this._messagesSinceLastPalaceSave >= OpenClawClient.PALACE_SAVE_INTERVAL) {
+      this._messagesSinceLastPalaceSave = 0;
+      this.getWorkspaceDir().then(ws => {
+        const memDir = `${ws}\\memory`;
+        memoryPalaceClient.mine(memDir).catch(() => {});
+      }).catch(() => {});
+    }
   }
 
   /* ── Gateway: Status ── */
@@ -776,8 +819,9 @@ class OpenClawClient {
   /* ── Gateway: Skill invoke ── */
 
   async invokeSkill(skill: string, args: string): Promise<GatewayMessage> {
+    const escaped = escapeShellArg(`Use the ${skill} skill: ${args}`);
     const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-      command: `${OPENCLAW_CMD} agent --agent main --message "Use the ${skill} skill: ${args.replace(/"/g, '\\"')}"`,
+      command: `${OPENCLAW_CMD} agent --agent main --message "${escaped}"`,
       cwd: null,
     });
     return { type: "response", payload: { text: result.stdout.trim() } };
@@ -879,7 +923,7 @@ class OpenClawClient {
     try {
       const content = await invoke<string>("read_file", { path: curatedPath });
       const sections = content.split(/^(?=## )/m);
-      const filtered = sections.filter((_, i) => `mem-${i}` !== entryId && `mem-${i - 1}` !== entryId);
+      const filtered = sections.filter((_, i) => `mem-${i}` !== entryId);
       await invoke("write_file", { path: curatedPath, content: filtered.join("").trim() });
       this.reindexMemory();
     } catch { /* ignore */ }
@@ -890,6 +934,11 @@ class OpenClawClient {
       const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
         command: `${OPENCLAW_CMD} memory index --force`, cwd: null,
       });
+
+      // Also re-mine into MemPalace in the background
+      const ws = await this.getWorkspaceDir();
+      memoryPalaceClient.mine(ws).catch(() => {});
+
       return { success: result.code === 0, message: result.stdout?.trim() || result.stderr?.trim() || "Done" };
     } catch (e) {
       return { success: false, message: e instanceof Error ? e.message : "Reindex failed" };
@@ -921,12 +970,15 @@ class OpenClawClient {
         pluginEnabled = parsed?.plugins?.entries?.["memory-lancedb"]?.enabled === true;
       } catch { /* ignore */ }
 
+      const palaceInit = await memoryPalaceClient.isInitialized().catch(() => false);
+
       return {
         status: {
           files, chunks: files, dirty: false, provider,
           vector: { available: vectorReady && pluginEnabled },
           fts: { available: false },
           custom: { searchMode: vectorReady ? "hybrid" : "fts-only" },
+          palace: { initialized: palaceInit },
         },
       };
     } catch { /* ignore */ }
@@ -934,6 +986,22 @@ class OpenClawClient {
   }
 
   async searchMemory(query: string): Promise<MemoryEntry[]> {
+    // Try MemPalace semantic search first (hybrid BM25 + vector)
+    try {
+      const palaceResult = await memoryPalaceClient.search(query, undefined, undefined, 20);
+      if (palaceResult.results.length > 0) {
+        return palaceResult.results.map((r, i) => ({
+          id: `palace-${i}`,
+          content: r.text,
+          source: `${r.wing}/${r.room} — ${r.sourceFile}`,
+          date: `score: ${(r.similarity ?? 0).toFixed(3)}`,
+          type: "curated" as const,
+          relevance: r.similarity ?? 0,
+        }));
+      }
+    } catch { /* palace unavailable — fall through to OpenClaw */ }
+
+    // Fallback: OpenClaw CLI memory search
     try {
       const escaped = escapeShellArg(query);
       const result = await invoke<{ stdout: string; code: number }>("execute_command", {
@@ -955,6 +1023,10 @@ class OpenClawClient {
     const all = await this.getMemory();
     const q = query.toLowerCase();
     return all.filter(e => e.content.toLowerCase().includes(q));
+  }
+
+  async getPalaceWakeUpContext(wing?: string): Promise<string> {
+    return memoryPalaceClient.getWakeUpContext(wing);
   }
 
   private parseMemoryMd(md: string, type: "curated" | "daily"): MemoryEntry[] {
@@ -1185,10 +1257,10 @@ class OpenClawClient {
     message: string,
     opts?: { thinking?: string; sessionId?: string; cwd?: string },
   ): Promise<{ stdout: string; stderr: string; code: number }> {
-    const escaped = message.replace(/"/g, '\\"').replace(/\n/g, ' ');
-    let cmd = `${OPENCLAW_CMD} agent --agent "${agentId}"`;
-    if (opts?.thinking) cmd += ` --thinking ${opts.thinking}`;
-    if (opts?.sessionId) cmd += ` --session-id ${opts.sessionId}`;
+    const escaped = escapeShellArg(message);
+    let cmd = `${OPENCLAW_CMD} agent --agent "${escapeShellArg(agentId)}"`;
+    if (opts?.thinking) cmd += ` --thinking ${escapeShellArg(opts.thinking)}`;
+    if (opts?.sessionId) cmd += ` --session-id "${escapeShellArg(opts.sessionId)}"`;
     cmd += ` --message "${escaped}"`;
     return invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
       command: cmd,
@@ -1353,10 +1425,10 @@ class OpenClawClient {
     return [];
   }
 
-  async addCronJob(name: string, schedule: string, command: string): Promise<boolean> {
+  async addCronJob(name: string, schedule: string, message: string): Promise<boolean> {
     try {
       const r = await invoke<{ code: number }>("execute_command", {
-        command: `${OPENCLAW_CMD} cron add --name "${escapeShellArg(name)}" --schedule "${escapeShellArg(schedule)}" --command "${escapeShellArg(command)}"`,
+        command: `${OPENCLAW_CMD} cron add --cron "${escapeShellArg(schedule)}" --message "${escapeShellArg(message)}" --agent main --name "${escapeShellArg(name)}"`,
         cwd: null,
       });
       return r.code === 0;

@@ -7,7 +7,10 @@ export function useOpenClaw() {
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    openclawClient.connectGateway().then(setIsConnected);
+    let cancelled = false;
+    openclawClient.connectGateway().then((ok) => { if (!cancelled) setIsConnected(ok); });
+    const unsub = openclawClient.onStatusChange((s) => { if (!cancelled) setIsConnected(s === "connected"); });
+    return () => { cancelled = true; unsub(); };
   }, []);
 
   const sendMessage = useCallback(

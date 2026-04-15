@@ -6,6 +6,7 @@ import rehypeHighlight from "rehype-highlight";
 import { agentService, AgentStep, ActionButton } from "@/lib/agent";
 import { invoke } from "@tauri-apps/api/core";
 import { Message, ChatAttachment, Surface, openclawClient } from "@/lib/openclaw";
+import { escapeShellArg } from "@/lib/tools";
 import { useAppStore, type AppView } from "@/stores/appStore";
 import { voiceService } from "@/lib/voice";
 import { useVoice } from "@/hooks/useVoice";
@@ -794,20 +795,14 @@ export function ConversationView() {
         if (btn.args?.view) setView(btn.args.view as AppView);
         break;
       case "enable_plugin":
-        if (btn.args?.id) {
+        if (btn.args?.id && /^[\w.@\/-]+$/.test(btn.args.id)) {
           await invoke("execute_command", {
-            command: `openclaw plugins enable ${btn.args.id}`,
+            command: `openclaw plugins enable "${escapeShellArg(btn.args.id)}"`,
             cwd: null,
           });
         }
         break;
       case "run_command":
-        if (btn.args?.command) {
-          await invoke("execute_command", {
-            command: btn.args.command,
-            cwd: null,
-          });
-        }
         break;
       case "power_up":
         setView("tools");
@@ -2318,13 +2313,19 @@ function MessageBubble({ message, isLatest, meta, onImageClick, onRegenerate, on
 }
 
 /* ── Local image resolver — converts file paths to data URLs via Tauri ── */
-function isLocalPath(src: string): boolean {
+const ALLOWED_IMAGE_ROOTS = [
+  /[\\/]\.openclaw[\\/]workspace[\\/]/i,
+  /[\\/]\.openclaw[\\/]agents[\\/]/i,
+  /[\\/]\.openclaw[\\/]images[\\/]/i,
+];
+
+function isAllowedLocalImage(src: string): boolean {
   if (!src) return false;
   if (src.startsWith("data:") || src.startsWith("http://") || src.startsWith("https://") || src.startsWith("blob:")) return false;
-  if (/^[A-Za-z]:[\\/]/.test(src)) return true;
-  if (src.startsWith("/") || src.startsWith("~") || src.startsWith("\\\\")) return true;
-  if (src.startsWith("file://")) return true;
-  return false;
+  const normalized = src.startsWith("file://") ? src.replace(/^file:\/\/\/?/, "") : src;
+  const isLocal = /^[A-Za-z]:[\\/]/.test(normalized) || normalized.startsWith("/") || normalized.startsWith("~") || normalized.startsWith("\\\\");
+  if (!isLocal) return false;
+  return ALLOWED_IMAGE_ROOTS.some(re => re.test(normalized));
 }
 
 function LocalImage({ src, alt, onImageClick }: { src?: string; alt?: string; onImageClick?: (src: string, name: string) => void }) {
@@ -2333,7 +2334,7 @@ function LocalImage({ src, alt, onImageClick }: { src?: string; alt?: string; on
 
   useEffect(() => {
     if (!src) return;
-    if (isLocalPath(src)) {
+    if (isAllowedLocalImage(src)) {
       const filePath = src.startsWith("file://") ? src.replace(/^file:\/\/\/?/, "") : src;
       invoke<string>("read_file_base64", { path: filePath })
         .then(dataUrl => setResolvedSrc(dataUrl))

@@ -247,11 +247,7 @@ class FactoryService {
         useFactoryStore.getState().failBuild(buildId);
         return;
       }
-      if (i < PIPELINE_STAGES.length - 1) {
-        useFactoryStore.getState().advanceStage(buildId);
-      } else {
-        useFactoryStore.getState().advanceStage(buildId);
-      }
+      useFactoryStore.getState().advanceStage(buildId);
     }
   }
 

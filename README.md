@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>The most complete desktop frontend for <a href="https://github.com/nichochar/open-claw">OpenClaw</a>.</strong><br/>
-  A native AI command center with 30 views, AI-powered search, 70+ slash commands, NVIDIA-accelerated voice, 8-provider LLM support with offline mode, token cost analytics, a unified voice gateway, and a full agent workspace — all in a single desktop app.
+  A native AI command center with 30 views, AI-powered search, 70+ slash commands, NVIDIA-accelerated voice, 8-provider LLM support with offline mode, dual-layer memory (MemPalace + LanceDB Pro), 1Password secret management, token cost analytics, a unified voice gateway, and a full agent workspace — all in a single desktop app.
 </p>
 
 <p align="center">
@@ -232,6 +232,8 @@ Crystal wraps [OpenClaw](https://github.com/nichochar/open-claw) — an open-sou
 | System monitoring | None | Live GPU, CPU, RAM, disk dashboards |
 | Coding agents | Separate tools | Built-in Factory with skill launcher + any agent |
 | Agent identity | Edit files manually | Visual workspace editor with presets |
+| Memory | Flat file + basic recall | MemPalace spatial hierarchy + LanceDB Pro hybrid search |
+| Secrets | `.env` files or inline | 1Password vault with `op run` injection |
 | Themes | None | 6 polished themes |
 
 ---
@@ -242,6 +244,8 @@ Crystal wraps [OpenClaw](https://github.com/nichochar/open-claw) — an open-sou
 - **Zero Configuration.** Crystal auto-starts Ollama, the OpenClaw gateway, and all voice servers on launch. The onboarding wizard handles the rest.
 - **Actually Useful.** Crystal isn't a chatbot wrapper. It creates files, runs shell commands, manages your system, automates workflows, generates images, controls a browser, monitors hardware, and manages distributed agent nodes — through natural language or voice.
 - **NVIDIA-Accelerated Voice.** GPU-powered speech recognition (Parakeet STT) and synthesis (Magpie TTS) through the Voice Gateway, with the browser Web Speech API as an emergency fallback when local NVIDIA services are unavailable.
+- **Production-Grade Security.** All secrets stored in 1Password and injected at runtime. Path-scoped filesystem access control. Device authentication on the gateway. No plaintext API keys anywhere.
+- **Dual-Layer Memory.** MemPalace spatial hierarchy (94.8% recall) with AAAK compression and temporal knowledge graph, plus LanceDB Pro hybrid retrieval with auto-capture. Only ~170 tokens loaded at cold start.
 
 ---
 
@@ -483,19 +487,20 @@ Crystal integrates [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) for s
 
 ### Security
 
+- **1Password Integration** — All API keys and tokens stored in 1Password vault, injected at runtime via `op run`. Zero plaintext secrets in config files.
+- **Path-Scoped Access Control** — `access-policy.json` enforces RWX permissions per path. Agents get read-only by default, read-write to their own workspace, and zero access to `.ssh` and config files.
+- **Device Authentication** — Gateway UI requires device auth (no `dangerouslyDisableDeviceAuth`).
+- **Filesystem Isolation** — `fs.workspaceOnly` restricts agent file access to designated workspaces.
 - **Security Audit** — Standard and deep scan modes with pass/warn/fail scoring
 - **Auto Fix** — One-click remediation for detected issues
 - **Tool Permissions** — View and manage allowed/denied tool policies
-- **Gateway Auth** — Authentication status and configuration
-- **Secrets Management** — Reload secrets from vault
 - **Approval Rules** — Auto/manual execution approval policies
-- **Memory Reindex** — Rebuild the memory index
 
 ---
 
 ### Agent Management
 
-- **Agents** — Unified agent hub combining agent configuration with live monitoring dashboard. Shows all real OpenClaw agents with identity, emoji, model, running tasks, recent sessions, token usage, task dispatch form, and "Send to Chat" buttons. Includes agent CRUD, sessions tab, and 30-second auto-refresh.
+- **Agents** — Unified agent hub combining agent configuration with live monitoring dashboard. Shows all real OpenClaw agents with identity, emoji, model, running tasks, recent sessions, token usage, task dispatch form, and "Send to Chat" buttons. Includes agent CRUD, sessions tab, and 30-second auto-refresh. Four specialized agents (main, research, home, finance) each with purpose-built SOUL.md identity files.
 - **Tasks** — Background task monitoring with filtering by status and kind. Audit and maintenance controls
 - **Approvals** — Exec approval management with allowlist configuration per agent
 - **Sub-Agents & ACP** — Unified view for spawning, steering, and managing sub-agents and ACP sessions (Codex, Claude Code, Gemini CLI)
@@ -504,13 +509,29 @@ Crystal integrates [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) for s
 
 ### Memory
 
-- **Knowledge Base** — Browse, view, and edit all workspace `.md` files (SOUL.md, USER.md, AGENTS.md, TOOLS.md, etc.) with category filtering (Identity, System, Operations, Security, Domain)
-- **Tiered Memory** — Visual HOT → WARM → COLD memory hierarchy showing active context, stable facts, and long-term archive with installed memory skills
+Crystal ships with a dual-layer memory architecture: **MemPalace** for spatial/hierarchical memory and **LanceDB Pro** for OpenClaw's native auto-capture.
+
+**Memory Palace (MemPalace)**
+- **Spatial Hierarchy** — Memories organized into Wings > Rooms > Halls with cross-wing Tunnels for shared topics. Wing+room scoping achieves 94.8% recall vs 60.9% for flat search.
+- **Layered Loading** — L0 identity (~50 tokens) + L1 critical facts (~120 tokens) injected at startup. L2 room recall loaded on-demand. L3 deep semantic search for explicit queries. Only ~170 tokens at cold start.
+- **AAAK Compression** — 30x lossless compression natively readable by any LLM. Turns 1,000 tokens of prose into ~120 tokens of structured shorthand.
+- **Temporal Knowledge Graph** — SQLite-backed entity-relationship triples with valid_from/ended dates. Facts expire, contradictions are detected, historical queries supported.
+- **Auto-extraction** — Background mining every 15 messages captures topics, decisions, and code changes automatically.
+- **Palace UI** — Dedicated Palace tab with wing/room/hall browser, tunnel explorer, KG entity query, identity (L0) editor, and actions for mining, compression, and repair.
+
+**LanceDB Pro (OpenClaw Native)**
+- **Hybrid Retrieval** — Vector + BM25 full-text search with RRF fusion and cross-encoder reranking
+- **Smart Extraction** — LLM-powered automatic memory categorization (6 types)
+- **Weibull Decay** — Accessed memories get promoted, stale ones naturally fade
+- **Multi-scope Isolation** — Global, agent, user, project, and custom scopes
+
+**Additional Tabs**
+- **Knowledge Base** — Browse and edit all workspace `.md` files (SOUL.md, USER.md, AGENTS.md, TOOLS.md, etc.) with category filtering
+- **Tiered Memory** — Visual HOT > WARM > COLD hierarchy with installed memory skills
 - **Curated Memory** — View, add, and delete entries in `MEMORY.md`
-- **Daily Memory** — Browse daily memory logs with automatic cron capture (11 PM daily)
-- **Semantic Search** — Search across all memory entries
-- **Vector DB** — LanceDB configuration, similarity search, and embedding stats
-- **Reindex** — Rebuild the memory index with stats
+- **Daily Memory** — Browse daily memory logs with automatic cron capture
+- **Semantic Search** — Hybrid search across MemPalace and OpenClaw memory
+- **Vector DB** — LanceDB Pro configuration, similarity search, and embedding stats
 
 ---
 
@@ -666,6 +687,8 @@ Crystal is engineered to feel instant:
 | Voice Gateway | FastAPI (`voice_gateway.py`, port 6500) |
 | Voice STT | NVIDIA Parakeet (`nvidia_stt_worker.py`, port 8090 via gateway 6500), Web Speech API (fallback) |
 | Voice TTS | NVIDIA Magpie (`nvidia_tts_worker.py`, port 8091 via gateway 6500), Web Speech API (fallback) |
+| Memory (Spatial) | [MemPalace](https://github.com/ultrawideband/mempalace) (Wings/Rooms/Halls/KG, ChromaDB) |
+| Memory (Native) | LanceDB Pro (hybrid BM25+vector, Weibull decay, multi-scope) |
 | Image Gen | OpenAI DALL·E (via OpenClaw skill) |
 | Sandbox | [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) *(optional)* |
 | Icons | Lucide React |
@@ -764,6 +787,7 @@ Crystal/
 │   │   │   ├── intent-router.ts      # Voice intent classification
 │   │   │   ├── conversation-agent.ts # Voice conversation handler
 │   │   │   └── session-store.ts      # Voice session persistence
+│   │   ├── memory-palace.ts           # MemPalace integration (wings, rooms, halls, KG, mining)
 │   │   ├── marketplace.ts            # Skill/plugin catalog
 │   │   ├── telegram.ts               # Telegram topic helpers
 │   │   ├── version.ts                # App version constant
@@ -820,6 +844,7 @@ Crystal/
 | Keyboard shortcuts | 14 |
 | Tauri commands | 13 |
 | OpenClaw skills | 51+ |
+| Memory layers | 4 (L0 identity, L1 facts, L2 room recall, L3 deep search) |
 | Data cache entries | 8 |
 | AI search view mappings | 80+ |
 | Nav sections | 3 (Mission / Claw / System) |

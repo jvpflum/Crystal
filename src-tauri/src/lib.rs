@@ -530,6 +530,17 @@ fn resolve_path(path: &str) -> String {
         resolved = format!("{}\\{}", home, resolved);
     }
 
+    // Canonicalize and verify the path stays under USERPROFILE
+    if let Ok(canonical) = std::fs::canonicalize(&resolved) {
+        let canon_str = canonical.to_string_lossy().to_string();
+        let home_lower = home.to_lowercase();
+        if !canon_str.to_lowercase().starts_with(&home_lower) {
+            eprintln!("resolve_path: '{}' escapes home directory, blocking", path);
+            return format!("{}\\__blocked_path__", home);
+        }
+        return canon_str;
+    }
+
     resolved
 }
 
@@ -651,6 +662,18 @@ fn start_direct_chat(
     model: String,
     max_tokens: Option<u32>,
 ) -> Result<String, String> {
+    if let Ok(parsed) = base_url.parse::<reqwest::Url>() {
+        match parsed.host_str() {
+            Some("localhost") | Some("127.0.0.1") | Some("0.0.0.0")
+            | Some("api.openai.com") | Some("api.anthropic.com")
+            | Some("api.x.ai") | Some("generativelanguage.googleapis.com")
+            | Some("api.deepseek.com") => {}
+            _ => return Err(format!("start_direct_chat: host '{}' not in allowlist", parsed.host_str().unwrap_or("unknown"))),
+        }
+    } else {
+        return Err("start_direct_chat: invalid base_url".to_string());
+    }
+
     let id = format!("stream-{}", STREAM_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
     let proc = Arc::new(StreamingProcess {
         stdout_buf: Mutex::new(String::new()),

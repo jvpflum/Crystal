@@ -57,7 +57,7 @@ function ViewSlot({ id, active, children }: { id: string; active: boolean; child
   const mountedRef = useRef(false);
   const [alive, setAlive] = useState(false);
 
-  if (active) {
+  if (active && !mountedRef.current) {
     mountedRef.current = true;
   }
 
@@ -71,7 +71,8 @@ function ViewSlot({ id, active, children }: { id: string; active: boolean; child
     return () => clearTimeout(timer);
   }, [active]);
 
-  if (!mountedRef.current || !alive) return null;
+  if (!mountedRef.current) return null;
+  if (!alive && !active) return null;
 
   return (
     <div key={id} style={{ display: active ? "contents" : "none" }}>

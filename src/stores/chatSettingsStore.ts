@@ -26,7 +26,10 @@ function load<T>(key: string, fallback: T): T {
   try {
     const v = localStorage.getItem(PREFIX + key);
     if (v === null) return fallback;
-    if (typeof fallback === "number") return parseFloat(v) as unknown as T;
+    if (typeof fallback === "number") {
+      const n = parseFloat(v);
+      return (isNaN(n) ? fallback : n) as unknown as T;
+    }
     if (typeof fallback === "boolean") return (v === "true") as unknown as T;
     return v as unknown as T;
   } catch {

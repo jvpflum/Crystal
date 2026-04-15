@@ -167,9 +167,6 @@ class AgentService {
     }
 
     const cleaned = this.extractAndEmitActions(fullResponse);
-    if (cleaned !== fullResponse) {
-      yield "";
-    }
     this.emitStep({ action: { type: "response", content: cleaned }, timestamp: new Date() });
   }
 
