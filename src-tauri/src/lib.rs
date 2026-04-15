@@ -679,11 +679,13 @@ fn start_direct_chat(
             let mut body = serde_json::json!({
                 "model": model,
                 "messages": messages,
-                "max_tokens": max_tok,
                 "stream": true,
             });
             if is_local {
+                body["max_tokens"] = serde_json::json!(max_tok);
                 body["chat_template_kwargs"] = serde_json::json!({"enable_thinking": false});
+            } else {
+                body["max_completion_tokens"] = serde_json::json!(max_tok);
             }
 
             let resp = client
@@ -1085,31 +1087,45 @@ fn find_openclaw_bin() -> String {
 }
 
 #[tauri::command]
-fn start_openclaw_daemon(state: tauri::State<AppState>) -> Result<String, String> {
-    if check_port_in_use(18789) {
+async fn start_openclaw_daemon(_state: tauri::State<'_, AppState>) -> Result<String, String> {
+    if check_port_in_use(18789) && gateway_http_healthy() {
         return Ok("OpenClaw daemon already running".to_string());
     }
 
-    // Sanitize config before attempting start
     sanitize_openclaw_config();
 
-    let openclaw_bin = find_openclaw_bin();
-    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
+    tokio::task::spawn_blocking(|| {
+        let openclaw_bin = find_openclaw_bin();
 
-    // First attempt
-    match spawn_hidden(&openclaw_bin, &["gateway", "--port", "18789"]) {
-        Ok(mut child) => {
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            if check_port_in_use(18789) {
-                servers.openclaw = Some(child);
-                return Ok("OpenClaw daemon started".to_string());
+        #[cfg(target_os = "windows")]
+        let spawn_result = {
+            let mut cmd = Command::new(&openclaw_bin);
+            cmd.args(["gateway", "start"])
+                .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW);
+            cmd.spawn()
+        };
+        #[cfg(not(target_os = "windows"))]
+        let spawn_result = Command::new(&openclaw_bin)
+            .args(["gateway", "start"])
+            .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+            .spawn();
+
+        match spawn_result {
+            Ok(_) => {
+                for _ in 0..20 {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    if check_port_in_use(18789) && gateway_http_healthy() {
+                        return Ok("OpenClaw daemon started".to_string());
+                    }
+                }
+                Err("Gateway started but not healthy within 40s — check openclaw config".to_string())
             }
-            kill_process_tree(&mut child);
+            Err(e) => Err(format!("Failed to start gateway: {}", e)),
         }
-        Err(_) => {}
-    }
-
-    Err("Gateway started but not listening — check openclaw config".to_string())
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]
@@ -1271,61 +1287,121 @@ fn sanitize_openclaw_config() {
     }
 }
 
-/// Try to start the gateway, retrying once after running `openclaw doctor --fix`
-/// if the first attempt fails (config validation error).
-fn start_gateway_resilient<R: Runtime>(app: &AppHandle<R>) {
-    // Pre-flight: sanitize config before first attempt
-    sanitize_openclaw_config();
-    let openclaw_bin = find_openclaw_bin();
-    if check_port_in_use(18789) {
-        let status = Command::new(&openclaw_bin)
-            .args(["gateway", "status"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::null())
-            .output();
-        if let Ok(out) = status {
-            let text = format!(
-                "{}\n{}",
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
-            )
-            .to_lowercase();
-            if text.contains("rpc probe: ok") {
-                println!("OpenClaw gateway already healthy on port 18789 — reusing instance");
-                return;
-            }
+/// Check if the gateway is accepting HTTP connections (more reliable than RPC probe).
+fn gateway_http_healthy() -> bool {
+    use std::io::{Read as IoRead, Write as IoWrite};
+    use std::net::TcpStream;
+    if let Ok(mut stream) = TcpStream::connect_timeout(
+        &"127.0.0.1:18789".parse().unwrap(),
+        std::time::Duration::from_secs(2),
+    ) {
+        let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(3)));
+        let _ = stream.write_all(b"GET / HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n");
+        let mut buf = [0u8; 64];
+        if let Ok(n) = stream.read(&mut buf) {
+            let resp = String::from_utf8_lossy(&buf[..n]);
+            return resp.contains("HTTP/");
         }
-        eprintln!("OpenClaw gateway port is up but RPC is unhealthy — restarting gateway");
-        let _ = Command::new(&openclaw_bin)
-            .args(["gateway", "restart"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .stdin(Stdio::null())
-            .output();
-        std::thread::sleep(std::time::Duration::from_secs(3));
+    }
+    false
+}
+
+/// Start the OpenClaw gateway via `openclaw gateway start`, which delegates to
+/// the Windows Scheduled Task (or equivalent service manager). This avoids
+/// spawning a competing process that fights with the system service.
+///
+/// This runs entirely in a background thread to avoid blocking app startup.
+fn start_gateway_resilient<R: Runtime>(_app: &AppHandle<R>) {
+    sanitize_openclaw_config();
+
+    if check_port_in_use(18789) && gateway_http_healthy() {
+        println!("OpenClaw gateway already healthy on port 18789 — reusing instance");
+        return;
     }
 
-    // First attempt
-    println!("Starting OpenClaw daemon...");
-    match spawn_hidden(&openclaw_bin, &["gateway", "--port", "18789"]) {
-        Ok(mut child) => {
-            std::thread::sleep(std::time::Duration::from_secs(2));
+    println!("Starting OpenClaw gateway in background...");
+    std::thread::spawn(|| {
+        let openclaw_bin = find_openclaw_bin();
+
+        // If the port is held by a dead/stuck process, stop it first.
+        if check_port_in_use(18789) {
+            println!("OpenClaw port 18789 occupied but unhealthy — stopping stale gateway...");
+            #[cfg(target_os = "windows")]
+            {
+                let mut cmd = Command::new(&openclaw_bin);
+                cmd.args(["gateway", "stop"])
+                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                    .creation_flags(CREATE_NO_WINDOW);
+                let _ = cmd.output();
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = Command::new(&openclaw_bin)
+                    .args(["gateway", "stop"])
+                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                    .output();
+            }
+            for _ in 0..10 {
+                if !check_port_in_use(18789) { break; }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
             if check_port_in_use(18789) {
-                if let Some(state) = app.try_state::<AppState>() {
-                    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
-                    servers.openclaw = Some(child);
+                #[cfg(target_os = "windows")]
+                {
+                    let kill_cmd = "Get-NetTCPConnection -LocalPort 18789 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }";
+                    let mut cmd = Command::new("powershell");
+                    cmd.args(["-NoProfile", "-NonInteractive", "-Command", kill_cmd])
+                        .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                        .creation_flags(CREATE_NO_WINDOW);
+                    let _ = cmd.output();
                 }
-                println!("OpenClaw gateway started on port 18789");
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+        }
+
+        // Fire-and-forget: trigger the Scheduled Task.
+        // Use spawn() instead of output() so we don't block waiting for
+        // the CLI to finish its own health-check loop.
+        println!("Triggering OpenClaw gateway service...");
+        #[cfg(target_os = "windows")]
+        let spawn_result = {
+            let mut cmd = Command::new(&openclaw_bin);
+            cmd.args(["gateway", "start"])
+                .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW);
+            cmd.spawn()
+        };
+        #[cfg(not(target_os = "windows"))]
+        let spawn_result = Command::new(&openclaw_bin)
+            .args(["gateway", "start"])
+            .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+            .spawn();
+
+        match spawn_result {
+            Ok(_child) => {
+                // Don't wait for the CLI to finish — just poll the port.
+            }
+            Err(e) => {
+                eprintln!("Failed to invoke openclaw gateway start: {}", e);
                 return;
             }
-            kill_process_tree(&mut child);
-            eprintln!("OpenClaw gateway spawned but not listening — running without gateway");
         }
-        Err(e) => {
-            eprintln!("OpenClaw daemon not available: {} (agent will use direct LLM)", e);
+
+        // Poll for readiness (gateway typically takes ~17s to fully boot)
+        let max_wait = std::time::Duration::from_secs(45);
+        let start = std::time::Instant::now();
+        while start.elapsed() < max_wait {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            if check_port_in_use(18789) && gateway_http_healthy() {
+                println!("OpenClaw gateway is ready on port 18789");
+                return;
+            }
         }
-    }
+        eprintln!(
+            "OpenClaw gateway did not become healthy within {}s — running without gateway",
+            max_wait.as_secs()
+        );
+    });
 }
 
 fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
@@ -1533,8 +1609,29 @@ fn cleanup_servers(app: &AppHandle<impl Runtime>) {
             kill_process_tree(&mut child);
         }
 
+        // Stop OpenClaw gateway via CLI (managed by service manager, not a child process)
+        if check_port_in_use(18789) {
+            println!("Stopping OpenClaw gateway via service manager...");
+            let openclaw_bin = find_openclaw_bin();
+            #[cfg(target_os = "windows")]
+            {
+                let mut cmd = Command::new(&openclaw_bin);
+                cmd.args(["gateway", "stop"])
+                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                    .creation_flags(CREATE_NO_WINDOW);
+                let _ = cmd.output();
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = Command::new(&openclaw_bin)
+                    .args(["gateway", "stop"])
+                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                    .output();
+            }
+        }
+        // Legacy: if we somehow still hold a child handle, clean it up
         if let Some(mut child) = servers.openclaw.take() {
-            println!("Stopping OpenClaw daemon...");
+            println!("Stopping legacy OpenClaw child process...");
             kill_process_tree(&mut child);
         }
 

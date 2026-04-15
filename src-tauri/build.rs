@@ -10,7 +10,12 @@ fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     
     let scripts_src = Path::new(&manifest_dir).parent().unwrap().join("scripts");
-    let target_dir = Path::new(&manifest_dir).join("target").join(&profile).join("scripts");
+    let out_dir = std::env::var("CARGO_TARGET_DIR")
+        .or_else(|_| std::env::var("OUT_DIR").map(|o| {
+            Path::new(&o).ancestors().nth(3).unwrap_or(Path::new(&o)).to_string_lossy().to_string()
+        }))
+        .unwrap_or_else(|_| Path::new(&manifest_dir).join("target").to_string_lossy().to_string());
+    let target_dir = Path::new(&out_dir).join(&profile).join("scripts");
 
     if scripts_src.exists() {
         // Create target scripts directory

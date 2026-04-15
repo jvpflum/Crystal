@@ -898,23 +898,36 @@ class OpenClawClient {
 
   async getMemoryStatus(): Promise<Record<string, unknown> | null> {
     try {
-      const result = await cachedCommand(`${OPENCLAW_CMD} ltm stats`, { ttl: 300_000, timeout: 120_000 });
-      const out = (result.stdout ?? "") + (result.stderr ?? "");
-      const match = out.match(/Total memories:\s*(\d+)/i);
-      const chunks = match ? parseInt(match[1], 10) : 0;
+      const ws = await this.getWorkspaceDir();
+      const home = ws.replace(/\\workspace$/, "");
 
-      let vectorReady = false;
-      let provider = "none";
-      if (/memory-lancedb/i.test(out)) {
-        vectorReady = true;
-        provider = "lancedb";
-      }
+      const countFilesCmd = `powershell -Command "$ws='${ws}'; $mem='${ws}\\memory'; $wf=0; $mf=0; if(Test-Path $ws){$wf=(Get-ChildItem $ws -Filter '*.md' -File -ErrorAction SilentlyContinue).Count} if(Test-Path $mem){$mf=(Get-ChildItem $mem -Filter '*.md' -File -ErrorAction SilentlyContinue).Count} Write-Output ($wf+$mf)"`;
+      const lanceExistsCmd = `powershell -Command "if(Test-Path '${home}\\memory\\lancedb\\memories.lance'){Write-Output 'YES'}else{Write-Output 'NO'}"`;
+
+      const [filesResult, lanceResult] = await Promise.all([
+        invoke<{ stdout: string; code: number }>("execute_command", { command: countFilesCmd, cwd: null }).catch(() => ({ stdout: "0", code: 1 })),
+        invoke<{ stdout: string; code: number }>("execute_command", { command: lanceExistsCmd, cwd: null }).catch(() => ({ stdout: "NO", code: 1 })),
+      ]);
+
+      const files = parseInt(filesResult.stdout.trim(), 10) || 0;
+      const vectorReady = lanceResult.stdout.trim() === "YES";
+      const provider = vectorReady ? "lancedb" : "none";
+
+      // Read openclaw.json to check memory plugin config
+      let pluginEnabled = false;
+      try {
+        const cfg = await invoke<string>("read_file", { path: `${home}\\openclaw.json` });
+        const parsed = JSON.parse(cfg);
+        pluginEnabled = parsed?.plugins?.entries?.["memory-lancedb"]?.enabled === true;
+      } catch { /* ignore */ }
 
       return {
-        chunks, files: 0, dirty: false, provider,
-        vector: { available: vectorReady },
-        fts: { available: false },
-        custom: { searchMode: vectorReady ? "vector" : "unknown" },
+        status: {
+          files, chunks: files, dirty: false, provider,
+          vector: { available: vectorReady && pluginEnabled },
+          fts: { available: false },
+          custom: { searchMode: vectorReady ? "hybrid" : "fts-only" },
+        },
       };
     } catch { /* ignore */ }
     return null;
@@ -1090,28 +1103,73 @@ class OpenClawClient {
   }
 
   async setModel(m: string): Promise<void> {
-    const prev = this._currentModel;
     this._currentModel = m;
     localStorage.setItem("crystal_openclaw_model", m);
     this._modelsCache = null;
-    try {
-      await invoke("execute_command", {
-        command: `${OPENCLAW_CMD} models set "${m}"`,
-        cwd: null,
-      });
-    } catch (err) {
-      console.error("[OpenClaw] Failed to set model:", err);
-      this._currentModel = prev;
-      if (prev) localStorage.setItem("crystal_openclaw_model", prev);
-      throw err;
-    }
+    // Fire-and-forget: don't block the UI waiting for the gateway CLI
+    invoke("execute_command", {
+      command: `${OPENCLAW_CMD} models set "${m}"`,
+      cwd: null,
+    }).catch(err => {
+      console.warn("[OpenClaw] models set failed (model still active locally):", err);
+    });
   }
 
   getModel(): string { return this._currentModel || "default"; }
 
+  /**
+   * Read the local/cloud model pair directly from openclaw.json config,
+   * bypassing the gateway CLI entirely (which may be down or slow).
+   */
+  async getModelPairFromConfig(): Promise<{ local: string | null; cloud: string | null }> {
+    try {
+      const home = await this.getOpenClawDir();
+      const raw = await invoke<string>("read_file", { path: `${home}\\openclaw.json` });
+      const cfg = JSON.parse(raw);
+      const agentModels = cfg?.agents?.defaults?.models as Record<string, unknown> | undefined;
+      const primary = cfg?.agents?.defaults?.model?.primary as string | undefined;
+      const fallbacks = cfg?.agents?.defaults?.model?.fallbacks as string[] | undefined;
+
+      let local: string | null = null;
+      let cloud: string | null = null;
+
+      const allKeys = new Set<string>();
+      if (primary) allKeys.add(primary);
+      if (fallbacks) fallbacks.forEach(f => allKeys.add(f));
+      if (agentModels) Object.keys(agentModels).forEach(k => allKeys.add(k));
+
+      for (const key of allKeys) {
+        if (!local && key.startsWith("vllm/")) local = key;
+        if (!cloud && (key.startsWith("openai/") || key.startsWith("anthropic/"))) cloud = key;
+      }
+      return { local, cloud };
+    } catch {
+      return { local: null, cloud: null };
+    }
+  }
+
   /* ── Agents ── */
 
   async listAgents(): Promise<{ id: string; workspace: string; agentDir: string; model: string; bindings: number; isDefault: boolean; routes: string[] }[]> {
+    // Primary: read directly from config file (no gateway dependency)
+    try {
+      const cfg = await this.getConfig(true);
+      const defaults = cfg?.agents?.defaults;
+      const list = cfg?.agents?.list as { id: string; name?: string; workspace?: string; agentDir?: string; model?: string }[] | undefined;
+      if (list && list.length > 0) {
+        const primaryModel = defaults?.model?.primary || "";
+        return list.map((a, i) => ({
+          id: a.id,
+          workspace: a.workspace || defaults?.workspace || "",
+          agentDir: a.agentDir || "",
+          model: a.model || primaryModel,
+          bindings: 0,
+          isDefault: i === 0 || a.id === "main",
+          routes: [],
+        }));
+      }
+    } catch { /* fall through */ }
+    // Fallback: try CLI (may hang if gateway is down)
     try {
       const result = await cachedCommand(`${OPENCLAW_CMD} agents list --json`, { ttl: 60_000 });
       if (result.code === 0 && result.stdout.trim()) {

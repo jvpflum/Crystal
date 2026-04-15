@@ -731,25 +731,58 @@ function VectorDBTab({ status, onReindex, reindexing }: { status: MemoryStatus |
   const loadConfig = useCallback(async () => {
     setConfigLoading(true);
     try {
-      const [memCfg, ocCfg] = await Promise.all([
-        cachedCommand("openclaw config get memory --json", { ttl: 120_000 }),
-        cachedCommand("openclaw config get plugins --json", { ttl: 120_000 }),
-      ]);
       let embModel = "text-embedding-3-small", autoCapture = true, autoRecall = true, pluginEnabled = true, pluginSlot = "memory-lancedb";
-      if (ocCfg.code === 0 && ocCfg.stdout.trim()) {
-        try { const p = JSON.parse(ocCfg.stdout); pluginSlot = p?.slots?.memory ?? pluginSlot; const entry = p?.entries?.["memory-lancedb"];
-          if (entry) { pluginEnabled = entry.enabled !== false; autoCapture = entry.config?.autoCapture !== false; autoRecall = entry.config?.autoRecall !== false; embModel = entry.config?.embedding?.model ?? embModel; }
-        } catch { /* */ }
-      }
       let hybridEnabled = true, vectorWeight = 0.7, textWeight = 0.3, mmrEnabled = true, mmrLambda = 0.7, temporalDecayEnabled = true, halfLifeDays = 30, sources = ["memory", "sessions"];
-      if (memCfg.code === 0 && memCfg.stdout.trim()) {
-        try { const m = JSON.parse(memCfg.stdout); const ms = m?.memorySearch ?? m; sources = ms?.sources ?? sources;
-          const h = ms?.query?.hybrid ?? {};
-          hybridEnabled = h?.enabled !== false; vectorWeight = h?.vectorWeight ?? vectorWeight; textWeight = h?.textWeight ?? textWeight;
-          mmrEnabled = h?.mmr?.enabled !== false; mmrLambda = h?.mmr?.lambda ?? mmrLambda;
-          temporalDecayEnabled = h?.temporalDecay?.enabled !== false; halfLifeDays = h?.temporalDecay?.halfLifeDays ?? halfLifeDays;
-        } catch { /* */ }
+
+      // Read directly from openclaw.json for fast, reliable config
+      try {
+        const homeCmd = `powershell -Command "Write-Output (Join-Path $env:USERPROFILE '.openclaw')"`;
+        const homeResult = await invoke<{ stdout: string }>("execute_command", { command: homeCmd, cwd: null });
+        const homePath = homeResult.stdout.trim().replace(/\r?\n/g, "");
+        const cfgContent = await invoke<string>("read_file", { path: `${homePath}\\openclaw.json` });
+        const cfg = JSON.parse(cfgContent);
+
+        if (cfg?.plugins) {
+          pluginSlot = cfg.plugins.slots?.memory ?? pluginSlot;
+          const entry = cfg.plugins.entries?.["memory-lancedb"];
+          if (entry) {
+            pluginEnabled = entry.enabled !== false;
+            autoCapture = entry.config?.autoCapture !== false;
+            autoRecall = entry.config?.autoRecall !== false;
+            embModel = entry.config?.embedding?.model ?? embModel;
+          }
+        }
+
+        if (cfg?.memorySearch) {
+          const ms = cfg.memorySearch;
+          sources = ms.sources ?? sources;
+          const h = ms.query?.hybrid ?? {};
+          hybridEnabled = h.enabled !== false;
+          vectorWeight = h.vectorWeight ?? vectorWeight;
+          textWeight = h.textWeight ?? textWeight;
+          mmrEnabled = h.mmr?.enabled !== false;
+          mmrLambda = h.mmr?.lambda ?? mmrLambda;
+          temporalDecayEnabled = h.temporalDecay?.enabled !== false;
+          halfLifeDays = h.temporalDecay?.halfLifeDays ?? halfLifeDays;
+        }
+      } catch {
+        // Fallback: try CLI (slower)
+        try {
+          const ocCfg = await cachedCommand("openclaw config get plugins --json", { ttl: 120_000, timeout: 10_000 });
+          if (ocCfg.code === 0 && ocCfg.stdout.trim()) {
+            const p = JSON.parse(ocCfg.stdout);
+            pluginSlot = p?.slots?.memory ?? pluginSlot;
+            const entry = p?.entries?.["memory-lancedb"];
+            if (entry) {
+              pluginEnabled = entry.enabled !== false;
+              autoCapture = entry.config?.autoCapture !== false;
+              autoRecall = entry.config?.autoRecall !== false;
+              embModel = entry.config?.embedding?.model ?? embModel;
+            }
+          }
+        } catch { /* keep defaults */ }
       }
+
       setConfig({ plugin: pluginSlot, enabled: pluginEnabled, autoCapture, autoRecall, embeddingModel: embModel,
         hybridEnabled, vectorWeight, textWeight, mmrEnabled, mmrLambda, temporalDecayEnabled, halfLifeDays, sources });
     } catch { /* */ }

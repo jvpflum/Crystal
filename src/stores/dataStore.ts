@@ -1,5 +1,14 @@
 import { create } from "zustand";
+import { invoke } from "@tauri-apps/api/core";
 import { cachedCommand, invalidateCache } from "@/lib/cache";
+
+let _openclawHome: string | null = null;
+async function getOpenClawHome(): Promise<string> {
+  if (_openclawHome) return _openclawHome;
+  const r = await invoke<{ stdout: string }>("execute_command", { command: "echo $env:USERPROFILE\\.openclaw", cwd: null });
+  _openclawHome = r.stdout.trim().replace(/\r?\n/g, "");
+  return _openclawHome;
+}
 
 /** CLI string used by `fetchCronJobs`; bust this cache after any cron add/remove/toggle/run. */
 export const CRON_LIST_JSON_ALL_CMD = "openclaw cron list --json --all";
@@ -157,6 +166,15 @@ function makeGetter<T>(
 // All fetchers now go through cachedCommand which has a concurrency limiter
 
 async function fetchCronJobs(): Promise<Record<string, unknown>[]> {
+  // Primary: read directly from cron jobs file (no gateway dependency)
+  try {
+    const home = `${await getOpenClawHome()}\\cron\\jobs.json`;
+    const raw = await invoke<string>("read_file", { path: home });
+    const parsed = JSON.parse(raw);
+    const jobs = parsed?.jobs ?? (Array.isArray(parsed) ? parsed : []);
+    if (jobs.length > 0) return jobs;
+  } catch { /* fall through to CLI */ }
+  // Fallback: CLI (may hang if gateway is down)
   const r = await cachedCommand(CRON_LIST_JSON_ALL_CMD, { ttl: 120_000 });
   if (r.code === 0 && r.stdout.trim()) {
     try {
@@ -168,6 +186,24 @@ async function fetchCronJobs(): Promise<Record<string, unknown>[]> {
 }
 
 async function fetchAgents(): Promise<Record<string, unknown>[]> {
+  // Primary: read directly from openclaw.json config (no gateway dependency)
+  try {
+    const home = await getOpenClawHome();
+    const raw = await invoke<string>("read_file", { path: `${home}\\openclaw.json` });
+    const cfg = JSON.parse(raw);
+    const list = cfg?.agents?.list;
+    if (Array.isArray(list) && list.length > 0) {
+      const primary = cfg?.agents?.defaults?.model?.primary || "";
+      return list.map((a: Record<string, unknown>, i: number) => ({
+        ...a,
+        model: a.model || primary,
+        isDefault: i === 0 || a.id === "main",
+        bindings: 0,
+        routes: [],
+      }));
+    }
+  } catch { /* fall through to CLI */ }
+  // Fallback: CLI (may hang if gateway is down)
   const r = await cachedCommand("openclaw agents list --json", { ttl: 60_000 });
   if (r.code === 0 && r.stdout.trim()) {
     try {
@@ -317,7 +353,7 @@ export function parseSkillsCliOutput(stdout: string, stderr: string): Record<str
 }
 
 async function fetchSkills(): Promise<Record<string, unknown>[]> {
-  const r = await cachedCommand(SKILLS_LIST_JSON_CMD, { ttl: 120_000 });
+  const r = await cachedCommand(SKILLS_LIST_JSON_CMD, { ttl: 120_000, timeout: 12_000 });
   return parseSkillsCliOutput(r.stdout || "", r.stderr || "");
 }
 

@@ -779,20 +779,29 @@ function SandboxTab() {
 
   const loadSandboxMode = useCallback(async () => {
     try {
-      const r = await cachedCommand("openclaw config get agents.defaults.sandbox --json", { ttl: 30_000 });
-      if (r.code === 0 && r.stdout.trim()) {
-        try {
+      // Read directly from openclaw.json for speed
+      const homeCmd = `powershell -Command "Write-Output (Join-Path $env:USERPROFILE '.openclaw')"`;
+      const homeResult = await invoke<{ stdout: string }>("execute_command", { command: homeCmd, cwd: null });
+      const homePath = homeResult.stdout.trim().replace(/\r?\n/g, "");
+      const cfgContent = await invoke<string>("read_file", { path: `${homePath}\\openclaw.json` });
+      const cfg = JSON.parse(cfgContent);
+      const mode = cfg?.agents?.defaults?.sandbox?.mode ?? "off";
+      setSandboxMode(typeof mode === "string" && mode !== "off" ? "openshell" : "off");
+    } catch {
+      try {
+        const r = await cachedCommand("openclaw config get agents.defaults.sandbox --json", { ttl: 30_000, timeout: 8_000 });
+        if (r.code === 0 && r.stdout.trim()) {
           const data = JSON.parse(r.stdout);
           const mode = data.mode ?? data.value?.mode ?? data.value ?? data ?? "off";
           setSandboxMode(typeof mode === "string" && mode !== "off" ? "openshell" : "off");
-        } catch { /* keep default */ }
-      }
-    } catch { /* keep default */ }
+        }
+      } catch { /* keep default */ }
+    }
   }, []);
 
   const loadSandbox = useCallback(async () => {
     try {
-      const result = await cachedCommand("openclaw sandbox list --json", { ttl: 60_000 });
+      const result = await cachedCommand("openclaw sandbox list --json", { ttl: 60_000, timeout: 8_000 });
       const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
       const raw = extractCliJsonObject(combined);
       if (raw) {
@@ -806,7 +815,7 @@ function SandboxTab() {
 
   const loadPolicy = useCallback(async () => {
     try {
-      const result = await cachedCommand("openclaw sandbox explain --json", { ttl: 120_000 });
+      const result = await cachedCommand("openclaw sandbox explain --json", { ttl: 120_000, timeout: 8_000 });
       const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
       setPolicy(extractCliJsonObject(combined));
     } catch { /* non-critical */ }
@@ -814,11 +823,23 @@ function SandboxTab() {
 
   const loadToolPermissions = useCallback(async () => {
     try {
-      const result = await cachedCommand("openclaw config get tools --json", { ttl: 120_000 });
-      const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
-      const parsed = extractCliJsonObject(combined);
-      setToolPermissions(normalizeToolsConfigPayload(parsed));
-    } catch { setToolPermissions(null); }
+      // Read directly from openclaw.json for speed
+      const homeCmd = `powershell -Command "Write-Output (Join-Path $env:USERPROFILE '.openclaw')"`;
+      const homeResult = await invoke<{ stdout: string }>("execute_command", { command: homeCmd, cwd: null });
+      const homePath = homeResult.stdout.trim().replace(/\r?\n/g, "");
+      const cfgContent = await invoke<string>("read_file", { path: `${homePath}\\openclaw.json` });
+      const cfg = JSON.parse(cfgContent);
+      if (cfg?.tools) {
+        setToolPermissions(cfg.tools);
+      }
+    } catch {
+      try {
+        const result = await cachedCommand("openclaw config get tools --json", { ttl: 120_000, timeout: 8_000 });
+        const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
+        const parsed = extractCliJsonObject(combined);
+        setToolPermissions(normalizeToolsConfigPayload(parsed));
+      } catch { setToolPermissions(null); }
+    }
   }, []);
 
   const loadAll = useCallback(async () => {

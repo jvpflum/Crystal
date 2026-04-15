@@ -231,16 +231,15 @@ export function ConversationView() {
   }, []);
 
   const toggleModel = useCallback(async () => {
-    const localModel = availableModels.find(m => m.startsWith("vllm/"));
-    const cloudModel = availableModels.find(m => m.startsWith("openai/") || m.startsWith("anthropic/"));
-    if (!localModel || !cloudModel) return;
-    const next = isLocalModel ? cloudModel : localModel;
+    const pair = await openclawClient.getModelPairFromConfig();
+    const localModel = pair.local || availableModels.find(m => m.startsWith("vllm/"));
+    const cloudModel = pair.cloud || availableModels.find(m => m.startsWith("openai/") || m.startsWith("anthropic/"));
+    const next = isLocalModel
+      ? (cloudModel || modelKey)
+      : (localModel || modelKey);
+    if (next === modelKey) return;
     setModelKey(next);
-    try {
-      await openclawClient.setModel(next);
-    } catch {
-      setModelKey(modelKey);
-    }
+    await openclawClient.setModel(next);
   }, [isLocalModel, modelKey, availableModels]);
 
   useEffect(() => {
