@@ -21,8 +21,24 @@
 </p>
 
 <p align="center">
-  <a href="#-whats-new">What's New</a> · <a href="#-features">Features</a> · <a href="#-quick-start">Quick Start</a> · <a href="#-tech-stack">Tech Stack</a> · <a href="#-contributing">Contributing</a>
+  <a href="#-whats-new">What's New</a> · <a href="#screenshots">Screenshots</a> · <a href="#-features">Features</a> · <a href="#-quick-start">Quick Start</a> · <a href="#-tech-stack">Tech Stack</a> · <a href="#-contributing">Contributing</a>
 </p>
+
+---
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="Crystal home dashboard — system performance, lifetime tokens, cron jobs, memory and vector store" width="900" />
+</p>
+
+<p align="center"><em>Home dashboard — live system performance, lifetime token spend, cron health, and memory telemetry.</em></p>
+
+<p align="center">
+  <img src="docs/screenshots/command-center.png" alt="Crystal Command Center — scheduled job calendar with 24-hour activity strip" width="900" />
+</p>
+
+<p align="center"><em>Command Center — week calendar, 24-hour activity strip, and agenda of every scheduled agent run.</em></p>
 
 ---
 
