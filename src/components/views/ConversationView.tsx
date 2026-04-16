@@ -223,36 +223,54 @@ export function ConversationView() {
   const [modelKey, setModelKey] = useState(() => openclawClient.getModel());
   const model = openclawClient.getModelDisplayName(modelKey);
   const [liveTps, setLiveTps] = useState(0);
-  const isLocalModel = modelKey.includes("vllm/");
-
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const isLocalModel = /vllm|ollama|qwen|nvfp/i.test(modelKey);
 
   useEffect(() => {
-    openclawClient.getModels().then(setAvailableModels).catch(() => {});
+    openclawClient.warmUp().catch(() => {});
+    if (!modelKey || modelKey === "default") {
+      openclawClient.getModelPairFromConfig().then(pair => {
+        const resolved = pair.cloud || pair.local;
+        if (resolved) {
+          setModelKey(resolved);
+          openclawClient.setModel(resolved);
+        }
+      }).catch(() => {});
+    }
   }, []);
 
+  const [toggleError, setToggleError] = useState<string | null>(null);
+
   const toggleModel = useCallback(async () => {
+    setToggleError(null);
     const pair = await openclawClient.getModelPairFromConfig();
-    const localModel = pair.local || availableModels.find(m => m.startsWith("vllm/"));
-    const cloudModel = pair.cloud || availableModels.find(m => m.startsWith("openai/") || m.startsWith("anthropic/"));
+    const localModel = pair.local;
+    const cloudModel = pair.cloud;
+    if (!localModel && !cloudModel) {
+      setToggleError("No models found in config");
+      return;
+    }
     const next = isLocalModel
       ? (cloudModel || modelKey)
       : (localModel || modelKey);
     if (next === modelKey) return;
+
+    const switchingToLocal = /vllm|ollama|qwen|nvfp/i.test(next);
+    if (switchingToLocal) {
+      try {
+        const status = await invoke<{ vllm_running: boolean }>("get_server_status");
+        if (!status.vllm_running) {
+          setToggleError("vLLM not running — start Docker Desktop first");
+          setTimeout(() => setToggleError(null), 4000);
+          return;
+        }
+      } catch { /* proceed anyway */ }
+    }
+
     setModelKey(next);
     await openclawClient.setModel(next);
-  }, [isLocalModel, modelKey, availableModels]);
-
-  useEffect(() => {
-    const sync = () => {
-      const current = openclawClient.getModel();
-      if (current && current !== "default" && current !== modelKey) {
-        setModelKey(current);
-      }
-    };
-    const interval = setInterval(sync, 10_000);
-    return () => clearInterval(interval);
-  }, [modelKey]);
+    useChatSettingsStore.getState().setOfflineMode(switchingToLocal);
+    if (!switchingToLocal) useChatSettingsStore.getState().setCloudModel(next);
+  }, [isLocalModel, modelKey]);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1822,6 +1840,13 @@ export function ConversationView() {
                 </>
               )}
             </button>
+            {toggleError && (
+              <span style={{
+                fontSize: 9, color: "#f87171", fontFamily: MONO,
+                whiteSpace: "nowrap", padding: "2px 6px",
+                background: "rgba(248,113,113,0.1)", borderRadius: 4,
+              }}>{toggleError}</span>
+            )}
             <button
               onClick={cycleThinkingLevel}
               title={`Thinking level: ${thinkingLevel || "default"} (click to cycle)`}

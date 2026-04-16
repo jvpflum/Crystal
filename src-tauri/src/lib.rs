@@ -7,6 +7,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -65,6 +66,32 @@ struct StreamingPollResult {
 }
 
 static STREAM_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+static LOCAL_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static REMOTE_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn get_chat_client(is_local: bool) -> reqwest::Client {
+    if is_local {
+        LOCAL_HTTP_CLIENT.get_or_init(|| {
+            reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(3))
+                .timeout(std::time::Duration::from_secs(120))
+                .pool_max_idle_per_host(2)
+                .tcp_keepalive(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new())
+        }).clone()
+    } else {
+        REMOTE_HTTP_CLIENT.get_or_init(|| {
+            reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(15))
+                .timeout(std::time::Duration::from_secs(120))
+                .pool_max_idle_per_host(2)
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new())
+        }).clone()
+    }
+}
 
 struct AppState {
     servers: Mutex<ServerProcesses>,
@@ -530,15 +557,17 @@ fn resolve_path(path: &str) -> String {
         resolved = format!("{}\\{}", home, resolved);
     }
 
-    // Canonicalize and verify the path stays under USERPROFILE
+    // Canonicalize and verify the path stays under USERPROFILE.
+    // On Windows, canonicalize() prepends \\?\ — strip it before comparing.
     if let Ok(canonical) = std::fs::canonicalize(&resolved) {
         let canon_str = canonical.to_string_lossy().to_string();
+        let clean = canon_str.strip_prefix(r"\\?\").unwrap_or(&canon_str);
         let home_lower = home.to_lowercase();
-        if !canon_str.to_lowercase().starts_with(&home_lower) {
+        if !clean.to_lowercase().starts_with(&home_lower) {
             eprintln!("resolve_path: '{}' escapes home directory, blocking", path);
             return format!("{}\\__blocked_path__", home);
         }
-        return canon_str;
+        return clean.to_string();
     }
 
     resolved
@@ -697,8 +726,8 @@ fn start_direct_chat(
             .build()
             .unwrap();
         rt.block_on(async move {
-            let client = reqwest::Client::new();
-            let is_local = api_key == "vllm-local";
+            let is_local = api_key == "vllm-local" || api_key == "ollama";
+            let client = get_chat_client(is_local);
             let mut body = serde_json::json!({
                 "model": model,
                 "messages": messages,
@@ -734,15 +763,18 @@ fn start_direct_chat(
                                     if let Some(data) = line.strip_prefix("data: ") {
                                         if data.trim() == "[DONE]" { continue; }
                                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
-                                            if let Some(content) = parsed
+                                            let delta = parsed
                                                 .get("choices")
                                                 .and_then(|c| c.get(0))
-                                                .and_then(|c| c.get("delta"))
-                                                .and_then(|d| d.get("content"))
-                                                .and_then(|c| c.as_str())
-                                            {
-                                                let mut out = proc_clone.stdout_buf.lock().unwrap();
-                                                out.push_str(content);
+                                                .and_then(|c| c.get("delta"));
+                                            if let Some(d) = delta {
+                                                let content = d.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                                                let reasoning = d.get("reasoning_content").and_then(|c| c.as_str()).unwrap_or("");
+                                                if !content.is_empty() || !reasoning.is_empty() {
+                                                    let mut out = proc_clone.stdout_buf.lock().unwrap();
+                                                    out.push_str(content);
+                                                    out.push_str(reasoning);
+                                                }
                                             }
                                         }
                                     }
@@ -1118,10 +1150,18 @@ async fn start_openclaw_daemon(_state: tauri::State<'_, AppState>) -> Result<Str
     sanitize_openclaw_config();
 
     tokio::task::spawn_blocking(|| {
-        let openclaw_bin = find_openclaw_bin();
+        let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\jarro".to_string());
+        let gateway_cmd_path = std::path::PathBuf::from(&home).join(".openclaw").join("gateway.cmd");
 
         #[cfg(target_os = "windows")]
-        let spawn_result = {
+        let spawn_result = if gateway_cmd_path.exists() {
+            let mut cmd = Command::new("cmd");
+            cmd.args(["/c", gateway_cmd_path.to_str().unwrap_or("gateway.cmd")])
+                .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW);
+            cmd.spawn()
+        } else {
+            let openclaw_bin = find_openclaw_bin();
             let mut cmd = Command::new(&openclaw_bin);
             cmd.args(["gateway", "start"])
                 .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
@@ -1129,20 +1169,23 @@ async fn start_openclaw_daemon(_state: tauri::State<'_, AppState>) -> Result<Str
             cmd.spawn()
         };
         #[cfg(not(target_os = "windows"))]
-        let spawn_result = Command::new(&openclaw_bin)
-            .args(["gateway", "start"])
-            .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
-            .spawn();
+        let spawn_result = {
+            let openclaw_bin = find_openclaw_bin();
+            Command::new(&openclaw_bin)
+                .args(["gateway", "start"])
+                .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                .spawn()
+        };
 
         match spawn_result {
             Ok(_) => {
-                for _ in 0..20 {
-                    std::thread::sleep(std::time::Duration::from_secs(2));
+                for _ in 0..25 {
+                    std::thread::sleep(std::time::Duration::from_secs(3));
                     if check_port_in_use(18789) && gateway_http_healthy() {
                         return Ok("OpenClaw daemon started".to_string());
                     }
                 }
-                Err("Gateway started but not healthy within 40s — check openclaw config".to_string())
+                Err("Gateway started but not healthy within 75s — check openclaw config".to_string())
             }
             Err(e) => Err(format!("Failed to start gateway: {}", e)),
         }
@@ -1329,9 +1372,8 @@ fn gateway_http_healthy() -> bool {
     false
 }
 
-/// Start the OpenClaw gateway via `openclaw gateway start`, which delegates to
-/// the Windows Scheduled Task (or equivalent service manager). This avoids
-/// spawning a competing process that fights with the system service.
+/// Start the OpenClaw gateway, preferring gateway.cmd (which wraps with
+/// `op run` to inject 1Password secrets) over bare `openclaw gateway start`.
 ///
 /// This runs entirely in a background thread to avoid blocking app startup.
 fn start_gateway_resilient<R: Runtime>(_app: &AppHandle<R>) {
@@ -1382,12 +1424,25 @@ fn start_gateway_resilient<R: Runtime>(_app: &AppHandle<R>) {
             }
         }
 
-        // Fire-and-forget: trigger the Scheduled Task.
-        // Use spawn() instead of output() so we don't block waiting for
-        // the CLI to finish its own health-check loop.
-        println!("Triggering OpenClaw gateway service...");
+        // Prefer gateway.cmd which injects 1Password secrets via `op run`.
+        // Fall back to bare `openclaw gateway start` if gateway.cmd is missing.
+        let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\jarro".to_string());
+        let gateway_cmd_path = std::path::PathBuf::from(&home).join(".openclaw").join("gateway.cmd");
+        let use_gateway_cmd = gateway_cmd_path.exists();
+
+        println!(
+            "Triggering OpenClaw gateway via {}...",
+            if use_gateway_cmd { "gateway.cmd (1Password secrets)" } else { "openclaw CLI" }
+        );
+
         #[cfg(target_os = "windows")]
-        let spawn_result = {
+        let spawn_result = if use_gateway_cmd {
+            let mut cmd = Command::new("cmd");
+            cmd.args(["/c", gateway_cmd_path.to_str().unwrap_or("gateway.cmd")])
+                .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW);
+            cmd.spawn()
+        } else {
             let mut cmd = Command::new(&openclaw_bin);
             cmd.args(["gateway", "start"])
                 .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
@@ -1405,18 +1460,19 @@ fn start_gateway_resilient<R: Runtime>(_app: &AppHandle<R>) {
                 // Don't wait for the CLI to finish — just poll the port.
             }
             Err(e) => {
-                eprintln!("Failed to invoke openclaw gateway start: {}", e);
+                eprintln!("Failed to invoke gateway: {}", e);
                 return;
             }
         }
 
-        // Poll for readiness (gateway typically takes ~17s to fully boot)
-        let max_wait = std::time::Duration::from_secs(45);
+        // Poll for readiness — gateway.cmd includes `op run` which takes ~15s,
+        // then Node.js boot adds ~15s more.
+        let max_wait = std::time::Duration::from_secs(75);
         let start = std::time::Instant::now();
         while start.elapsed() < max_wait {
-            std::thread::sleep(std::time::Duration::from_secs(2));
+            std::thread::sleep(std::time::Duration::from_secs(3));
             if check_port_in_use(18789) && gateway_http_healthy() {
-                println!("OpenClaw gateway is ready on port 18789");
+                println!("OpenClaw gateway is ready on port 18789 ({:.0}s)", start.elapsed().as_secs_f64());
                 return;
             }
         }
@@ -1425,6 +1481,102 @@ fn start_gateway_resilient<R: Runtime>(_app: &AppHandle<R>) {
             max_wait.as_secs()
         );
     });
+}
+
+fn is_docker_running() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", "docker", "info"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .stdin(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW);
+        matches!(cmd.status(), Ok(s) if s.success())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        matches!(
+            Command::new("docker").arg("info")
+                .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                .status(),
+            Ok(s) if s.success()
+        )
+    }
+}
+
+fn try_start_docker_desktop() {
+    #[cfg(target_os = "windows")]
+    {
+        let paths = [
+            r"C:\Program Files\Docker\Docker\Docker Desktop.exe",
+            r"C:\Program Files (x86)\Docker\Docker\Docker Desktop.exe",
+        ];
+        for p in &paths {
+            if Path::new(p).exists() {
+                println!("Starting Docker Desktop from {}...", p);
+                let mut cmd = Command::new(p);
+                cmd.stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                    .creation_flags(CREATE_NO_WINDOW);
+                let _ = cmd.spawn();
+                return;
+            }
+        }
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", "start", "", "Docker Desktop"])
+            .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW);
+        let _ = cmd.spawn();
+    }
+}
+
+fn ensure_docker_then_vllm(compose_file: &str) {
+    if !is_docker_running() {
+        println!("Docker not running — attempting to start Docker Desktop...");
+        try_start_docker_desktop();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+        loop {
+            if is_docker_running() {
+                println!("Docker Desktop is ready.");
+                break;
+            }
+            if std::time::Instant::now() > deadline {
+                eprintln!("Docker Desktop did not start within 90s — vLLM will not be available.");
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(3));
+        }
+    }
+
+    println!("Starting vLLM Docker container...");
+    #[cfg(target_os = "windows")]
+    let output = {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", "docker", "compose", "-f", compose_file, "up", "-d", "vllm"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW);
+        cmd.output()
+    };
+    #[cfg(not(target_os = "windows"))]
+    let output = Command::new("docker")
+        .args(["compose", "-f", compose_file, "up", "-d", "vllm"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null())
+        .output();
+    match output {
+        Ok(out) if out.status.success() => {
+            println!("vLLM Docker container started (model loading ~5min with CUDA graph compilation)");
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            eprintln!("vLLM Docker start failed: {}", stderr);
+        }
+        Err(e) => eprintln!("Could not launch vLLM Docker container: {}", e),
+    }
 }
 
 fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
@@ -1479,34 +1631,10 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
     if check_port_in_use(8000) {
         println!("vLLM detected on port 8000 (OpenAI-compatible API)");
     } else if let Some(compose_file) = find_compose_file() {
-        println!("vLLM not on port 8000 — starting Docker container...");
-        #[cfg(target_os = "windows")]
-        let output = {
-            let mut cmd = Command::new("cmd");
-            cmd.args(["/C", "docker", "compose", "-f", &compose_file, "up", "-d", "vllm"])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .stdin(Stdio::null())
-                .creation_flags(CREATE_NO_WINDOW);
-            cmd.output()
-        };
-        #[cfg(not(target_os = "windows"))]
-        let output = Command::new("docker")
-            .args(["compose", "-f", &compose_file, "up", "-d", "vllm"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::null())
-            .output();
-        match output {
-            Ok(out) if out.status.success() => {
-                println!("vLLM Docker container started (model may still be loading)");
-            }
-            Ok(out) => {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                eprintln!("vLLM Docker start failed: {}", stderr);
-            }
-            Err(e) => eprintln!("Could not launch vLLM Docker container: {}", e),
-        }
+        let compose_clone = compose_file.clone();
+        std::thread::spawn(move || {
+            ensure_docker_then_vllm(&compose_clone);
+        });
     } else {
         eprintln!("vLLM not detected on port 8000 and no docker-compose.yml found.");
     }

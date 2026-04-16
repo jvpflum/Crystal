@@ -18,7 +18,7 @@ import { openclawClient } from "@/lib/openclaw";
 import { Loader2 } from "lucide-react";
 import "./index.css";
 
-useDataStore.getState().hydrateFromDisk();
+try { useDataStore.getState().hydrateFromDisk(); } catch (e) { console.error("[App] hydrateFromDisk failed:", e); }
 
 const HomeView = lazy(() => import("@/components/views/HomeView").then(m => ({ default: m.HomeView })));
 const ConversationView = lazy(() => import("@/components/views/ConversationView").then(m => ({ default: m.ConversationView })));
@@ -97,9 +97,9 @@ function App() {
   const setView = useAppStore(s => s.setView);
   const { isInitialized } = useStorage();
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(
-    !localStorage.getItem("crystal_onboarded")
-  );
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    try { return !localStorage.getItem("crystal_onboarded"); } catch { return false; }
+  });
 
   useToggleWindowShortcut();
   useKeyboardShortcuts();
@@ -202,40 +202,38 @@ function App() {
           <div style={{ flex: 1, display: "flex", minHeight: 0, overflow: "hidden" }}>
             <Navigation />
             <main className="app-main" style={{ flex: 1, minWidth: 0, overflow: "hidden", position: "relative" }}>
-              <ErrorBoundary>
-                <Suspense fallback={<ViewFallback />}>
-                  <ViewSlot id="home" active={currentView === "home"}><HomeView /></ViewSlot>
-                  <ViewSlot id="conversation" active={currentView === "conversation"}><ConversationView /></ViewSlot>
-                  <ViewSlot id="command-center" active={currentView === "command-center"}><CommandCenterView /></ViewSlot>
-                  <ViewSlot id="agents" active={currentView === "agents"}><AgentsView /></ViewSlot>
-                  <ViewSlot id="models" active={currentView === "models"}><ModelsView /></ViewSlot>
-                  <ViewSlot id="sessions" active={currentView === "sessions"}><SessionsView /></ViewSlot>
-                  <ViewSlot id="templates" active={currentView === "templates"}><TemplatesView /></ViewSlot>
-                  <ViewSlot id="channels" active={currentView === "channels"}><ChannelsView /></ViewSlot>
-                  <ViewSlot id="memory" active={currentView === "memory"}><MemoryView /></ViewSlot>
-                  <ViewSlot id="tools" active={currentView === "tools"}><ToolsView /></ViewSlot>
-                  <ViewSlot id="activity" active={currentView === "activity"}><ActivityView /></ViewSlot>
-                  <ViewSlot id="settings" active={currentView === "settings"}><SettingsView /></ViewSlot>
-                  <ViewSlot id="security" active={currentView === "security"}><SecurityView /></ViewSlot>
-                  <ViewSlot id="hooks" active={currentView === "hooks"}><HooksView /></ViewSlot>
-                  <ViewSlot id="doctor" active={currentView === "doctor"}><DoctorView /></ViewSlot>
-                  <ViewSlot id="nodes" active={currentView === "nodes"}><NodesView /></ViewSlot>
-                  <ViewSlot id="browser" active={currentView === "browser"}><BrowserView /></ViewSlot>
+              <Suspense fallback={<ViewFallback />}>
+                <ViewSlot id="home" active={currentView === "home"}><ErrorBoundary><HomeView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="conversation" active={currentView === "conversation"}><ErrorBoundary><ConversationView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="command-center" active={currentView === "command-center"}><ErrorBoundary><CommandCenterView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="agents" active={currentView === "agents"}><ErrorBoundary><AgentsView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="models" active={currentView === "models"}><ErrorBoundary><ModelsView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="sessions" active={currentView === "sessions"}><ErrorBoundary><SessionsView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="templates" active={currentView === "templates"}><ErrorBoundary><TemplatesView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="channels" active={currentView === "channels"}><ErrorBoundary><ChannelsView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="memory" active={currentView === "memory"}><ErrorBoundary><MemoryView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="tools" active={currentView === "tools"}><ErrorBoundary><ToolsView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="activity" active={currentView === "activity"}><ErrorBoundary><ActivityView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="settings" active={currentView === "settings"}><ErrorBoundary><SettingsView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="security" active={currentView === "security"}><ErrorBoundary><SecurityView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="hooks" active={currentView === "hooks"}><ErrorBoundary><HooksView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="doctor" active={currentView === "doctor"}><ErrorBoundary><DoctorView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="nodes" active={currentView === "nodes"}><ErrorBoundary><NodesView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="browser" active={currentView === "browser"}><ErrorBoundary><BrowserView /></ErrorBoundary></ViewSlot>
 
-                  <ViewSlot id="factory" active={currentView === "factory"}><FactoryView /></ViewSlot>
-                  <ViewSlot id="workspace" active={currentView === "workspace"}><WorkspaceView /></ViewSlot>
-                  <ViewSlot id="messaging" active={currentView === "messaging"}><MessagingView /></ViewSlot>
-                  <ViewSlot id="directory" active={currentView === "directory"}><DirectoryView /></ViewSlot>
-                  <ViewSlot id="devices" active={currentView === "devices"}><DevicesView /></ViewSlot>
-                  <ViewSlot id="subagents" active={currentView === "subagents"}><SubagentsView /></ViewSlot>
-                  <ViewSlot id="webhooks" active={currentView === "webhooks"}><WebhooksView /></ViewSlot>
-                  <ViewSlot id="voicecall" active={currentView === "voicecall"}><VoiceCallView /></ViewSlot>
-                  <ViewSlot id="tasks" active={currentView === "tasks"}><TasksView /></ViewSlot>
-                  <ViewSlot id="approvals" active={currentView === "approvals"}><ApprovalsView /></ViewSlot>
-                  <ViewSlot id="city" active={currentView === "city"}><CityView /></ViewSlot>
-                  <ViewSlot id="usage" active={currentView === "usage"}><UsageView /></ViewSlot>
-                </Suspense>
-              </ErrorBoundary>
+                <ViewSlot id="factory" active={currentView === "factory"}><ErrorBoundary><FactoryView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="workspace" active={currentView === "workspace"}><ErrorBoundary><WorkspaceView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="messaging" active={currentView === "messaging"}><ErrorBoundary><MessagingView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="directory" active={currentView === "directory"}><ErrorBoundary><DirectoryView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="devices" active={currentView === "devices"}><ErrorBoundary><DevicesView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="subagents" active={currentView === "subagents"}><ErrorBoundary><SubagentsView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="webhooks" active={currentView === "webhooks"}><ErrorBoundary><WebhooksView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="voicecall" active={currentView === "voicecall"}><ErrorBoundary><VoiceCallView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="tasks" active={currentView === "tasks"}><ErrorBoundary><TasksView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="approvals" active={currentView === "approvals"}><ErrorBoundary><ApprovalsView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="city" active={currentView === "city"}><ErrorBoundary><CityView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="usage" active={currentView === "usage"}><ErrorBoundary><UsageView /></ErrorBoundary></ViewSlot>
+              </Suspense>
             </main>
           </div>
           <CommandPalette isOpen={cmdPaletteOpen} onClose={() => setCmdPaletteOpen(false)} />

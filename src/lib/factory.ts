@@ -75,11 +75,7 @@ class FactoryService {
         return;
       }
 
-      if (i < PIPELINE_STAGES.length - 1) {
-        useFactoryStore.getState().advanceStage(buildId);
-      } else {
-        useFactoryStore.getState().advanceStage(buildId);
-      }
+      useFactoryStore.getState().advanceStage(buildId);
     }
   }
 
@@ -320,6 +316,8 @@ class FactoryService {
         useFactoryStore.getState().appendStageOutput(
           buildId, stage, "\n[factory] Stage timed out after 10 minutes.\n"
         );
+        try { await invoke("kill_streaming_command", { id: streamId }); } catch { /* best effort */ }
+        this._activePolls.delete(buildId);
         return 1;
       }
 
@@ -334,13 +332,16 @@ class FactoryService {
         }
 
         if (poll.done) {
+          this._activePolls.delete(buildId);
           return poll.exit_code ?? 1;
         }
       } catch {
+        this._activePolls.delete(buildId);
         return 1;
       }
     }
 
+    this._activePolls.delete(buildId);
     return 1; // cancelled
   }
 }

@@ -7,7 +7,7 @@ export function useGlobalShortcut(shortcut: string, callback: () => void) {
   callbackRef.current = callback;
 
   useEffect(() => {
-    let isRegistered = false;
+    let disposed = false;
 
     const registerShortcut = async () => {
       try {
@@ -16,7 +16,10 @@ export function useGlobalShortcut(shortcut: string, callback: () => void) {
             callbackRef.current();
           }
         });
-        isRegistered = true;
+        if (disposed) {
+          unregister(shortcut).catch(console.error);
+          return;
+        }
         if (import.meta.env.DEV) console.log(`Global shortcut registered: ${shortcut}`);
       } catch (error) {
         console.error(`Failed to register global shortcut: ${error}`);
@@ -26,22 +29,25 @@ export function useGlobalShortcut(shortcut: string, callback: () => void) {
     registerShortcut();
 
     return () => {
-      if (isRegistered) {
-        unregister(shortcut).catch(console.error);
-      }
+      disposed = true;
+      unregister(shortcut).catch(console.error);
     };
   }, [shortcut]);
 }
 
 export function useToggleWindowShortcut() {
   const toggle = useCallback(async () => {
-    const window = getCurrentWindow();
-    const isVisible = await window.isVisible();
-    if (isVisible) {
-      await window.hide();
-    } else {
-      await window.show();
-      await window.setFocus();
+    try {
+      const window = getCurrentWindow();
+      const isVisible = await window.isVisible();
+      if (isVisible) {
+        await window.hide();
+      } else {
+        await window.show();
+        await window.setFocus();
+      }
+    } catch (err) {
+      console.error("[useToggleWindowShortcut]", err);
     }
   }, []);
 

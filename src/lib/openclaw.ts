@@ -226,8 +226,22 @@ class OpenClawClient {
   private _messagesSinceLastPalaceSave = 0;
   private static PALACE_SAVE_INTERVAL = 15;
 
+  private _warmUpDone = false;
+
   constructor() {
     this._currentModel = localStorage.getItem("crystal_openclaw_model") || null;
+  }
+
+  async warmUp(): Promise<void> {
+    if (this._warmUpDone) return;
+    this._warmUpDone = true;
+    try {
+      await Promise.all([
+        this.resolveModelFromConfig().catch(() => null),
+        this.getCachedWakeUpContext().catch(() => ""),
+        this.getDirectChatConfig().catch(() => null),
+      ]);
+    } catch { /* best effort */ }
   }
 
   private normalizeThinkingLevel(thinking?: string): string | undefined {
@@ -239,14 +253,65 @@ class OpenClawClient {
   /* ── Direct Chat (bypasses CLI for speed) ── */
 
   private _openaiKeyCache: string | null = null;
+  private _directConfigResolving = false;
+
+  private async resolveModelFromConfig(): Promise<string | null> {
+    try {
+      const home = await this.getOpenClawDir();
+      const raw = await invoke<string>("read_file", { path: `${home}\\openclaw.json` });
+      const cfg = JSON.parse(raw);
+      const primary = cfg?.agents?.defaults?.model?.primary as string | undefined;
+      if (primary) {
+        this._currentModel = primary;
+        localStorage.setItem("crystal_openclaw_model", primary);
+        return primary;
+      }
+    } catch { /* config unreadable */ }
+    return null;
+  }
+
+  private _localPortCache: { up: boolean; ts: number; port: number } | null = null;
+  private static LOCAL_PORT_TTL = 10_000; // recheck every 10s
+
+  private async isLocalPortUp(port: number): Promise<boolean> {
+    if (this._localPortCache && this._localPortCache.port === port
+        && Date.now() - this._localPortCache.ts < OpenClawClient.LOCAL_PORT_TTL) {
+      return this._localPortCache.up;
+    }
+    try {
+      const status = await invoke<{ vllm_running: boolean }>("get_server_status");
+      const up = port === 8000 ? status.vllm_running : false;
+      this._localPortCache = { up, ts: Date.now(), port };
+      return up;
+    } catch {
+      return false;
+    }
+  }
 
   private async getDirectChatConfig(): Promise<{ baseUrl: string; apiKey: string; model: string } | null> {
-    const model = this._currentModel || "";
+    let model = this._currentModel || "";
+    if ((!model || model === "default") && !this._directConfigResolving) {
+      this._directConfigResolving = true;
+      try {
+        model = (await this.resolveModelFromConfig()) || "";
+      } finally {
+        this._directConfigResolving = false;
+      }
+    }
+    if (!model || model === "default") return null;
+
     const lower = model.toLowerCase();
     if (lower.includes("vllm") || lower.includes("qwen") || lower.includes("nvfp4")) {
+      if (!(await this.isLocalPortUp(8000))) {
+        console.warn("[getDirectChatConfig] vLLM port 8000 not open — skipping direct path");
+        return null;
+      }
       return { baseUrl: "http://127.0.0.1:8000/v1", apiKey: "vllm-local", model: model.replace(/^vllm\//, "") };
     }
-    if (lower.includes("gpt") || lower.includes("openai")) {
+    if (lower.includes("ollama")) {
+      return { baseUrl: "http://127.0.0.1:11434/v1", apiKey: "ollama", model: model.replace(/^ollama\//, "") };
+    }
+    if (lower.includes("gpt") || lower.includes("openai") || lower.startsWith("openai/")) {
       if (!this._openaiKeyCache) {
         try {
           const { resolveOpenAiApiKeyForCrystal } = await import("@/lib/openclawSecrets");
@@ -264,19 +329,48 @@ class OpenClawClient {
     return text.replace(/<think>[\s\S]*?<\/think>\s*/g, "").replace(/<think>[\s\S]*$/g, "").trim();
   }
 
+  private _wakeUpCache: { text: string; ts: number } | null = null;
+  private static WAKEUP_TTL = 300_000; // 5 minutes
+
+  private async getCachedWakeUpContext(): Promise<string> {
+    if (this._wakeUpCache && Date.now() - this._wakeUpCache.ts < OpenClawClient.WAKEUP_TTL) {
+      return this._wakeUpCache.text;
+    }
+    try {
+      const wakeUp = await memoryPalaceClient.getWakeUpContext();
+      this._wakeUpCache = { text: wakeUp || "", ts: Date.now() };
+      return this._wakeUpCache.text;
+    } catch {
+      return this._wakeUpCache?.text || "";
+    }
+  }
+
   async *directStreamingChat(text: string): AsyncGenerator<string> {
     const config = await this.getDirectChatConfig();
     if (!config) return;
 
+    const isLocal = config.apiKey === "vllm-local" || config.apiKey === "ollama";
+
     let systemPrompt = "You are Crystal, a helpful AI desktop assistant. Be concise and helpful.";
-    try {
-      const wakeUp = await memoryPalaceClient.getWakeUpContext();
-      if (wakeUp) systemPrompt += `\n\n--- MEMORY CONTEXT ---\n${wakeUp}`;
-    } catch { /* palace unavailable */ }
+    const wakeUpPromise = this.getCachedWakeUpContext().catch(() => "");
+    const wakeUp = await wakeUpPromise;
+    if (wakeUp) {
+      const maxCtx = isLocal ? 800 : 1500;
+      const trimmedCtx = wakeUp.length > maxCtx ? wakeUp.slice(0, maxCtx) + "\n..." : wakeUp;
+      systemPrompt += `\n\n--- MEMORY CONTEXT ---\n${trimmedCtx}`;
+    }
+
+    const historySlice = isLocal ? 4 : 10;
+    const maxTokens = isLocal ? 2048 : 4096;
+
+    const history = this._sessionMessages.slice(-historySlice).map(m => ({
+      role: m.role,
+      content: m.text.length > 400 ? m.text.slice(0, 400) + "..." : m.text,
+    }));
 
     const messages = [
       { role: "system", content: systemPrompt },
-      ...this._sessionMessages.slice(-10).map(m => ({ role: m.role, content: m.text })),
+      ...history,
       { role: "user", content: text },
     ];
 
@@ -285,12 +379,12 @@ class OpenClawClient {
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
       model: config.model,
-      maxTokens: 4096,
+      maxTokens,
     });
 
     const startTime = Date.now();
     const TIMEOUT = 120_000;
-    const POLL_INTERVAL = 100;
+    const POLL_INTERVAL = isLocal ? 30 : 80;
     let rawOutput = "";
     let yieldedLen = 0;
 
@@ -394,6 +488,7 @@ class OpenClawClient {
   }
 
   private async syncModelFromOpenClaw(): Promise<void> {
+    if (this._currentModel && this._currentModel !== "default") return;
     try {
       const result = await invoke<{ stdout: string; code: number }>("execute_command", {
         command: `${OPENCLAW_CMD} models status`,
@@ -403,8 +498,10 @@ class OpenClawClient {
       if (defaultMatch?.[1] && defaultMatch[1] !== "-") {
         this._currentModel = defaultMatch[1];
         localStorage.setItem("crystal_openclaw_model", defaultMatch[1]);
+        return;
       }
-    } catch { /* keep cached value */ }
+    } catch { /* CLI failed */ }
+    await this.resolveModelFromConfig();
   }
 
   private async ensureDailyMemoryCron(): Promise<void> {
@@ -489,7 +586,7 @@ class OpenClawClient {
 
     const streamId = await invoke<string>("start_streaming_command", { command: cmd, cwd: null });
     const cmdPromise = (async () => {
-      const POLL_INTERVAL = 300;
+      const POLL_INTERVAL = 50;
       let fullOutput = "";
       let fullStderr = "";
       while (true) {
@@ -568,11 +665,22 @@ class OpenClawClient {
     const directConfig = await this.getDirectChatConfig();
     if (directConfig) {
       let gotOutput = false;
-      for await (const chunk of this.directStreamingChat(text)) {
-        gotOutput = true;
-        yield chunk;
+      let gotError = false;
+      try {
+        for await (const chunk of this.directStreamingChat(text)) {
+          if (chunk.startsWith("Connection failed:") || chunk.startsWith("API error")) {
+            gotError = true;
+            console.warn("[streamingChat] direct path error, falling back to CLI:", chunk);
+            break;
+          }
+          gotOutput = true;
+          yield chunk;
+        }
+      } catch (e) {
+        console.warn("[streamingChat] direct path threw, falling back to CLI:", e);
+        gotError = true;
       }
-      if (gotOutput) return;
+      if (gotOutput && !gotError) return;
     }
 
     this.logActivity({ type: "chat", payload: { text } });
@@ -588,7 +696,7 @@ class OpenClawClient {
     const streamId = await invoke<string>("start_streaming_command", { command: cmd, cwd: null });
     const startTime = Date.now();
     const TIMEOUT = 180_000;
-    const POLL_INTERVAL = 300;
+    const POLL_INTERVAL = 50;
     let fullOutput = "";
     let fullStderr = "";
 
@@ -1211,7 +1319,7 @@ class OpenClawClient {
       if (agentModels) Object.keys(agentModels).forEach(k => allKeys.add(k));
 
       for (const key of allKeys) {
-        if (!local && key.startsWith("vllm/")) local = key;
+        if (!local && (key.startsWith("vllm/") || key === "vllm" || key.startsWith("ollama/"))) local = key;
         if (!cloud && (key.startsWith("openai/") || key.startsWith("anthropic/"))) cloud = key;
       }
       return { local, cloud };

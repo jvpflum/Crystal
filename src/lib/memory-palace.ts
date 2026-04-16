@@ -109,12 +109,19 @@ export class MemoryPalaceClient {
     if (this._palacePathPromise) return this._palacePathPromise;
 
     this._palacePathPromise = (async () => {
-      const result = await invoke<{ stdout: string }>("execute_command", {
-        command: `echo $env:USERPROFILE\\.openclaw\\mempalace`,
-        cwd: null,
-      });
-      this.palacePath = result.stdout.trim().replace(/\r?\n/g, "");
-      return this.palacePath;
+      try {
+        const result = await invoke<{ stdout: string }>("execute_command", {
+          command: `echo $env:USERPROFILE\\.openclaw\\memory-palace`,
+          cwd: null,
+        });
+        const path = result.stdout.trim().replace(/\r?\n/g, "");
+        if (!path) throw new Error("Empty palace path");
+        this.palacePath = path;
+        return path;
+      } catch (e) {
+        this._palacePathPromise = null;
+        throw e;
+      }
     })();
 
     return this._palacePathPromise;
@@ -267,8 +274,9 @@ except Exception:
 
 kg_stats = None
 try:
+    import os
     from mempalace.knowledge_graph import KnowledgeGraph
-    kg = KnowledgeGraph()
+    kg = KnowledgeGraph(db_path=os.path.join(palace, 'knowledge_graph.sqlite3'))
     kg_stats = kg.stats()
     kg.close()
 except Exception:
@@ -307,11 +315,12 @@ print(json.dumps(result))
 
   async queryEntity(name: string, asOf?: string): Promise<KGTriple[]> {
     try {
+      const palace = await this.getPalacePath();
       const asOfArg = asOf ? `, as_of='${escapeShellArg(asOf)}'` : "";
       const cmd = `$env:PYTHONIOENCODING="utf-8"; ${PYTHON} -c "
-import json
+import os, json
 from mempalace.knowledge_graph import KnowledgeGraph
-kg = KnowledgeGraph()
+kg = KnowledgeGraph(db_path=os.path.join('${escapeShellArg(palace)}', 'knowledge_graph.sqlite3'))
 results = kg.query_entity('${escapeShellArg(name)}', direction='both'${asOfArg})
 kg.close()
 print(json.dumps(results))
@@ -330,11 +339,12 @@ print(json.dumps(results))
 
   async getTimeline(entity?: string): Promise<KGTriple[]> {
     try {
+      const palace = await this.getPalacePath();
       const entityArg = entity ? `'${escapeShellArg(entity)}'` : "None";
       const cmd = `$env:PYTHONIOENCODING="utf-8"; ${PYTHON} -c "
-import json
+import os, json
 from mempalace.knowledge_graph import KnowledgeGraph
-kg = KnowledgeGraph()
+kg = KnowledgeGraph(db_path=os.path.join('${escapeShellArg(palace)}', 'knowledge_graph.sqlite3'))
 results = kg.timeline(entity_name=${entityArg})
 kg.close()
 print(json.dumps(results))
@@ -358,10 +368,12 @@ print(json.dumps(results))
     validFrom?: string,
   ): Promise<boolean> {
     try {
+      const palace = await this.getPalacePath();
       const fromArg = validFrom ? `, valid_from='${escapeShellArg(validFrom)}'` : "";
       const cmd = `$env:PYTHONIOENCODING="utf-8"; ${PYTHON} -c "
+import os
 from mempalace.knowledge_graph import KnowledgeGraph
-kg = KnowledgeGraph()
+kg = KnowledgeGraph(db_path=os.path.join('${escapeShellArg(palace)}', 'knowledge_graph.sqlite3'))
 kg.add_triple('${escapeShellArg(subject)}', '${escapeShellArg(predicate)}', '${escapeShellArg(object)}'${fromArg})
 kg.close()
 print('OK')

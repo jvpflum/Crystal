@@ -287,7 +287,9 @@ export class ConversationAgent {
       return;
     }
 
-    this.stateMachine.send("REPLY_READY");
+    if (this.stateMachine.canSend("REPLY_READY")) {
+      this.stateMachine.send("REPLY_READY");
+    }
     this.session.addTranscriptEntry(
       this.session.createTranscriptEntry("assistant", text)
     );
@@ -297,7 +299,9 @@ export class ConversationAgent {
       await this.audioOutput.play(audioBlob);
     } catch (err) {
       console.error("[ConversationAgent] TTS error:", err);
-      this.stateMachine.send("SPEECH_COMPLETE");
+      if (this.stateMachine.canSend("SPEECH_COMPLETE")) {
+        this.stateMachine.send("SPEECH_COMPLETE");
+      }
     }
   }
 
@@ -367,7 +371,7 @@ export class ConversationAgent {
 
   dispose(): void {
     this.cancel();
-    // Full stop on dispose — release the microphone
+    this._eventListeners = [];
     this.audioInput.stop();
     for (const p of this._sttProviders) p.dispose();
     for (const p of this._ttsProviders) p.dispose();

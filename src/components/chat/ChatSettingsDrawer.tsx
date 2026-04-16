@@ -52,12 +52,19 @@ export function ChatSettingsDrawer({ open, onClose }: { open: boolean; onClose: 
     if (!offlineMode) {
       setCloudModel(currentModel);
       const vllmUp = await checkPort(8000);
+      const ollamaUp = !vllmUp && await checkPort(11434);
       if (vllmUp) {
-        await openclawClient.setModel("vllm");
-        setCurrentModel("vllm");
+        const localModel = models.find(m => m.startsWith("vllm/")) || "vllm";
+        await openclawClient.setModel(localModel);
+        setCurrentModel(localModel);
+        setOfflineMode(true);
+      } else if (ollamaUp) {
+        const localModel = models.find(m => m.startsWith("ollama/")) || "ollama";
+        await openclawClient.setModel(localModel);
+        setCurrentModel(localModel);
         setOfflineMode(true);
       } else {
-        setOfflineWarning("vLLM not running on port 8000. Start vLLM for local inference.");
+        setOfflineWarning("No local model server found. Start vLLM (port 8000) or Ollama (port 11434).");
       }
     } else {
       const restore = cloudModel || "default";
@@ -184,7 +191,7 @@ export function ChatSettingsDrawer({ open, onClose }: { open: boolean; onClose: 
                     {offlineMode ? "Local Model Active" : "Use Local Model"}
                   </span>
                   <p style={{ fontSize: 9, color: "var(--text-muted)", margin: "2px 0 0" }}>
-                    {offlineMode ? "vLLM Active" : "Switch to vLLM"}
+                    {offlineMode ? "Local Model Active" : "Switch to local model"}
                   </p>
                 </div>
               </div>

@@ -6,14 +6,14 @@
 
 <p align="center">
   <strong>The most complete desktop frontend for <a href="https://github.com/nichochar/open-claw">OpenClaw</a>.</strong><br/>
-  A native AI command center with 30 views, AI-powered search, 70+ slash commands, NVIDIA-accelerated voice, 8-provider LLM support with offline mode, dual-layer memory (MemPalace + LanceDB Pro), 1Password secret management, token cost analytics, a unified voice gateway, and a full agent workspace — all in a single desktop app.
+  A native AI command center with 30 views, AI-powered search, 70+ slash commands, NVIDIA-accelerated voice, 7-provider LLM support with offline mode, dual-layer memory (MemPalace + LanceDB), 1Password secret management, token cost analytics, a unified voice gateway, and a full agent workspace — all in a single desktop app.
 </p>
 
 <p align="center">
   <a href="#-features"><img src="https://img.shields.io/badge/30-Views-6366f1?style=flat-square" /></a>
   <a href="#-ai-chat"><img src="https://img.shields.io/badge/70+-Slash%20Commands-3b82f6?style=flat-square" /></a>
   <a href="#-voice-engine"><img src="https://img.shields.io/badge/NVIDIA%2BBrowser-Voice-10b981?style=flat-square" /></a>
-  <a href="#-multi-provider-llm"><img src="https://img.shields.io/badge/8-LLM%20Providers-f59e0b?style=flat-square" /></a>
+  <a href="#-multi-provider-llm"><img src="https://img.shields.io/badge/7-LLM%20Providers-f59e0b?style=flat-square" /></a>
   <a href="#-tech-stack"><img src="https://img.shields.io/badge/Tauri-2.0-24c8db?style=flat-square&logo=tauri" /></a>
   <a href="#-voice-engine"><img src="https://img.shields.io/badge/NVIDIA-RTX%20Voice-76b900?style=flat-square&logo=nvidia" /></a>
   <a href="#-themes"><img src="https://img.shields.io/badge/6-Themes-ec4899?style=flat-square" /></a>
@@ -78,7 +78,7 @@ The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects
 
 #### World-Class Chat Experience
 - **In-Chat Settings Drawer** — Gear icon in the chat header opens a 300px slide-out panel with model selector, temperature/max tokens/top-p sliders, thinking level picker, response style presets (Concise/Balanced/Detailed), and streaming toggle. All settings persisted to localStorage via new `chatSettingsStore`.
-- **Offline Mode Toggle** — One-click switch to local models. Auto-detects vLLM on port 8000 and Ollama on port 11434, stores/restores cloud model on toggle. Green "LOCAL" badge in header when active.
+- **Offline Mode Toggle** — One-click switch to local models. Auto-detects vLLM on port 8000, stores/restores cloud model on toggle. Green "LOCAL" badge in header when active.
 - **Regenerate Response** — RefreshCw button on the latest assistant message to re-run the prompt with current settings.
 - **Edit & Resend** — Pencil icon on user messages opens inline edit mode. Truncates history at that point and resends with the edited content.
 - **Message Feedback** — ThumbsUp/ThumbsDown on every assistant message, persisted in conversation data. Filled icon when selected.
@@ -99,7 +99,7 @@ The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects
 
 #### Unified Voice Gateway
 - **Voice Gateway Service** — New `voice_gateway.py` FastAPI service on port 6500 that unifies STT and TTS backends. Normalizes HTTP (`/stt/transcribe`, `/tts/speak`) and WebSocket (`/stt/realtime`, `/tts/realtime`) endpoints. Routes to NVIDIA Parakeet STT (`nvidia_stt_worker.py`, port 8090) and NVIDIA Magpie TTS (`nvidia_tts_worker.py`, port 8091), with the browser Web Speech API as an emergency fallback when local services are unavailable.
-- **vLLM Integration** — vLLM added as the preferred local LLM backend (port 8000). Rust backend prioritizes vLLM over Ollama for auto-start. New provider in Settings, token usage store, and secrets management.
+- **vLLM Integration** — vLLM added as the local LLM backend (port 8000). Rust backend auto-starts Docker/vLLM on launch. New provider in Settings, token usage store, and secrets management.
 - **STT Worker FastAPI Rewrite** — `nvidia_stt_worker.py` rewritten from aiohttp to FastAPI with `/transcribe`, `/ws`, `/health`, and auto-generated `/docs` endpoints.
 - **Voice Pipeline Optimization** — 20ms audio chunking, Web Audio API playback (replacing HTMLAudioElement), parallel provider initialization, warm-mic pause/resume, health check caching (5s TTL), and pre-connection audio buffering.
 
@@ -115,10 +115,10 @@ The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects
 
 #### Dashboard Enhancements
 - **Vector Store Visualization** — New dashboard card with a segmented ring gauge showing vector chunk count, satellite status dots for Vector DB/FTS/file readiness, and inline status rows (Vector DB, Full-text Search, Provider, Index Pending). Powered by enriched `fetchMemoryStatus` that now fetches `openclaw memory status --json` in parallel.
-- **Memory Chunks Ring Gauge** — Memory section upgraded from a standalone dot matrix to a `RingGauge` + `DotMatrix` combo card with click-through to Memory view.
+- **Memory Palace Widget** — Memory section shows MemPalace status with drawer count ring gauge, wing/room counts, and active/inactive status indicator with click-through to Memory view.
 - **Floating Performance Graphs** — System Performance ring gauges (CPU/RAM/Storage) and Lifetime Tokens radial burst now render with fully transparent backgrounds — no card outline or shadow — so they appear to float directly on the page.
 - **NVIDIA Logo (Official)** — Replaced the incorrect GPU section logo with the official NVIDIA "eye" SVG from Simple Icons. The `NvidiaLogo` component is now exported from `GpuMonitor.tsx` for reuse.
-- **NVIDIA Logo for Local LLM** — The local model card in the LLM Models section now uses the official `NvidiaLogo` with NVIDIA green (`#76b900`) branding instead of the old Ollama logo, reflecting that local inference runs on NVIDIA GPUs.
+- **NVIDIA Logo for Local LLM** — The local model card uses the official `NvidiaLogo` with NVIDIA green (`#76b900`) branding, reflecting that local inference runs on NVIDIA GPUs via vLLM.
 
 #### Calendar Redesign
 - **Agenda Timeline** — The Command Center Calendar tab completely rebuilt from an overcrowded 24×7 grid to a scalable agenda-style view with:
@@ -136,7 +136,7 @@ The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects
 - **OpenShell Sandbox in Tools** — Full sandbox management (install, enable/disable, Docker detection, sandbox listing, logs) duplicated from Settings into the Tools → Sandbox tab for easier access.
 
 #### Token Usage & Cost Estimation
-- **Estimated Costs** — Usage page now calculates estimated dollar costs for all providers: cloud APIs (OpenAI, Anthropic, DeepSeek, xAI, Google) use published per-million-token rates; local GPU (Ollama, NVIDIA STT/TTS) uses electricity-based estimates (configurable wattage and $/kWh).
+- **Estimated Costs** — Usage page now calculates estimated dollar costs for all providers: cloud APIs (OpenAI, Anthropic, DeepSeek, xAI, Google) use published per-million-token rates; local GPU (vLLM, NVIDIA STT/TTS) uses electricity-based estimates (configurable wattage and $/kWh).
 - **Local Compute Savings** — Prominent comparison card showing "If sent to cloud API" vs. "Actual electricity cost" with a savings multiplier badge.
 - **$/M Tok Column** — Input/Output token breakdown table now includes a blended cost-per-million-tokens column and GPU badges for local providers.
 - **Pricing Methodology** — Detailed footer explaining how cloud and local costs are estimated.
@@ -161,7 +161,7 @@ The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects
 
 - **Dashboard Redesign** — Complete visual overhaul with SVG data visualizations: ring gauges (CPU, RAM, Storage), radial burst (lifetime tokens), smooth bezier sparklines (CPU/RAM trends), mini bar charts (cron jobs), dot matrix (memory), and glow progress bars — all theme-aware.
 - **Apple-Meets-Futuristic UX** — Every card lifts, scales, and glows on hover with spring-eased micro-interactions. Press-down feedback on clickable elements. Smooth cubic-bezier transitions throughout. Status dots pulse when disconnected.
-- **Dual LLM Model Display** — Dashboard LLM card now shows both hosted (OpenAI with official logo) and local (Ollama) models side by side with independent status indicators and live model name from `ollama ps`.
+- **Dual LLM Model Display** — Dashboard LLM card shows both hosted (OpenAI with official logo) and local (NVIDIA/vLLM) models side by side with independent status indicators.
 - **GPU Monitor Redesign** — Rebuilt with ring gauge, glow bars, metric chips, NVIDIA-green branding, hover interactions, and theme-aware colors to match the new dashboard aesthetic.
 - **Quick Actions Relocated** — Moved from dashboard to Command Center Workflows tab for a cleaner home screen.
 - **Voice Button Cleanup** — Removed duplicate voice orb from dashboard (kept in chat).
@@ -180,7 +180,7 @@ The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects
 
 - **NVIDIA OpenShell Sandbox** — One-toggle sandbox mode in Settings. Agents execute inside isolated [OpenShell](https://github.com/NVIDIA/OpenShell) containers with filesystem, network, and process isolation. Auto-detects Docker, creates sandboxes from the `openclaw` community image, and reverts cleanly if anything fails. Requires Docker Desktop.
 - **Crystal City — Future-Punk Visualization** — Full cyberpunk isometric city with neon buildings, holographic billboards, flying drones, electric arcs, rain, steam vents, scanlines, and shooting stars. Agents walk between buildings, display current tasks in speech bubbles, and show status rings. HUD includes activity feed, agent roster, and live clock.
-- **Memory System Overhaul** — New Knowledge Base tab for browsing, viewing, and editing all workspace `.md` files (SOUL.md, USER.md, AGENTS.md, etc.). New Tiers tab visualizing HOT → WARM → COLD memory hierarchy. ClawHub memory skills (`memory-never-forget`, `elite-longterm-memory`) installed.
+- **Memory System Overhaul** — New Knowledge Base tab for browsing, viewing, and editing all workspace `.md` files (SOUL.md, USER.md, AGENTS.md, etc.). MemPalace integration with spatial hierarchy, Knowledge Graph, and AAAK compression.
 - **Sidebar Consolidation** — Navigation reduced from 31 to 15 items with collapsible OpenClaw section. All views remain accessible via Ctrl+K command palette.
 - **Concurrency Limiter** — `cache.ts` now throttles CLI commands to 3 concurrent requests max, preventing WebSocket handshake timeouts and gateway lane stalls.
 - **Batched Prefetching** — Data store prefetches in 3 sequential batches with 30s cooldown instead of flooding the gateway with 12+ parallel requests.
@@ -201,7 +201,7 @@ The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects
 
 ### March 2026 — v0.4.0
 
-- **Multi-Provider LLM Support** — Connect to Ollama, OpenAI, Anthropic, Google, OpenRouter, Groq, or Mistral.
+- **Multi-Provider LLM Support** — Connect to vLLM, OpenAI, Anthropic, Google, OpenRouter, Groq, or Mistral.
 - **NVIDIA RTX Voice Engine** — GPU-accelerated speech with Nemotron/Parakeet STT and Magpie TTS.
 - **Software Factory** — Launch and manage coding agents with live log streaming.
 - **ClawHub** — Built-in skill registry with search, install, publish, and sync.
@@ -225,14 +225,14 @@ Crystal wraps [OpenClaw](https://github.com/nichochar/open-claw) — an open-sou
 | Interface | Terminal | Native desktop GUI with 30 views |
 | Setup | Manual config files | One-click onboarding wizard |
 | LLM Providers | Manual configuration | 7 providers with visual API key management |
-| Server management | Start services manually | Auto-starts Ollama, gateway, and voice servers |
-| Model management | `ollama pull/rm` | Visual model browser with VRAM charts |
+| Server management | Start services manually | Auto-starts vLLM, gateway, and voice servers |
+| Model management | CLI commands | Visual model browser with VRAM charts |
 | Skills & plugins | `npx openclaw skills list` | Toggle switches, ClawHub, one-click Power Up |
 | Voice | Separate setup | NVIDIA Parakeet STT and Magpie TTS via Voice Gateway (browser fallback) |
 | System monitoring | None | Live GPU, CPU, RAM, disk dashboards |
 | Coding agents | Separate tools | Built-in Factory with skill launcher + any agent |
 | Agent identity | Edit files manually | Visual workspace editor with presets |
-| Memory | Flat file + basic recall | MemPalace spatial hierarchy + LanceDB Pro hybrid search |
+| Memory | Flat file + basic recall | MemPalace spatial hierarchy + LanceDB hybrid search |
 | Secrets | `.env` files or inline | 1Password vault with `op run` injection |
 | Themes | None | 6 polished themes |
 
@@ -240,12 +240,12 @@ Crystal wraps [OpenClaw](https://github.com/nichochar/open-claw) — an open-sou
 
 ## Why Crystal?
 
-- **Local-First, Cloud-Optional.** Run everything on your own GPU with Ollama, or connect to OpenAI, Anthropic, Google, Groq, OpenRouter, or Mistral when you need it. Your data stays on your machine unless you choose otherwise.
-- **Zero Configuration.** Crystal auto-starts Ollama, the OpenClaw gateway, and all voice servers on launch. The onboarding wizard handles the rest.
+- **Local-First, Cloud-Optional.** Run everything on your own GPU with vLLM, or connect to OpenAI, Anthropic, Google, Groq, OpenRouter, or Mistral when you need it. Your data stays on your machine unless you choose otherwise.
+- **Zero Configuration.** Crystal auto-starts vLLM (via Docker), the OpenClaw gateway, and all voice servers on launch. The onboarding wizard handles the rest.
 - **Actually Useful.** Crystal isn't a chatbot wrapper. It creates files, runs shell commands, manages your system, automates workflows, generates images, controls a browser, monitors hardware, and manages distributed agent nodes — through natural language or voice.
 - **NVIDIA-Accelerated Voice.** GPU-powered speech recognition (Parakeet STT) and synthesis (Magpie TTS) through the Voice Gateway, with the browser Web Speech API as an emergency fallback when local NVIDIA services are unavailable.
 - **Production-Grade Security.** All secrets stored in 1Password and injected at runtime. Path-scoped filesystem access control. Device authentication on the gateway. No plaintext API keys anywhere.
-- **Dual-Layer Memory.** MemPalace spatial hierarchy (94.8% recall) with AAAK compression and temporal knowledge graph, plus LanceDB Pro hybrid retrieval with auto-capture. Only ~170 tokens loaded at cold start.
+- **Dual-Layer Memory.** MemPalace spatial hierarchy (94.8% recall) with AAAK compression and temporal knowledge graph, plus LanceDB hybrid retrieval with auto-capture. Only ~170 tokens loaded at cold start.
 
 ---
 
@@ -285,9 +285,9 @@ Futuristic bird's-eye view of your entire system with Apple-level polish and mic
 - **CPU & Memory Trends** — Smooth bezier sparkline charts with gradient fills, glowing endpoints, and live percentage readouts
 - **Cron Jobs** — Mini bar chart (active/disabled/failed) with one-click navigation to the scheduler
 - **Stats Tiles** — Sessions, Agents, Skills, Heartbeat — each with hover lift, glow, and press feedback
-- **Memory Chunks** — Ring gauge + dot matrix combo showing stored memory chunks with click-through to Memory view
+- **Memory Palace** — MemPalace status widget with drawer count ring gauge, wing/room counts, and active status indicator with click-through to Memory view
 - **Vector Store** — Segmented ring gauge with satellite status dots for Vector DB, Full-text Search, and file index readiness. Shows provider name and "INDEX PENDING" indicator
-- **Dual LLM Display** — Shows both hosted model (OpenAI logo + model name) and local model (NVIDIA logo + running model name from `ollama ps`) with independent connection status dots
+- **Dual LLM Display** — Shows both hosted model (OpenAI logo + model name) and local model (NVIDIA/vLLM) with independent connection status dots
 - **Uptime & Version** — System uptime with OpenClaw version badge
 - **Telegram Topics** — Topic tags with cron delivery counts and hover highlights
 - **Security** — Audit status card with glow progress bar and navigation chevron
@@ -323,12 +323,11 @@ Crystal ships with an NVIDIA-first voice stack. The desktop app talks to the **V
 
 ### Multi-Provider LLM
 
-Crystal supports 8 LLM providers. Manage API keys visually in Settings and switch models on the fly — or toggle offline mode in the chat settings drawer to auto-switch to local inference.
+Crystal supports 7 LLM providers. Manage API keys visually in Settings and switch models on the fly — or toggle offline mode in the chat settings drawer to auto-switch to local inference.
 
 | Provider | Type |
 |----------|------|
-| **vLLM** | Local (preferred, OpenAI-compatible on port 8000) |
-| **Ollama** | Local (fallback) |
+| **vLLM** | Local (OpenAI-compatible on port 8000, auto-started via Docker) |
 | **OpenAI** | Cloud API |
 | **Anthropic** | Cloud API |
 | **Google** | Cloud API |
@@ -401,7 +400,7 @@ Centralized management hub with four tabs:
 
 Comprehensive token usage analytics and cost estimation:
 
-- **Per-Provider Breakdown** — Tracks tokens across Anthropic, OpenAI, Ollama, Eleven Labs, NVIDIA STT/TTS, and other connected APIs.
+- **Per-Provider Breakdown** — Tracks tokens across Anthropic, OpenAI, vLLM, NVIDIA STT/TTS, and other connected APIs.
 - **Estimated Costs** — Cloud APIs priced at published per-million-token rates; local GPU priced at electricity costs (configurable wattage, $/kWh rate, and throughput).
 - **Local Compute Savings** — Side-by-side comparison showing hypothetical cloud cost vs. actual electricity cost with savings multiplier badge.
 - **Token Split Table** — Input/Output breakdown per provider with $/M Tok column and GPU badges for local providers.
@@ -509,29 +508,30 @@ Crystal integrates [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) for s
 
 ### Memory
 
-Crystal ships with a dual-layer memory architecture: **MemPalace** for spatial/hierarchical memory and **LanceDB Pro** for OpenClaw's native auto-capture.
+Crystal ships with a dual-layer memory architecture: **MemPalace** for spatial/hierarchical memory and **LanceDB** for OpenClaw's native auto-capture.
 
 **Memory Palace (MemPalace)**
 - **Spatial Hierarchy** — Memories organized into Wings > Rooms > Halls with cross-wing Tunnels for shared topics. Wing+room scoping achieves 94.8% recall vs 60.9% for flat search.
 - **Layered Loading** — L0 identity (~50 tokens) + L1 critical facts (~120 tokens) injected at startup. L2 room recall loaded on-demand. L3 deep semantic search for explicit queries. Only ~170 tokens at cold start.
 - **AAAK Compression** — 30x lossless compression natively readable by any LLM. Turns 1,000 tokens of prose into ~120 tokens of structured shorthand.
-- **Temporal Knowledge Graph** — SQLite-backed entity-relationship triples with valid_from/ended dates. Facts expire, contradictions are detected, historical queries supported.
+- **Temporal Knowledge Graph** — SQLite-backed entity-relationship triples with valid_from/ended dates. Facts expire, contradictions are detected, historical queries supported. 18 entities, 31 triples seeded.
+- **Entity Registry** — Disambiguates people, projects, and aliases for accurate recall.
+- **Cross-Wing Tunnels** — 10 explicit tunnels linking related rooms across wings for cross-domain recall.
+- **Agent Diary** — Daily reflection journal for the agent's operational insights.
 - **Auto-extraction** — Background mining every 15 messages captures topics, decisions, and code changes automatically.
 - **Palace UI** — Dedicated Palace tab with wing/room/hall browser, tunnel explorer, KG entity query, identity (L0) editor, and actions for mining, compression, and repair.
 
-**LanceDB Pro (OpenClaw Native)**
-- **Hybrid Retrieval** — Vector + BM25 full-text search with RRF fusion and cross-encoder reranking
-- **Smart Extraction** — LLM-powered automatic memory categorization (6 types)
+**LanceDB (OpenClaw Native)**
+- **Hybrid Retrieval** — Vector + BM25 full-text search with RRF fusion
 - **Weibull Decay** — Accessed memories get promoted, stale ones naturally fade
 - **Multi-scope Isolation** — Global, agent, user, project, and custom scopes
 
 **Additional Tabs**
 - **Knowledge Base** — Browse and edit all workspace `.md` files (SOUL.md, USER.md, AGENTS.md, TOOLS.md, etc.) with category filtering
-- **Tiered Memory** — Visual HOT > WARM > COLD hierarchy with installed memory skills
 - **Curated Memory** — View, add, and delete entries in `MEMORY.md`
 - **Daily Memory** — Browse daily memory logs with automatic cron capture
 - **Semantic Search** — Hybrid search across MemPalace and OpenClaw memory
-- **Vector DB** — LanceDB Pro configuration, similarity search, and embedding stats
+- **Vector DB** — LanceDB configuration, similarity search, and embedding stats
 
 ---
 
@@ -655,8 +655,8 @@ Terminal-style output with color-coded results and summary cards (Passed / Warni
 First-run wizard with 5 steps:
 
 1. **Welcome** — Introduction with Crystal branding
-2. **Prerequisites** — Auto-checks Node.js, Ollama, OpenClaw, NVIDIA GPU
-3. **LLM Setup** — Pick from installed models or pull a new one
+2. **Prerequisites** — Auto-checks Node.js, Docker, OpenClaw, NVIDIA GPU
+3. **LLM Setup** — Configure local vLLM or cloud provider
 4. **Gateway** — Verify/start the OpenClaw gateway on port 18789
 5. **Launch** — Summary of checks, selected model, and gateway status
 
@@ -682,13 +682,13 @@ Crystal is engineered to feel instant:
 | Frontend | React 19, TypeScript, Tailwind CSS 4, Zustand |
 | Backend | Rust (Tokio, Reqwest, Serde) |
 | AI Agent | [OpenClaw](https://github.com/nichochar/open-claw) |
-| LLM (Local) | [vLLM](https://github.com/vllm-project/vllm) (preferred), [Ollama](https://ollama.com/) (fallback) |
+| LLM (Local) | [vLLM](https://github.com/vllm-project/vllm) via Docker (auto-started) |
 | LLM (Cloud) | OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral |
 | Voice Gateway | FastAPI (`voice_gateway.py`, port 6500) |
 | Voice STT | NVIDIA Parakeet (`nvidia_stt_worker.py`, port 8090 via gateway 6500), Web Speech API (fallback) |
 | Voice TTS | NVIDIA Magpie (`nvidia_tts_worker.py`, port 8091 via gateway 6500), Web Speech API (fallback) |
 | Memory (Spatial) | [MemPalace](https://github.com/ultrawideband/mempalace) (Wings/Rooms/Halls/KG, ChromaDB) |
-| Memory (Native) | LanceDB Pro (hybrid BM25+vector, Weibull decay, multi-scope) |
+| Memory (Native) | LanceDB (hybrid BM25+vector, Weibull decay, multi-scope) |
 | Image Gen | OpenAI DALL·E (via OpenClaw skill) |
 | Sandbox | [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) *(optional)* |
 | Icons | Lucide React |
@@ -706,10 +706,8 @@ Crystal is engineered to feel instant:
 | **Node.js** | v18+ |
 | **Package Manager** | pnpm |
 | **Rust** | Latest stable toolchain |
-| **Docker** | Docker Desktop with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) *(for vLLM local inference)* |
-| **Ollama** | Installed with at least one model pulled *(fallback if no Docker/GPU)* |
+| **Docker** | Docker Desktop with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) *(for vLLM local inference and OpenShell sandbox)* |
 | **Python** | 3.10+ *(optional, for Voice Gateway and NVIDIA STT/TTS workers)* |
-| **Docker** | Docker Desktop with NVIDIA Container Toolkit *(required for vLLM and OpenShell sandbox)* |
 
 > **Cloud-only mode:** If you don't have an NVIDIA GPU, you can still use Crystal with cloud LLM providers and browser-based voice. Set your API keys in Settings and you're good to go.
 
@@ -720,12 +718,10 @@ Crystal is engineered to feel instant:
 ### 1. Install prerequisites
 
 ```bash
-# Ollama: https://ollama.com/download
-# Node.js: https://nodejs.org
-# Rust:    https://rustup.rs
-# pnpm:    npm install -g pnpm
-
-ollama pull qwen2.5:32b
+# Node.js:  https://nodejs.org
+# Rust:     https://rustup.rs
+# Docker:   https://www.docker.com/products/docker-desktop/
+# pnpm:     npm install -g pnpm
 ```
 
 ### 2. Clone and install
@@ -742,7 +738,7 @@ pnpm install
 pnpm tauri dev
 ```
 
-Crystal auto-starts Ollama, the OpenClaw gateway, and voice servers on launch. The onboarding wizard walks you through everything else.
+Crystal auto-starts Docker/vLLM, the OpenClaw gateway, and voice servers on launch. The onboarding wizard walks you through everything else.
 
 ### 4. Voice setup *(optional)*
 
@@ -831,7 +827,7 @@ Crystal/
 | Views | 30 |
 | Slash commands | 70+ |
 | Voice providers | 4 (2 STT + 2 TTS: NVIDIA + browser fallback each) |
-| LLM providers | 8 (incl. vLLM) |
+| LLM providers | 7 (vLLM local + 6 cloud) |
 | Themes | 6 |
 | Tools | 6 |
 | Channel integrations | 11 |

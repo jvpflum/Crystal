@@ -9,7 +9,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s
+      start_period: 600s
     volumes:
       - huggingface-cache:/root/.cache/huggingface
     environment:
@@ -25,10 +25,10 @@ services:
       --kv-cache-dtype fp8
       --host 0.0.0.0
       --port 8000
-      --max-model-len 40960
-      --gpu-memory-utilization 0.94
+      --max-model-len 32768
+      --gpu-memory-utilization 0.92
       --max-num-seqs 4
-      --max-num-batched-tokens 40960
+      --max-num-batched-tokens 32768
       --performance-mode interactivity
       --enable-prefix-caching
       --enable-auto-tool-choice

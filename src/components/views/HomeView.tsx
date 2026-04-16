@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "@/stores/appStore";
 import { openclawClient } from "@/lib/openclaw";
+import { memoryPalaceClient } from "@/lib/memory-palace";
 import { cachedCommand } from "@/lib/cache";
 import { GpuMonitor, NvidiaLogo, HudSectionLabel } from "@/components/widgets/GpuMonitor";
 import { LobsterIcon } from "@/components/LobsterIcon";
@@ -12,6 +13,7 @@ import {
   MemoryStick, Bolt, Trash2, Wifi, BatteryFull,
   RefreshCw, Power, RotateCcw, FolderCog, ShieldCheck,
   MonitorDown, Layers, XCircle, ChevronRight, Database, Search,
+  Castle, DoorOpen,
 } from "lucide-react";
 import { useDataStore } from "@/stores/dataStore";
 import { useTokenUsageStore, formatLifetimeTokens } from "@/stores/tokenUsageStore";
@@ -331,34 +333,6 @@ function SparkLine({ data, color, width = 200, height = 48, fill = true }: {
   );
 }
 
-function DotMatrix({ data, cols = 8, dotSize = 5, gap = 4, colorOn, colorOff = "rgba(255,255,255,0.04)" }: {
-  data: boolean[]; cols?: number; dotSize?: number; gap?: number;
-  colorOn: string; colorOff?: string;
-}) {
-  const rows = Math.ceil(data.length / cols);
-  const w = cols * (dotSize + gap) - gap;
-  const h = rows * (dotSize + gap) - gap;
-
-  return (
-    <svg width={w} height={h}>
-      {data.map((on, i) => {
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        return (
-          <circle key={i}
-            cx={col * (dotSize + gap) + dotSize / 2}
-            cy={row * (dotSize + gap) + dotSize / 2}
-            r={on ? dotSize / 2 : dotSize / 2 - 0.5}
-            fill={on ? colorOn : colorOff}
-            opacity={on ? 0.85 : 1}
-            style={on ? { filter: `drop-shadow(0 0 4px ${colorOn})`, transition: `all 0.3s ${EASE}` } : undefined}
-          />
-        );
-      })}
-    </svg>
-  );
-}
-
 function GlowProgress({ value, max = 100, color, height = 4 }: {
   value: number; max?: number; color: string; height?: number;
 }) {
@@ -552,6 +526,11 @@ export function HomeView() {
   const [gwTokenTotal, setGwTokenTotal] = useState<number>(0);
   const [statsLoaded, setStatsLoaded] = useState(() => !!(useDataStore.getState().agents?.data));
 
+  const [palaceDrawers, setPalaceDrawers] = useState(0);
+  const [palaceWings, setPalaceWings] = useState(0);
+  const [palaceRooms, setPalaceRooms] = useState(0);
+  const [palaceReady, setPalaceReady] = useState(false);
+
   const lifetimeTokens = Math.max(localLifetimeTokens, gwTokenTotal);
 
   useEffect(() => {
@@ -561,6 +540,16 @@ export function HomeView() {
         getAgents(), getCronJobs(), getSkills(), getSessions(),
       ]);
       getMemoryStatus(true);
+      memoryPalaceClient.isInitialized().then(init => {
+        if (!init || cancelled) return;
+        setPalaceReady(true);
+        memoryPalaceClient.getStatus().then(s => {
+          if (cancelled || !s) return;
+          setPalaceDrawers(s.totalDrawers ?? 0);
+          setPalaceWings(s.wings?.length ?? 0);
+          setPalaceRooms(s.wings?.reduce((a: number, w: { rooms: unknown[] }) => a + w.rooms.length, 0) ?? 0);
+        }).catch(() => {});
+      }).catch(() => {});
       if (cancelled) return;
 
       if (agentsR.status === "fulfilled" && Array.isArray(agentsR.value))
@@ -728,8 +717,6 @@ export function HomeView() {
   const cronBarColors = ["var(--success)", "var(--warning)", "var(--error)"];
   const cronBarLabels = ["On", "Off", "Fail"];
 
-  const memoryChunks = vectorStore.chunks;
-  const memoryDots = Array.from({ length: 64 }, (_, i) => i < memoryChunks);
 
   return (
     <div style={{
@@ -905,29 +892,47 @@ export function HomeView() {
       {/* ═══ Row 3b: Memory + Vector Store ═══ */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
 
-        {/* Memory Chunks — ring gauge */}
-        <div style={glowCard("var(--success)", { padding: "18px 20px", cursor: "pointer" })}
-          data-glow="var(--success)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}
+        {/* Memory Palace */}
+        <div style={glowCard("#b744ff", { padding: "18px 20px", cursor: "pointer" })}
+          data-glow="#b744ff" onMouseEnter={hoverLift} onMouseLeave={hoverReset}
           onMouseDown={pressDown} onMouseUp={pressUp}
           onClick={() => setView("memory")}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-            <SectionLabel text="Memory Chunks" />
+            <SectionLabel text="Memory Palace" />
             <ChevronRight style={{ width: 12, height: 12, color: "var(--text-muted)", opacity: 0.4 }} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
             <RingGauge
-              value={memoryChunks}
-              max={Math.max(memoryChunks, 100)}
+              value={palaceDrawers}
+              max={Math.max(palaceDrawers, 100)}
               size={88}
               stroke={7}
-              color="var(--success)"
-              label="Chunks"
-              display={loading ? "…" : String(memoryChunks)}
+              color="#b744ff"
+              label="Drawers"
+              display={loading ? "…" : String(palaceDrawers)}
             />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <DotMatrix data={memoryDots} cols={8} dotSize={5} gap={4} colorOn="var(--success)" />
-              <p style={{ margin: "8px 0 0", fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.03em" }}>
-                stored in long-term memory
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Castle style={{ width: 12, height: 12, color: "#b744ff", flexShrink: 0 }} />
+                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>{palaceWings}</span>
+                <span style={{ fontSize: 9, color: "var(--text-muted)" }}>wings</span>
+                <span style={{ margin: "0 2px", color: "var(--border)" }}>·</span>
+                <DoorOpen style={{ width: 12, height: 12, color: "#0088ff", flexShrink: 0 }} />
+                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>{palaceRooms}</span>
+                <span style={{ fontSize: 9, color: "var(--text-muted)" }}>rooms</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{
+                  width: 5, height: 5, borderRadius: "50%", flexShrink: 0,
+                  background: palaceReady ? "var(--success)" : "var(--error)",
+                  boxShadow: palaceReady ? "0 0 6px var(--success)" : "0 0 6px var(--error)",
+                }} />
+                <span style={{ fontSize: 9, color: palaceReady ? "var(--success)" : "var(--text-muted)", letterSpacing: "0.03em" }}>
+                  {palaceReady ? "MemPalace Active" : "Not Initialized"}
+                </span>
+              </div>
+              <p style={{ margin: "2px 0 0", fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.03em" }}>
+                semantic search + knowledge graph
               </p>
             </div>
           </div>

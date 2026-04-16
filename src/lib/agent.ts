@@ -113,9 +113,8 @@ class AgentService {
   ): AsyncGenerator<string> {
     this.emitStep({ action: { type: "thinking" }, timestamp: new Date() });
 
-    if (overrides) {
-      await openclawClient.applySessionOverrides(overrides).catch(() => {});
-    }
+    // Note: temperature/maxTokens/topP are not supported by OpenClaw's
+    // agents.defaults schema. Settings drawer shows them for future use.
 
     const imagePrompt = this.isImageRequest(userMessage);
 
