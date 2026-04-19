@@ -1,6 +1,10 @@
 services:
   vllm:
-    image: vllm/vllm-openai:nightly
+    # TIP: pin to a specific vLLM release tag for reproducibility.
+    # `nightly` is used so Crystal picks up NVFP4 + tool-calling fixes as they
+    # land, but for production deployments pin to `:latest` or a tested tag.
+    # Check https://hub.docker.com/r/vllm/vllm-openai/tags for current stable.
+    image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-nightly}
     container_name: crystal-vllm
     ports:
       - "8000:8000"
@@ -25,10 +29,10 @@ services:
       --kv-cache-dtype fp8
       --host 0.0.0.0
       --port 8000
-      --max-model-len 32768
-      --gpu-memory-utilization 0.92
+      --max-model-len 16384
+      --gpu-memory-utilization 0.80
       --max-num-seqs 4
-      --max-num-batched-tokens 32768
+      --max-num-batched-tokens 16384
       --performance-mode interactivity
       --enable-prefix-caching
       --enable-auto-tool-choice

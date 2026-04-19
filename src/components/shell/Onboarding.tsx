@@ -93,12 +93,27 @@ async function runCmd(command: string): Promise<string> {
   }
 }
 
+const ONBOARDING_STEP_KEY = "crystal_onboarding_step";
+
 export function Onboarding({ onComplete }: { onComplete: () => void }) {
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(() => {
+    try {
+      const saved = localStorage.getItem(ONBOARDING_STEP_KEY);
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed >= 0 && parsed < TOTAL_STEPS) return parsed;
+      }
+    } catch { /* ignore */ }
+    return 0;
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem(ONBOARDING_STEP_KEY, String(step)); } catch { /* ignore */ }
+  }, [step]);
 
   const [prereqs, setPrereqs] = useState<PrereqResult[]>([
     { label: "Node.js", ok: false, detail: "", loading: true },
-    { label: "Model Server", ok: false, detail: "", loading: true },
+    { label: "Local AI (vLLM)", ok: false, detail: "", loading: true },
     { label: "OpenClaw", ok: false, detail: "", loading: true },
     { label: "NVIDIA GPU", ok: false, detail: "", loading: true },
   ]);
@@ -555,8 +570,14 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
                 <span>Gateway: {gatewayUp ? "Connected" : "Not running"}</span>
               </div>
             </div>
-            <button style={primaryBtn} onClick={onComplete}>
-              <Rocket size={16} /> Launch Crystal
+            <button
+              style={primaryBtn}
+              onClick={() => {
+                try { localStorage.removeItem(ONBOARDING_STEP_KEY); } catch { /* ignore */ }
+                onComplete();
+              }}
+            >
+              <Rocket size={16} aria-hidden="true" /> Launch Crystal
             </button>
           </div>
         );

@@ -150,7 +150,22 @@ export class SttBridge {
 
       this._ws.onmessage = (event) => {
         try {
-          const msg: SttBridgeResponse = JSON.parse(event.data as string);
+          const raw = JSON.parse(event.data as string);
+
+          // Gateway SttEvent format: { provider, text, is_final, confidence, duration, error }
+          // Normalize to SttBridgeResponse { type: "partial" | "final" | "error" | "ready" }
+          if (raw && typeof raw.is_final === "boolean") {
+            if (raw.error) {
+              this._onError?.(raw.error);
+            } else if (raw.is_final) {
+              this._onFinal?.(raw.text ?? "", raw.confidence, raw.duration);
+            } else {
+              this._onPartial?.(raw.text ?? "", raw.confidence);
+            }
+            return;
+          }
+
+          const msg: SttBridgeResponse = raw;
           switch (msg.type) {
             case "partial":
               this._onPartial?.(msg.text, msg.confidence);

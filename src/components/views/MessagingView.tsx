@@ -11,7 +11,7 @@ import {
   BarChart3,
   X,
 } from "lucide-react";
-import { hoverLift, hoverReset, pressDown, pressUp, innerPanel, sectionLabel, inputStyle as sharedInputStyle } from "@/styles/viewStyles";
+import { hoverLift, hoverReset, pressDown, pressUp, innerPanel, sectionLabel, inputStyle as sharedInputStyle, btnSecondary } from "@/styles/viewStyles";
 
 /* ── Types ── */
 
@@ -116,9 +116,11 @@ export function MessagingView() {
 
   const [history, setHistory] = useState<SentMessage[]>(loadHistory);
   const [quickTargets, setQuickTargets] = useState(loadQuickTargets);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchChannels = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const raw = await runCli("openclaw channels list --json");
       const data = JSON.parse(raw);
@@ -145,8 +147,9 @@ export function MessagingView() {
 
       setChannels(entries);
       if (entries.length > 0 && !channel) setChannel(entries[0].id);
-    } catch {
+    } catch (err) {
       setChannels([]);
+      setLoadError(err instanceof Error ? err.message : "Could not load channels from OpenClaw");
     }
     setLoading(false);
   }, []);
@@ -352,6 +355,19 @@ export function MessagingView() {
               <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
                 Loading channels...
               </span>
+            </div>
+          ) : loadError ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: 8 }}>
+              <p style={{ fontSize: 11, color: "var(--warn, #f59e0b)", margin: 0 }}>
+                Couldn't reach OpenClaw: {loadError}
+              </p>
+              <button
+                type="button"
+                onClick={() => void fetchChannels()}
+                style={{ ...btnSecondary, alignSelf: "flex-start", fontSize: 10, padding: "4px 10px" }}
+              >
+                Retry
+              </button>
             </div>
           ) : channels.length === 0 ? (
             <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0 }}>

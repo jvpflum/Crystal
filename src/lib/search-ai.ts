@@ -43,7 +43,8 @@ ADDITIONAL VIEWS (accessible via Ctrl+K command palette):
 - Voice Calls: Voice call interface (NVIDIA Riva STT/TTS).
 
 Agents: main (JC/Juiceclaw — default), research, home, finance
-Key Skills: bill-pay, bill-sweep, bounty-hunter, car-broker, charts, goplaces, home-broker, home-project, market-research-agent, memory-tiering, notion, openclaw-auto-updater, sag, self-improve, session-logs, session-wrap, summarize, venture-capital, memory-lancedb, elite-longterm-memory, memory-never-forget
+Key Skills: bill-pay, bill-sweep, bounty-hunter, car-broker, charts, desktop-control-win, fundamental-stock-analysis, goplaces, home-broker, home-project, humanize-ai-text, market-research-agent, notion, openclaw-auto-updater, sag, self-improve, session-logs, session-wrap, skill-vetter, summarize, venture-capital, voice-chat
+Memory: MemPalace (spatial hierarchy wings/rooms/closets/drawers, Knowledge Graph, AAAK compression, Agent Diary, tunnels) + memory-lancedb (vector auto-capture)
 
 TIPS FOR GUIDING USERS:
 - To manage cron/scheduled jobs: Navigate to Command Center → Scheduled tab

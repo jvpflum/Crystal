@@ -1,0 +1,63 @@
+name: Bug Report
+description: Something isn't working as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please include as much detail as you can so we can reproduce and fix it quickly.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? What did you expect to happen?
+      placeholder: Crystal crashes when I click...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Crystal
+        2. Click on...
+        3. See error...
+    validations:
+      required: true
+
+  - type: input
+    id: crystal-version
+    attributes:
+      label: Crystal version
+      description: From the title bar or `package.json`
+      placeholder: v0.8.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Windows 10
+        - Windows 11
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU (if using local models)
+      placeholder: NVIDIA RTX 5090 32GB / CPU only
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Output from `~/.openclaw/logs/` or the Crystal Activity view
+      render: shell

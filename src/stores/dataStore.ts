@@ -214,68 +214,91 @@ async function fetchAgents(): Promise<Record<string, unknown>[]> {
   return [];
 }
 
+/**
+ * Unified memory status, post-MemPalace canonical migration.
+ *
+ * Single source of truth: `python mempalace_query.py status` (JSON one-shot,
+ * <100 ms). Returns drawers + wings + rooms + closets + KG node/edge counts +
+ * last successful mine timestamp.
+ *
+ * Backwards-compat shape: still exposes `chunks`/`status.{provider,vector,…}`
+ * so legacy consumers in HomeView keep rendering, with `provider="mempalace"`
+ * to make the swap obvious.
+ */
 async function fetchMemoryStatus(): Promise<Record<string, unknown>> {
-  const result: Record<string, unknown> = { chunks: 0, totalChunks: 0 };
+  const home = await getOpenClawHome();
+  const scriptPath = `${home}\\scripts\\mempalace_query.py`;
 
-  // openclaw ltm stats is very slow (~60-80s) — give it 2 min and cache for 5 min
-  const [statsR, pluginsR] = await Promise.allSettled([
-    cachedCommand("openclaw ltm stats", { ttl: 300_000, timeout: 120_000 }),
-    cachedCommand("openclaw plugins list", { ttl: 300_000, timeout: 60_000 }),
-  ]);
-
-  let chunks = 0;
-  let statsOut = "";
-  if (statsR.status === "fulfilled") {
-    statsOut = (statsR.value.stdout ?? "") + "\n" + (statsR.value.stderr ?? "");
-    const match = statsOut.match(/Total memories:\s*(\d+)/i);
-    chunks = match ? parseInt(match[1], 10) : 0;
-  }
-
-  // Fallback: count lines from `openclaw ltm list` (no --json flag)
-  if (!chunks) {
-    try {
-      const listR = await cachedCommand("openclaw ltm list", { ttl: 300_000, timeout: 120_000 });
-      if (listR.code === 0 && listR.stdout.trim()) {
-        const lines = listR.stdout.trim().split("\n").filter(l => l.trim() && !l.startsWith("["));
-        chunks = lines.length;
+  let palace: Record<string, unknown> | null = null;
+  let palaceError: string | null = null;
+  try {
+    const r = await cachedCommand(`python "${scriptPath}" status`, { ttl: 60_000, timeout: 8_000 });
+    if (r.code === 0 && r.stdout.trim()) {
+      try {
+        palace = JSON.parse(r.stdout) as Record<string, unknown>;
+      } catch (err) {
+        palaceError = `parse: ${(err as Error).message}`;
       }
-    } catch { /* ignore */ }
-  }
-
-  result.chunks = chunks;
-  result.totalChunks = chunks;
-
-  // Detect vector store status from plugins output AND ltm stats output
-  let vectorReady = false;
-  let ftsReady = false;
-  let provider = "none";
-  let files = 0;
-
-  // Check ltm stats output first — "memory-lancedb: plugin registered" appears in stdout
-  if (/memory-lancedb/i.test(statsOut)) {
-    vectorReady = true;
-    provider = "lancedb";
-  }
-
-  if (pluginsR.status === "fulfilled") {
-    const out = (pluginsR.value.stdout ?? "") + "\n" + (pluginsR.value.stderr ?? "");
-    if (!vectorReady && /memory-lancedb/i.test(out)) {
-      vectorReady = true;
-      provider = "lancedb";
+    } else if (r.code !== 0) {
+      palaceError = `exit ${r.code}: ${(r.stderr || r.stdout).slice(0, 200)}`;
     }
-    if (/fts|full.text/i.test(out)) ftsReady = true;
-    const pluginLines = out.split("\n").filter(l => /memory/i.test(l) && !/failed|error/i.test(l));
-    files = pluginLines.length;
+  } catch (err) {
+    palaceError = `spawn: ${(err as Error).message}`;
   }
 
-  result.status = {
-    chunks, files, dirty: false, provider,
-    vector: { available: vectorReady },
-    fts: { available: ftsReady },
-    custom: { searchMode: vectorReady && ftsReady ? "hybrid" : vectorReady ? "vector" : ftsReady ? "fts-only" : "unknown" },
-  };
+  // Recall-hook + extension health: confirm the hook plugin is enabled in the
+  // gateway config so the UI can flag a misconfiguration even if the palace
+  // status itself succeeds.
+  let recallHookEnabled = false;
+  let recallHookRegistered = false;
+  try {
+    const cfg = await invoke<string>("read_file", { path: `${home}\\openclaw.json` });
+    const parsed = JSON.parse(cfg) as Record<string, unknown>;
+    const plugins = (parsed?.plugins as Record<string, unknown>)?.entries as Record<string, unknown> | undefined;
+    const recall = plugins?.["palace-recall"] as Record<string, unknown> | undefined;
+    recallHookRegistered = !!recall;
+    recallHookEnabled = recall?.enabled !== false && !!recall;
+  } catch { /* config unreadable */ }
 
-  return result;
+  const drawers = Number(palace?.drawers ?? 0) || 0;
+  const wings = Number(palace?.wings ?? 0) || 0;
+  const rooms = Number(palace?.rooms ?? 0) || 0;
+  const closets = Number(palace?.closets ?? 0) || 0;
+  const kgNodes = Number(palace?.kg_nodes ?? 0) || 0;
+  const kgEdges = Number(palace?.kg_edges ?? 0) || 0;
+  const lastMineAt = (palace?.last_mine_at as string | null | undefined) ?? null;
+
+  const ready = drawers > 0 && !palaceError;
+
+  return {
+    // Canonical fields
+    provider: "mempalace",
+    drawers,
+    wings,
+    rooms,
+    closets,
+    kgNodes,
+    kgEdges,
+    lastMineAt,
+    recallHookEnabled,
+    recallHookRegistered,
+    palacePath: (palace?.palace as string | undefined) ?? null,
+    error: palaceError,
+
+    // Backwards-compat for legacy HomeView consumers
+    chunks: drawers,
+    totalChunks: drawers,
+    palaceDrawers: drawers,
+    status: {
+      chunks: drawers,
+      files: drawers,
+      dirty: false,
+      provider: "mempalace",
+      vector: { available: ready },
+      fts: { available: ready },
+      custom: { searchMode: ready ? "hybrid+kg" : "unavailable" },
+    },
+  };
 }
 
 async function fetchSystemStatus(): Promise<Record<string, unknown>> {
@@ -353,7 +376,11 @@ export function parseSkillsCliOutput(stdout: string, stderr: string): Record<str
 }
 
 async function fetchSkills(): Promise<Record<string, unknown>[]> {
-  const r = await cachedCommand(SKILLS_LIST_JSON_CMD, { ttl: 120_000, timeout: 12_000 });
+  // `openclaw skills list --json` walks every skill folder, validates bins/env/config,
+  // and can take 30–45s on a cold gateway with ~25+ skills. 12s was far too tight and
+  // caused the Skills tab to render empty while the command was still running. 60s
+  // matches other enumeration CLIs (plugins list, ltm stats).
+  const r = await cachedCommand(SKILLS_LIST_JSON_CMD, { ttl: 120_000, timeout: 60_000 });
   return parseSkillsCliOutput(r.stdout || "", r.stderr || "");
 }
 

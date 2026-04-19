@@ -1693,7 +1693,7 @@ function HeartbeatTab() {
         });
       }
       if (hbPath.current) {
-        await invoke("write_file", { path: hbPath.current, contents: instructions });
+        await invoke("write_file", { path: hbPath.current, content: instructions });
       }
       setStatus(prev => ({
         ...prev, every: `${editInterval}m`, target: editTarget,

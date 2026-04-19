@@ -13,7 +13,7 @@ import {
   MemoryStick, Bolt, Trash2, Wifi, BatteryFull,
   RefreshCw, Power, RotateCcw, FolderCog, ShieldCheck,
   MonitorDown, Layers, XCircle, ChevronRight, Database, Search,
-  Castle, DoorOpen,
+  Castle, DoorOpen, Network, GitBranch, Pickaxe, Sparkles,
 } from "lucide-react";
 import { useDataStore } from "@/stores/dataStore";
 import { useTokenUsageStore, formatLifetimeTokens } from "@/stores/tokenUsageStore";
@@ -54,37 +54,58 @@ interface SysStats {
   uptime: string;
 }
 
-interface VectorStoreInfo {
-  chunks: number;
-  files: number;
-  vectorReady: boolean;
-  ftsReady: boolean;
+interface MemoryHealthInfo {
+  drawers: number;
+  wings: number;
+  rooms: number;
+  closets: number;
+  kgNodes: number;
+  kgEdges: number;
+  lastMineAt: string | null;
+  recallHookEnabled: boolean;
+  recallHookRegistered: boolean;
   provider: string;
-  searchMode: string;
-  dirty: boolean;
+  ready: boolean;
+  error: string | null;
 }
 
-function parseVectorStoreInfo(mem: Record<string, unknown> | null | undefined): VectorStoreInfo {
-  const base: VectorStoreInfo = { chunks: 0, files: 0, vectorReady: false, ftsReady: false, provider: "none", searchMode: "unknown", dirty: false };
+function parseMemoryHealthInfo(mem: Record<string, unknown> | null | undefined): MemoryHealthInfo {
+  const base: MemoryHealthInfo = {
+    drawers: 0, wings: 0, rooms: 0, closets: 0,
+    kgNodes: 0, kgEdges: 0, lastMineAt: null,
+    recallHookEnabled: false, recallHookRegistered: false,
+    provider: "none", ready: false, error: null,
+  };
   if (!mem || typeof mem !== "object") return base;
 
-  const st = mem.status as Record<string, unknown> | undefined;
-  if (st && typeof st === "object") {
-    base.chunks = Number(st.chunks ?? st.totalChunks ?? 0) || 0;
-    base.files = Number(st.files ?? 0) || 0;
-    base.dirty = Boolean(st.dirty);
-    base.provider = String(st.provider ?? "none");
-    const vector = st.vector as Record<string, unknown> | undefined;
-    const fts = st.fts as Record<string, unknown> | undefined;
-    const custom = st.custom as Record<string, unknown> | undefined;
-    base.vectorReady = Boolean(vector?.available);
-    base.ftsReady = Boolean(fts?.available);
-    base.searchMode = String(custom?.searchMode ?? "unknown");
-    return base;
-  }
-
-  base.chunks = Number(mem.totalChunks ?? mem.chunks ?? mem.count ?? 0) || 0;
+  base.drawers = Number(mem.drawers ?? mem.totalChunks ?? mem.chunks ?? 0) || 0;
+  base.wings = Number(mem.wings ?? 0) || 0;
+  base.rooms = Number(mem.rooms ?? 0) || 0;
+  base.closets = Number(mem.closets ?? 0) || 0;
+  base.kgNodes = Number(mem.kgNodes ?? 0) || 0;
+  base.kgEdges = Number(mem.kgEdges ?? 0) || 0;
+  base.lastMineAt = (mem.lastMineAt as string | null | undefined) ?? null;
+  base.recallHookEnabled = Boolean(mem.recallHookEnabled);
+  base.recallHookRegistered = Boolean(mem.recallHookRegistered);
+  base.provider = String(mem.provider ?? "none");
+  base.error = (mem.error as string | null | undefined) ?? null;
+  base.ready = base.drawers > 0 && !base.error;
   return base;
+}
+
+function relativeAge(iso: string | null): string {
+  if (!iso) return "never";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "never";
+  const diffMs = Date.now() - t;
+  if (diffMs < 0) return "just now";
+  const m = Math.floor(diffMs / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
 }
 
 const META_INITIAL: MetaInfo = {
@@ -350,9 +371,11 @@ function GlowProgress({ value, max = 100, color, height = 4 }: {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Vector Store Ring Visualization
+   Vector Store Ring Visualization (legacy — kept for any external import,
+   no longer rendered now that the unified Memory Health card replaced it)
    ═══════════════════════════════════════════════════════════════ */
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function VectorRingViz({ chunks, files, vectorReady, ftsReady, loading }: {
   chunks: number; files: number; vectorReady: boolean; ftsReady: boolean; loading: boolean;
 }) {
@@ -517,8 +540,8 @@ export function HomeView() {
     () => (useDataStore.getState().sessions?.data as unknown[] | undefined)?.length ?? 0
   );
   const memoryEntry = useDataStore(s => s.memoryStatus);
-  const vectorStore = useMemo(
-    () => parseVectorStoreInfo(memoryEntry?.data as Record<string, unknown> | null),
+  const memoryHealth = useMemo(
+    () => parseMemoryHealthInfo(memoryEntry?.data as Record<string, unknown> | null),
     [memoryEntry],
   );
   const localLifetimeTokens = useTokenUsageStore(s => s.totalTokens);
@@ -938,40 +961,61 @@ export function HomeView() {
           </div>
         </div>
 
-        {/* Vector Store — segmented bar chart style */}
+        {/* Memory Health — KG + recall hook + last mine, replaces legacy Vector Store ring */}
         <div style={glowCard("#06b6d4", { padding: "18px 20px", cursor: "pointer" })}
           data-glow="#06b6d4" onMouseEnter={hoverLift} onMouseLeave={hoverReset}
           onMouseDown={pressDown} onMouseUp={pressUp}
           onClick={() => setView("memory")}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-            <SectionLabel text="Vector Store" />
+            <SectionLabel text="Memory Health" />
             <ChevronRight style={{ width: 12, height: 12, color: "var(--text-muted)", opacity: 0.4 }} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-            <VectorRingViz
-              chunks={vectorStore.chunks}
-              files={vectorStore.files}
-              vectorReady={vectorStore.vectorReady}
-              ftsReady={vectorStore.ftsReady}
-              loading={loading}
+            <RingGauge
+              value={memoryHealth.kgEdges}
+              max={Math.max(memoryHealth.kgEdges, memoryHealth.drawers || 100)}
+              size={88}
+              stroke={7}
+              color="#06b6d4"
+              label="KG Triples"
+              display={loading ? "…" : String(memoryHealth.kgEdges)}
             />
             <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
-              {/* Status indicators */}
-              <VectorStatusRow icon={Database} label="Vector DB" active={vectorStore.vectorReady} />
-              <VectorStatusRow icon={Search} label="Full-text Search" active={vectorStore.ftsReady} />
-              <VectorStatusRow icon={Layers} label="Provider" active={vectorStore.provider !== "none"} value={vectorStore.provider !== "none" ? vectorStore.provider : "—"} />
-              {vectorStore.dirty && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Network style={{ width: 12, height: 12, color: "#06b6d4", flexShrink: 0 }} />
+                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>{memoryHealth.kgNodes}</span>
+                <span style={{ fontSize: 9, color: "var(--text-muted)" }}>entities</span>
+                <span style={{ margin: "0 2px", color: "var(--border)" }}>·</span>
+                <GitBranch style={{ width: 12, height: 12, color: "#a78bfa", flexShrink: 0 }} />
+                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>{memoryHealth.closets}</span>
+                <span style={{ fontSize: 9, color: "var(--text-muted)" }}>closets</span>
+              </div>
+              <VectorStatusRow
+                icon={Sparkles}
+                label="Recall Hook"
+                active={memoryHealth.recallHookEnabled}
+                value={memoryHealth.recallHookEnabled ? "active" : (memoryHealth.recallHookRegistered ? "disabled" : "missing")}
+              />
+              <VectorStatusRow
+                icon={Pickaxe}
+                label="Last Mine"
+                active={!!memoryHealth.lastMineAt}
+                value={relativeAge(memoryHealth.lastMineAt)}
+              />
+              {memoryHealth.error && (
                 <p style={{
                   margin: 0, fontSize: 8, color: "var(--warning)",
                   display: "flex", alignItems: "center", gap: 4,
                   letterSpacing: "0.05em", fontWeight: 600, textTransform: "uppercase",
                 }}>
                   <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--warning)", boxShadow: "0 0 6px var(--warning)", flexShrink: 0 }} />
-                  INDEX PENDING
+                  PALACE OFFLINE
                 </p>
               )}
               <p style={{ margin: "2px 0 0", fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.03em" }}>
-                {vectorStore.files > 0 ? `${vectorStore.files} files indexed` : "embeddings ready"}
+                {memoryHealth.error
+                  ? "mempalace_query.py status failed"
+                  : `provider · ${memoryHealth.provider}`}
               </p>
             </div>
           </div>

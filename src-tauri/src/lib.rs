@@ -4,14 +4,14 @@ use std::os::windows::process::CommandExt;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, Runtime, AppHandle,
+    Emitter, Manager, Runtime, AppHandle,
 };
 use serde::Serialize;
 
@@ -771,7 +771,7 @@ fn start_direct_chat(
                                                 let content = d.get("content").and_then(|c| c.as_str()).unwrap_or("");
                                                 let reasoning = d.get("reasoning_content").and_then(|c| c.as_str()).unwrap_or("");
                                                 if !content.is_empty() || !reasoning.is_empty() {
-                                                    let mut out = proc_clone.stdout_buf.lock().unwrap();
+                                                    let mut out = proc_clone.stdout_buf.lock().unwrap_or_else(|e| e.into_inner());
                                                     out.push_str(content);
                                                     out.push_str(reasoning);
                                                 }
@@ -781,7 +781,7 @@ fn start_direct_chat(
                                 }
                             }
                             Err(e) => {
-                                let mut err = proc_clone.stderr_buf.lock().unwrap();
+                                let mut err = proc_clone.stderr_buf.lock().unwrap_or_else(|e| e.into_inner());
                                 err.push_str(&format!("Stream error: {}\n", e));
                                 break;
                             }
@@ -791,17 +791,17 @@ fn start_direct_chat(
                 Ok(r) => {
                     let status = r.status();
                     let body = r.text().await.unwrap_or_default();
-                    let mut err = proc_clone.stderr_buf.lock().unwrap();
+                    let mut err = proc_clone.stderr_buf.lock().unwrap_or_else(|e| e.into_inner());
                     err.push_str(&format!("API error {}: {}\n", status, body));
                 }
                 Err(e) => {
-                    let mut err = proc_clone.stderr_buf.lock().unwrap();
+                    let mut err = proc_clone.stderr_buf.lock().unwrap_or_else(|e| e.into_inner());
                     err.push_str(&format!("Connection failed: {}\n", e));
                 }
             }
 
-            *proc_clone.exit_code.lock().unwrap() = Some(0);
-            *proc_clone.done.lock().unwrap() = true;
+            *proc_clone.exit_code.lock().unwrap_or_else(|e| e.into_inner()) = Some(0);
+            *proc_clone.done.lock().unwrap_or_else(|e| e.into_inner()) = true;
         });
     });
 
@@ -829,6 +829,78 @@ fn get_openclaw_token() -> Result<String, String> {
 fn check_port_in_use(port: u16) -> bool {
     use std::net::TcpStream;
     TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok()
+}
+
+/// Locate the bundled `scripts/` directory containing helpers like
+/// `mempalace_query.py`. Tries (in order): cwd, Tauri resource dir, and
+/// directories above the running exe (dev mode).
+fn find_scripts_dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    if let Ok(cwd) = std::env::current_dir() {
+        let scripts = cwd.join("scripts");
+        if scripts.is_dir() && scripts.join("mempalace_query.py").exists() {
+            return Some(scripts);
+        }
+    }
+    if let Ok(resource_path) = app.path().resource_dir() {
+        let bundled = resource_path.join("scripts");
+        if bundled.is_dir() && bundled.join("mempalace_query.py").exists() {
+            return Some(bundled);
+        }
+    }
+    if let Ok(exe_path) = std::env::current_exe() {
+        let mut current = exe_path;
+        for _ in 0..6 {
+            if let Some(parent) = current.parent() {
+                current = parent.to_path_buf();
+                let scripts = current.join("scripts");
+                if scripts.is_dir() && scripts.join("mempalace_query.py").exists() {
+                    return Some(scripts);
+                }
+            } else {
+                break;
+            }
+        }
+    }
+    None
+}
+
+/// Run a bundled Python script with the given args. Spawns Python directly
+/// (no shell) so the caller never has to worry about quoting / escaping —
+/// each arg is passed as a single argv entry. Returns stdout/stderr/code.
+#[tauri::command]
+async fn run_python_script<R: Runtime>(
+    app: AppHandle<R>,
+    script: String,
+    args: Vec<String>,
+) -> Result<CommandResult, String> {
+    let scripts_dir = find_scripts_dir(&app)
+        .ok_or_else(|| "scripts/ directory not found (looked in cwd, resource dir, and exe parents)".to_string())?;
+    let script_path = scripts_dir.join(&script);
+    if !script_path.exists() {
+        return Err(format!("script not found: {}", script_path.display()));
+    }
+    let python = find_python().ok_or_else(|| "python interpreter not found on PATH".to_string())?;
+
+    tokio::task::spawn_blocking(move || {
+        let mut cmd = Command::new(&python);
+        cmd.arg(&script_path);
+        for a in &args {
+            cmd.arg(a);
+        }
+        cmd.env("PYTHONIOENCODING", "utf-8");
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(Stdio::null());
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        let output = cmd.output()
+            .map_err(|e| format!("failed to spawn python: {}", e))?;
+        Ok(CommandResult {
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            code: output.status.code().unwrap_or(-1),
+        })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 fn find_python() -> Option<String> {
@@ -1222,6 +1294,10 @@ fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "quit" => {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.emit("crystal:shutting-down", ());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(300));
                 cleanup_servers(app);
                 app.exit(0);
             }
@@ -1465,9 +1541,13 @@ fn start_gateway_resilient<R: Runtime>(_app: &AppHandle<R>) {
             }
         }
 
-        // Poll for readiness — gateway.cmd includes `op run` which takes ~15s,
-        // then Node.js boot adds ~15s more.
-        let max_wait = std::time::Duration::from_secs(75);
+        // Poll for readiness. gateway.cmd pipeline:
+        //   1. `op run` — 1–60s (first call may prompt Windows Hello / 1Password desktop unlock)
+        //   2. `op` resolves every `op://` reference in .env — ~5–15s depending on network
+        //   3. Node.js boots openclaw dist — ~15–25s
+        // A 75s budget is too tight on cold boots; 180s covers first-unlock scenarios
+        // while still failing fast if something is actually broken.
+        let max_wait = std::time::Duration::from_secs(180);
         let start = std::time::Instant::now();
         while start.elapsed() < max_wait {
             std::thread::sleep(std::time::Duration::from_secs(3));
@@ -1786,9 +1866,22 @@ fn cleanup_servers(app: &AppHandle<impl Runtime>) {
             kill_process_tree(&mut child);
         }
 
+        // Fallback: if gateway CLI stop didn't work, force-kill the port holder
+        #[cfg(target_os = "windows")]
+        if check_port_in_use(18789) {
+            println!("Gateway still on 18789 after CLI stop — force-killing port holder...");
+            let kill_cmd = "Get-NetTCPConnection -LocalPort 18789 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }";
+            let mut cmd = Command::new("powershell");
+            cmd.args(["-NoProfile", "-NonInteractive", "-Command", kill_cmd])
+                .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW);
+            let _ = cmd.output();
+        }
+
         // Kill any streaming commands still running
         let mut streaming = state.streaming.lock().unwrap_or_else(|e| e.into_inner());
         for (id, proc) in streaming.iter() {
+            if proc.pid == 0 { continue; }
             println!("Killing streaming process {}...", id);
             let pid = proc.pid;
             #[cfg(target_os = "windows")]
@@ -1805,6 +1898,29 @@ fn cleanup_servers(app: &AppHandle<impl Runtime>) {
             }
         }
         streaming.clear();
+    }
+
+    // Stop vLLM Docker container (Crystal owns the lifecycle)
+    if check_port_in_use(8000) {
+        if let Some(compose_file) = find_compose_file() {
+            println!("Stopping vLLM Docker container...");
+            #[cfg(target_os = "windows")]
+            {
+                let mut cmd = Command::new("cmd");
+                cmd.args(["/C", "docker", "compose", "-f", &compose_file, "stop", "vllm"])
+                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                    .creation_flags(CREATE_NO_WINDOW);
+                let _ = cmd.output();
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = Command::new("docker")
+                    .args(["compose", "-f", &compose_file, "stop", "vllm"])
+                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                    .output();
+            }
+            println!("vLLM container stopped.");
+        }
     }
 
     // Kill any orphaned processes on Crystal-managed ports
@@ -1853,9 +1969,10 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Closing the window exits the app fully (cleanup + quit)
                 println!("Window close requested – shutting down all services...");
                 api.prevent_close();
+                let _ = window.emit("crystal:shutting-down", ());
+                std::thread::sleep(std::time::Duration::from_millis(300));
                 cleanup_servers(window.app_handle());
                 window.app_handle().exit(0);
             }
@@ -1882,7 +1999,8 @@ pub fn run() {
             stop_vllm_docker,
             http_proxy,
             get_openclaw_token,
-            start_direct_chat
+            start_direct_chat,
+            run_python_script
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -40,7 +40,7 @@ export class NvidiaMagpieTtsProvider implements TextToSpeechProvider {
     this._available = await this.isAvailable();
     if (this._available) {
       const via = this._useGateway ? "Voice Gateway (:6500)" : `direct (:${MAGPIE_TTS_PORT})`;
-      console.log(`[NvidiaMagpieTTS] Available via ${via}`);
+      if (import.meta.env.DEV) console.log(`[NvidiaMagpieTTS] Available via ${via}`);
       // Re-create bridge with correct URL
       const url = this._useGateway ? GATEWAY_HTTP_URL : DIRECT_HTTP_URL;
       this._bridge = new TtsBridge({ ttsHttpUrl: url });

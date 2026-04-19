@@ -15,6 +15,8 @@ import { useToggleWindowShortcut } from "@/hooks/useGlobalShortcut";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useStorage } from "@/hooks/useStorage";
 import { openclawClient } from "@/lib/openclaw";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Loader2 } from "lucide-react";
 import "./index.css";
 
@@ -100,9 +102,15 @@ function App() {
   const [showOnboarding, setShowOnboarding] = useState(() => {
     try { return !localStorage.getItem("crystal_onboarded"); } catch { return false; }
   });
+  const [shuttingDown, setShuttingDown] = useState(false);
 
   useToggleWindowShortcut();
   useKeyboardShortcuts();
+
+  useEffect(() => {
+    const unlisten = listen("crystal:shutting-down", () => setShuttingDown(true));
+    return () => { unlisten.then(fn => fn()); };
+  }, []);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "k") {
@@ -134,11 +142,15 @@ function App() {
     let disposed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let lastGwState: boolean | null = null;
+    const setSvc = useAppStore.getState().setServiceStatus;
+
+    setSvc("gateway", "starting");
 
     const safeSetGw = (connected: boolean) => {
       if (disposed || connected === lastGwState) return;
       lastGwState = connected;
       setGatewayConnected(connected);
+      setSvc("gateway", connected ? "ready" : "starting");
     };
 
     const statusCb = (s: string) => safeSetGw(s === "connected");
@@ -177,6 +189,38 @@ function App() {
     };
   }, [setGatewayConnected]);
 
+  // Global service health polling — tracks vLLM + voice readiness
+  useEffect(() => {
+    let disposed = false;
+    const setSvc = useAppStore.getState().setServiceStatus;
+    setSvc("vllm", "starting");
+    setSvc("voice", "starting");
+
+    const poll = async () => {
+      if (disposed) return;
+      try {
+        const status = await invoke<{
+          vllm_running: boolean;
+          openclaw_running: boolean;
+          nvidia_stt_running: boolean;
+          nvidia_tts_running: boolean;
+          voice_gateway_running: boolean;
+        }>("get_server_status");
+        setSvc("vllm", status.vllm_running ? "ready" : "starting");
+        setSvc("voice", (status.nvidia_stt_running || status.voice_gateway_running) ? "ready" : "starting");
+      } catch { /* ignore */ }
+    };
+
+    poll();
+    const interval = setInterval(poll, 15_000);
+    return () => { disposed = true; clearInterval(interval); };
+  }, []);
+
+  // Global warmUp — pre-cache model config and memory context on app start
+  useEffect(() => {
+    openclawClient.warmUp().catch(() => {});
+  }, []);
+
   if (!isInitialized) {
     return (
       <div className="app-root h-screen w-screen" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -184,6 +228,19 @@ function App() {
         <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
           <Loader2 style={{ width: 32, height: 32, color: "var(--accent)" }} className="animate-spin" />
           <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>Loading Crystal...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (shuttingDown) {
+    return (
+      <div className="app-root h-screen w-screen" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div className="app-atmosphere" aria-hidden />
+        <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+          <Loader2 style={{ width: 28, height: 28, color: "var(--accent)" }} className="animate-spin" />
+          <p style={{ fontSize: 14, color: "var(--text-secondary)", fontWeight: 500 }}>Shutting down services...</p>
+          <p style={{ fontSize: 11, color: "var(--text-muted)" }}>Stopping gateway, vLLM, and voice servers</p>
         </div>
       </div>
     );

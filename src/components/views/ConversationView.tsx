@@ -196,7 +196,7 @@ export function ConversationView() {
   const [isListening, setIsListening] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
 
-  // Local STT/TTS pipeline via useVoice (NVIDIA Nemotron/Parakeet → browser fallback)
+  // Local STT/TTS pipeline via useVoice (NVIDIA Parakeet → browser fallback)
   const {
     voiceState, transcript: voiceTranscript,
     isSttConnected,
@@ -1753,8 +1753,8 @@ export function ConversationView() {
             </button>
             <button
               onClick={handleMicClick}
-              aria-label={isListening ? "Stop listening" : localSttAvailable ? "Voice input (NVIDIA Nemotron)" : "Voice input (NVIDIA offline)"}
-              title={isListening ? "Click to stop" : localSttAvailable ? "NVIDIA Nemotron STT — click to speak" : "NVIDIA STT offline — waiting for GPU worker"}
+              aria-label={isListening ? "Stop listening" : localSttAvailable ? "Voice input (NVIDIA Parakeet)" : "Voice input (NVIDIA offline)"}
+              title={isListening ? "Click to stop" : localSttAvailable ? "NVIDIA Parakeet STT — click to speak" : "NVIDIA STT offline — waiting for GPU worker"}
               style={{
                 padding: "4px 8px", borderRadius: 8, border: "none", cursor: "pointer", flexShrink: 0,
                 display: "flex", alignItems: "center", gap: 4,

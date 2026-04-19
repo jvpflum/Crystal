@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions
+    url: https://github.com/jvpflum/Crystal/discussions
+    about: Ask questions, share setups, or discuss ideas
+  - name: OpenClaw Discord
+    url: https://discord.gg/openclaw
+    about: Community chat for OpenClaw and Crystal builders

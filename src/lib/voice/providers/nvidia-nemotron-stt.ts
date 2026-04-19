@@ -2,15 +2,15 @@
  * NvidiaNemotronSpeechProvider
  *
  * Concrete STT provider targeting local GPU inference with:
- *   nvidia/nemotron-speech-streaming-en-0.6b (Parakeet-family streaming ASR)
+ *   nvidia/parakeet-ctc-0.6b (NeMo ASR streaming model)
  *
- * Connects to a local Python WebSocket worker (nvidia_stt_worker.py) on port 8090.
+ * Connects to a local Python WebSocket worker (nvidia_stt_worker.py) on port 8090,
+ * or via the unified Voice Gateway on port 6500.
  *
- * Optimizations vs. previous version:
- *   - Callbacks are wired BEFORE startStream to eliminate race conditions
- *   - endStream uses a dedicated promise instead of overriding onFinalTranscript
- *   - Safety timeout reduced from 10s to 4s
- *   - Cached availability to avoid redundant /health pings
+ * Brand note: Crystal surfaces this as "NVIDIA Parakeet" in the UI because that is the
+ * deployed model identifier. The class name remains NvidiaNemotronSpeechProvider to keep
+ * the NeMo-framework association clear for engineers (NeMo = NVIDIA's framework; Parakeet
+ * is a specific NeMo ASR model family).
  */
 
 import type { SpeechToTextProvider, SttStreamHandle } from "./stt-provider";
@@ -102,7 +102,7 @@ class NemotronStreamHandle implements SttStreamHandle {
 
 export class NvidiaNemotronSpeechProvider implements SpeechToTextProvider {
   readonly id = "nvidia-nemotron";
-  readonly name = "NVIDIA Nemotron/Parakeet Streaming ASR";
+  readonly name = "NVIDIA Parakeet (NeMo ASR)";
 
   private _available = false;
   private _lastHealthCheck = 0;
@@ -113,9 +113,9 @@ export class NvidiaNemotronSpeechProvider implements SpeechToTextProvider {
     this._available = await this.isAvailable();
     if (this._available) {
       const via = this._useGateway ? "Voice Gateway (:6500)" : `direct (:${NEMOTRON_STT_PORT})`;
-      console.log(`[NvidiaNemotronSTT] Available via ${via}`);
+      if (import.meta.env.DEV) console.log(`[NvidiaNemotronSTT] Available via ${via}`);
     } else {
-      console.warn("[NvidiaNemotronSTT] Not available");
+      if (import.meta.env.DEV) console.warn("[NvidiaNemotronSTT] Not available");
     }
   }
 

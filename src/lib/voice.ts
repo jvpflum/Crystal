@@ -2,7 +2,7 @@
  * Voice service — local GPU voice pipeline using NVIDIA Parakeet STT + Magpie TTS.
  *
  * Pipeline:
- *   STT: NVIDIA Nemotron/Parakeet (8090) → Browser API
+ *   STT: NVIDIA Parakeet (8090) → Browser API
  *   TTS: NVIDIA Magpie (8091) → Browser API
  *
  * Optimizations:

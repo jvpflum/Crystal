@@ -38,7 +38,7 @@ const dot = (color: string): CSSProperties => ({
 });
 
 const VOICE_PROVIDER_META: Record<string, { label: string; port?: string }> = {
-  "nvidia-nemotron": { label: "NVIDIA Nemotron/Parakeet", port: "8090" },
+  "nvidia-nemotron": { label: "NVIDIA Parakeet (NeMo)", port: "8090" },
   "browser-stt":     { label: "Browser Speech API" },
   "nvidia-magpie":   { label: "NVIDIA Magpie TTS", port: "8091" },
   "browser-tts":     { label: "Browser TTS" },
@@ -1331,13 +1331,55 @@ function VoiceProviderRow({ label, providers, preferredId, onSelect }: {
 /* ── API Keys Manager ── */
 
 const API_PROVIDERS = [
-  { id: "anthropic", label: "Anthropic", placeholder: "sk-ant-...", color: "#d4a574" },
-  { id: "openai", label: "OpenAI", placeholder: "sk-...", color: "#10a37f" },
-  { id: "google", label: "Google AI", placeholder: "AIza...", color: "#4285f4" },
-  { id: "openrouter", label: "OpenRouter", placeholder: "sk-or-...", color: "#8b5cf6" },
-  { id: "groq", label: "Groq", placeholder: "gsk_...", color: "#f55036" },
-  { id: "mistral", label: "Mistral", placeholder: "...", color: "#ff7000" },
+  { id: "anthropic", label: "Anthropic", placeholder: "sk-ant-...", color: "#d4a574", getUrl: "https://console.anthropic.com/settings/keys" },
+  { id: "openai", label: "OpenAI", placeholder: "sk-...", color: "#10a37f", getUrl: "https://platform.openai.com/api-keys" },
+  { id: "google", label: "Google AI", placeholder: "AIza...", color: "#4285f4", getUrl: "https://aistudio.google.com/apikey" },
+  { id: "openrouter", label: "OpenRouter", placeholder: "sk-or-...", color: "#8b5cf6", getUrl: "https://openrouter.ai/keys" },
+  { id: "groq", label: "Groq", placeholder: "gsk_...", color: "#f55036", getUrl: "https://console.groq.com/keys" },
+  { id: "mistral", label: "Mistral", placeholder: "...", color: "#ff7000", getUrl: "https://console.mistral.ai/api-keys" },
 ] as const;
+
+async function testApiKey(providerId: string, apiKey: string): Promise<{ ok: boolean; message: string }> {
+  try {
+    if (providerId === "openai") {
+      const r = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${apiKey}` } });
+      if (r.ok) return { ok: true, message: "Connected" };
+      return { ok: false, message: r.status === 401 ? "Invalid key" : `HTTP ${r.status}` };
+    }
+    if (providerId === "anthropic") {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "claude-3-5-haiku-latest", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }),
+      });
+      if (r.ok || r.status === 400) return { ok: true, message: "Connected" };
+      return { ok: false, message: r.status === 401 ? "Invalid key" : `HTTP ${r.status}` };
+    }
+    if (providerId === "groq") {
+      const r = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: `Bearer ${apiKey}` } });
+      if (r.ok) return { ok: true, message: "Connected" };
+      return { ok: false, message: r.status === 401 ? "Invalid key" : `HTTP ${r.status}` };
+    }
+    if (providerId === "openrouter") {
+      const r = await fetch("https://openrouter.ai/api/v1/auth/key", { headers: { Authorization: `Bearer ${apiKey}` } });
+      if (r.ok) return { ok: true, message: "Connected" };
+      return { ok: false, message: r.status === 401 ? "Invalid key" : `HTTP ${r.status}` };
+    }
+    if (providerId === "google") {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+      if (r.ok) return { ok: true, message: "Connected" };
+      return { ok: false, message: r.status === 400 ? "Invalid key" : `HTTP ${r.status}` };
+    }
+    if (providerId === "mistral") {
+      const r = await fetch("https://api.mistral.ai/v1/models", { headers: { Authorization: `Bearer ${apiKey}` } });
+      if (r.ok) return { ok: true, message: "Connected" };
+      return { ok: false, message: r.status === 401 ? "Invalid key" : `HTTP ${r.status}` };
+    }
+    return { ok: false, message: "Test not implemented" };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Network error" };
+  }
+}
 
 
 function ApiKeysSection() {
@@ -1348,6 +1390,8 @@ function ApiKeysSection() {
   const [editKey, setEditKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+  const [testing, setTesting] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string }>>({});
 
   const getProfilePath = async (): Promise<string> => {
     const result = await invoke<{ stdout: string }>("execute_command", {
@@ -1516,9 +1560,34 @@ function ApiKeysSection() {
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {hasKey && !isEditing && (
                   <>
-                    <span style={{ fontSize: 10, color: "var(--success)", fontWeight: 500 }}>Active</span>
+                    {testResults[provider.id] ? (
+                      <span style={{
+                        fontSize: 10,
+                        color: testResults[provider.id].ok ? "var(--success)" : "var(--error)",
+                        fontWeight: 500,
+                      }}>
+                        {testResults[provider.id].message}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 10, color: "var(--success)", fontWeight: 500 }}>Active</span>
+                    )}
+                    <button
+                      onClick={async () => {
+                        setTesting(provider.id);
+                        const result = await testApiKey(provider.id, profile.key);
+                        setTestResults(prev => ({ ...prev, [provider.id]: result }));
+                        setTesting(null);
+                      }}
+                      disabled={testing === provider.id}
+                      title="Test API key"
+                      aria-label={`Test ${provider.label} API key`}
+                      style={{ background: "none", border: "none", cursor: testing === provider.id ? "wait" : "pointer", padding: "2px 6px", fontSize: 9, color: "var(--text-muted)", borderRadius: 4 }}
+                    >
+                      {testing === provider.id ? "Testing..." : "Test"}
+                    </button>
                     <button
                       onClick={() => setShowKeys(prev => ({ ...prev, [provider.id]: !prev[provider.id] }))}
+                      aria-label={isVisible ? "Hide key" : "Show key"}
                       style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "var(--text-muted)", display: "flex" }}
                     >
                       <IconEye open={isVisible} />
@@ -1538,16 +1607,33 @@ function ApiKeysSection() {
                   </>
                 )}
                 {!hasKey && !isEditing && (
-                  <button
-                    onClick={() => { setEditingProvider(provider.id); setEditKey(""); }}
-                    style={{
-                      background: "var(--accent-bg)", border: "1px solid rgba(59,130,246,0.2)",
-                      borderRadius: 6, padding: "3px 10px", fontSize: 10, fontWeight: 500,
-                      color: "var(--accent)", cursor: "pointer",
-                    }}
-                  >
-                    Add Key
-                  </button>
+                  <>
+                    <a
+                      href={provider.getUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        invoke("plugin:opener|open_url", { url: provider.getUrl }).catch(() => {
+                          window.open(provider.getUrl, "_blank");
+                        });
+                      }}
+                      style={{ fontSize: 9, color: "var(--text-muted)", textDecoration: "none", padding: "3px 8px" }}
+                      title={`Get an API key from ${provider.label}`}
+                    >
+                      Get key →
+                    </a>
+                    <button
+                      onClick={() => { setEditingProvider(provider.id); setEditKey(""); }}
+                      style={{
+                        background: "var(--accent-bg)", border: "1px solid rgba(59,130,246,0.2)",
+                        borderRadius: 6, padding: "3px 10px", fontSize: 10, fontWeight: 500,
+                        color: "var(--accent)", cursor: "pointer",
+                      }}
+                    >
+                      Add Key
+                    </button>
+                  </>
                 )}
               </div>
             </div>

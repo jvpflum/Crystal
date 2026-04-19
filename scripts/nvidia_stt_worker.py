@@ -104,7 +104,7 @@ def transcribe_audio(audio_np: np.ndarray, sample_rate: int = 16000) -> dict:
 
 app = FastAPI(
     title="Crystal NVIDIA STT Worker",
-    description="Streaming and batch speech-to-text using NVIDIA Nemotron/Parakeet ASR on local GPU.",
+    description="Streaming and batch speech-to-text using NVIDIA Parakeet (NeMo ASR) on local GPU.",
     version="1.0.0",
 )
 

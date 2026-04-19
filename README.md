@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>The most complete desktop frontend for <a href="https://github.com/nichochar/open-claw">OpenClaw</a>.</strong><br/>
-  A native AI command center with 30 views, AI-powered search, 70+ slash commands, NVIDIA-accelerated voice, 7-provider LLM support with offline mode, dual-layer memory (MemPalace + LanceDB), 1Password secret management, token cost analytics, a unified voice gateway, and a full agent workspace — all in a single desktop app.
+  A native AI command center with 30 views, AI-powered search, 70+ slash commands, NVIDIA-accelerated voice, 7-provider LLM support with offline mode, MemPalace canonical memory (drawers + knowledge graph + automated mining), 1Password secret management, token cost analytics, a unified voice gateway, and a full agent workspace — all in a single desktop app.
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Crystal home dashboard — system performance, lifetime tokens, cron jobs, memory and vector store" width="900" />
+  <img src="docs/screenshots/dashboard.png" alt="Crystal home dashboard — system performance, lifetime tokens, cron jobs, and unified memory health" width="900" />
 </p>
 
 <p align="center"><em>Home dashboard — live system performance, lifetime token spend, cron health, and memory telemetry.</em></p>
@@ -43,6 +43,20 @@
 ---
 
 ## What's New
+
+### April 2026 — MemPalace Canonical Memory
+
+LanceDB is retired. Crystal now runs on a single canonical memory system: **MemPalace** + **Knowledge Graph** + automated background mining, all surfaced through a unified Memory Health card and OpenClaw recall hook.
+
+- **Canonical store** — All memory lives in MemPalace (ChromaDB drawers + SQLite KG). Local ONNX MiniLM embeddings, no cloud dependency.
+- **Automated mining** — `palace-mine-incremental` cron runs every 30 min to ingest new workspace markdown into the right wing/room. Nightly KG extraction (`palace-kg-extract-nightly`, 1 AM) distills entities and triples.
+- **Channel-scoped wings** — Telegram chats, Crystal sessions, and CLI invocations write to per-channel wings (`channel_telegram_<chatId>`, `channel_web_<sessionId>`, `channel_cli_<host>`) so per-thread recall stays tight, with cross-wing tunnels bridging back to the workspace wing.
+- **`palace-recall` OpenClaw hook** — Two-stage retrieval injects channel-scoped drawers first, falls back to global, all in ~1.5 s with caching.
+- **Stitched MEMORY.md** — `HOT_MEMORY.md` (active session), `WARM_MEMORY.md` (stable facts), and `MEMORY_BASE.md` (long-term archive) are stitched into a single `MEMORY.md` for cold-start hydration.
+- **Memory Health dashboard card** — Replaces the old Vector Store widget on the Home view. Shows drawer count, KG entity/triple counts, recall hook status, last mine timestamp, and last KG extraction.
+- **Mining + KG Extract tabs** — New tabs in the Memory view show recent cron-ledger entries for the mining and extraction jobs.
+- **MCP janitor** — Background cron keeps orphaned `mempalace.mcp_server` stdio processes from accumulating (caps RAM at ~280–850 MB instead of unbounded).
+- **Heartbeat moved to OpenAI** — `agents.defaults.heartbeat.model` is now `openai/gpt-4o-mini` on an 8 h cadence so a stalled local model never blocks user chats. vLLM stays as the last-ditch fallback only.
 
 ### April 2026 — Local LLM via vLLM + Docker
 
@@ -130,7 +144,7 @@ The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects
 - **Agents/Office Merge** — `OfficeView` fully merged into `AgentsView`. The Agents view now includes a live monitoring dashboard with agent cards, session counts, token usage, task dispatch form, and "Send to Chat" buttons. The Office nav entry, route, and file have been removed; all references redirect to Agents.
 
 #### Dashboard Enhancements
-- **Vector Store Visualization** — New dashboard card with a segmented ring gauge showing vector chunk count, satellite status dots for Vector DB/FTS/file readiness, and inline status rows (Vector DB, Full-text Search, Provider, Index Pending). Powered by enriched `fetchMemoryStatus` that now fetches `openclaw memory status --json` in parallel.
+- **Memory Health Card** — Unified dashboard widget showing MemPalace drawer count, KG entity/triple counts, recall-hook status, and last mine timestamp. Powered by `fetchMemoryStatus` calling `mempalace_query.py status` directly.
 - **Memory Palace Widget** — Memory section shows MemPalace status with drawer count ring gauge, wing/room counts, and active/inactive status indicator with click-through to Memory view.
 - **Floating Performance Graphs** — System Performance ring gauges (CPU/RAM/Storage) and Lifetime Tokens radial burst now render with fully transparent backgrounds — no card outline or shadow — so they appear to float directly on the page.
 - **NVIDIA Logo (Official)** — Replaced the incorrect GPU section logo with the official NVIDIA "eye" SVG from Simple Icons. The `NvidiaLogo` component is now exported from `GpuMonitor.tsx` for reuse.
@@ -248,7 +262,7 @@ Crystal wraps [OpenClaw](https://github.com/nichochar/open-claw) — an open-sou
 | System monitoring | None | Live GPU, CPU, RAM, disk dashboards |
 | Coding agents | Separate tools | Built-in Factory with skill launcher + any agent |
 | Agent identity | Edit files manually | Visual workspace editor with presets |
-| Memory | Flat file + basic recall | MemPalace spatial hierarchy + LanceDB hybrid search |
+| Memory | Flat file + basic recall | MemPalace spatial hierarchy + Knowledge Graph + automated mining |
 | Secrets | `.env` files or inline | 1Password vault with `op run` injection |
 | Themes | None | 6 polished themes |
 
@@ -261,7 +275,7 @@ Crystal wraps [OpenClaw](https://github.com/nichochar/open-claw) — an open-sou
 - **Actually Useful.** Crystal isn't a chatbot wrapper. It creates files, runs shell commands, manages your system, automates workflows, generates images, controls a browser, monitors hardware, and manages distributed agent nodes — through natural language or voice.
 - **NVIDIA-Accelerated Voice.** GPU-powered speech recognition (Parakeet STT) and synthesis (Magpie TTS) through the Voice Gateway, with the browser Web Speech API as an emergency fallback when local NVIDIA services are unavailable.
 - **Production-Grade Security.** All secrets stored in 1Password and injected at runtime. Path-scoped filesystem access control. Device authentication on the gateway. No plaintext API keys anywhere.
-- **Dual-Layer Memory.** MemPalace spatial hierarchy (94.8% recall) with AAAK compression and temporal knowledge graph, plus LanceDB hybrid retrieval with auto-capture. Only ~170 tokens loaded at cold start.
+- **Canonical MemPalace Memory.** Spatial hierarchy (94.8% recall) with AAAK compression, temporal knowledge graph, automated markdown mining every 30 min, channel-scoped wings, and an OpenClaw recall hook. Only ~170 tokens loaded at cold start.
 
 ---
 
@@ -302,7 +316,7 @@ Futuristic bird's-eye view of your entire system with Apple-level polish and mic
 - **Cron Jobs** — Mini bar chart (active/disabled/failed) with one-click navigation to the scheduler
 - **Stats Tiles** — Sessions, Agents, Skills, Heartbeat — each with hover lift, glow, and press feedback
 - **Memory Palace** — MemPalace status widget with drawer count ring gauge, wing/room counts, and active status indicator with click-through to Memory view
-- **Vector Store** — Segmented ring gauge with satellite status dots for Vector DB, Full-text Search, and file index readiness. Shows provider name and "INDEX PENDING" indicator
+- **Memory Health** — Unified card showing drawer count, Knowledge Graph entity/triple counts, recall-hook status, last mine timestamp, and last KG extraction
 - **Dual LLM Display** — Shows both hosted model (OpenAI logo + model name) and local model (NVIDIA/vLLM) with independent connection status dots
 - **Uptime & Version** — System uptime with OpenClaw version badge
 - **Telegram Topics** — Topic tags with cron delivery counts and hover highlights
@@ -524,30 +538,33 @@ Crystal integrates [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) for s
 
 ### Memory
 
-Crystal ships with a dual-layer memory architecture: **MemPalace** for spatial/hierarchical memory and **LanceDB** for OpenClaw's native auto-capture.
+Crystal runs on a single canonical memory system: **MemPalace** (drawers + spatial hierarchy + temporal knowledge graph) plus an automated mining/extraction pipeline and an OpenClaw recall hook.
 
-**Memory Palace (MemPalace)**
+**MemPalace Core**
 - **Spatial Hierarchy** — Memories organized into Wings > Rooms > Halls with cross-wing Tunnels for shared topics. Wing+room scoping achieves 94.8% recall vs 60.9% for flat search.
 - **Layered Loading** — L0 identity (~50 tokens) + L1 critical facts (~120 tokens) injected at startup. L2 room recall loaded on-demand. L3 deep semantic search for explicit queries. Only ~170 tokens at cold start.
 - **AAAK Compression** — 30x lossless compression natively readable by any LLM. Turns 1,000 tokens of prose into ~120 tokens of structured shorthand.
-- **Temporal Knowledge Graph** — SQLite-backed entity-relationship triples with valid_from/ended dates. Facts expire, contradictions are detected, historical queries supported. 18 entities, 31 triples seeded.
+- **Temporal Knowledge Graph** — SQLite-backed entity-relationship triples with valid_from/ended dates. Facts expire, contradictions are detected, historical queries supported.
 - **Entity Registry** — Disambiguates people, projects, and aliases for accurate recall.
-- **Cross-Wing Tunnels** — 10 explicit tunnels linking related rooms across wings for cross-domain recall.
-- **Agent Diary** — Daily reflection journal for the agent's operational insights.
-- **Auto-extraction** — Background mining every 15 messages captures topics, decisions, and code changes automatically.
-- **Palace UI** — Dedicated Palace tab with wing/room/hall browser, tunnel explorer, KG entity query, identity (L0) editor, and actions for mining, compression, and repair.
+- **Cross-Wing Tunnels** — 25+ explicit tunnels linking related rooms across wings for cross-domain recall.
+- **Local ONNX Embeddings** — MiniLM-L6-v2 runs locally for vector encoding. No cloud dependency.
 
-**LanceDB (OpenClaw Native)**
-- **Hybrid Retrieval** — Vector + BM25 full-text search with RRF fusion
-- **Weibull Decay** — Accessed memories get promoted, stale ones naturally fade
-- **Multi-scope Isolation** — Global, agent, user, project, and custom scopes
+**Automated Pipeline**
+- **`palace-mine-incremental`** — Cron every 30 min ingests new workspace markdown into the right wing/room based on `mempalace.yaml` rules.
+- **`palace-kg-extract-nightly`** — 1 AM nightly job distills entities and triples from recent drawers via vLLM.
+- **`palace-recall` Hook** — OpenClaw `before_agent_start` hook performs two-stage retrieval (channel-scoped first, then global) and injects relevant drawers as `prependContext`. Cached, ~1.5 s end-to-end.
+- **Channel-Scoped Wings** — Telegram (`channel_telegram_<chatId>`), Crystal sessions (`channel_web_<sessionId>`), and CLI (`channel_cli_<host>`) get their own wings so per-thread recall stays tight.
+- **Stitched MEMORY.md** — `HOT_MEMORY.md` + `WARM_MEMORY.md` + `MEMORY_BASE.md` are stitched into a single `MEMORY.md` for cold-start hydration.
+- **MCP Janitor** — Hourly cron reaps orphaned `mempalace.mcp_server` stdio processes so RAM stays bounded.
 
-**Additional Tabs**
-- **Knowledge Base** — Browse and edit all workspace `.md` files (SOUL.md, USER.md, AGENTS.md, TOOLS.md, etc.) with category filtering
-- **Curated Memory** — View, add, and delete entries in `MEMORY.md`
-- **Daily Memory** — Browse daily memory logs with automatic cron capture
-- **Semantic Search** — Hybrid search across MemPalace and OpenClaw memory
-- **Vector DB** — LanceDB configuration, similarity search, and embedding stats
+**UI Tabs**
+- **Palace** — Wing/room/hall browser, tunnel explorer, KG entity query, identity (L0) editor, and actions for mining, compression, and repair.
+- **Knowledge Base** — Browse and edit all workspace `.md` files (SOUL.md, USER.md, AGENTS.md, TOOLS.md, etc.) with category filtering.
+- **Curated Memory** — View, add, and delete entries in `MEMORY.md`.
+- **Daily Memory** — Browse daily memory logs with automatic cron capture.
+- **Semantic Search** — Hybrid search across MemPalace drawers and the KG.
+- **Mining** — Recent ledger entries for `palace-mine-incremental`.
+- **KG Extract** — Recent ledger entries for `palace-kg-extract-nightly`.
 
 ---
 
@@ -703,8 +720,9 @@ Crystal is engineered to feel instant:
 | Voice Gateway | FastAPI (`voice_gateway.py`, port 6500) |
 | Voice STT | NVIDIA Parakeet (`nvidia_stt_worker.py`, port 8090 via gateway 6500), Web Speech API (fallback) |
 | Voice TTS | NVIDIA Magpie (`nvidia_tts_worker.py`, port 8091 via gateway 6500), Web Speech API (fallback) |
-| Memory (Spatial) | [MemPalace](https://github.com/ultrawideband/mempalace) (Wings/Rooms/Halls/KG, ChromaDB) |
-| Memory (Native) | LanceDB (hybrid BM25+vector, Weibull decay, multi-scope) |
+| Memory | [MemPalace](https://github.com/ultrawideband/mempalace) (Wings/Rooms/Halls + Knowledge Graph, ChromaDB + SQLite) |
+| Memory Embeddings | Local ONNX MiniLM-L6-v2 (no cloud) |
+| Memory Hook | `palace-recall` OpenClaw extension (channel-scoped two-stage retrieval) |
 | Image Gen | OpenAI DALL·E (via OpenClaw skill) |
 | Sandbox | [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) *(optional)* |
 | Icons | Lucide React |
@@ -800,7 +818,6 @@ Crystal/
 │   │   │   ├── conversation-agent.ts # Voice conversation handler
 │   │   │   └── session-store.ts      # Voice session persistence
 │   │   ├── memory-palace.ts           # MemPalace integration (wings, rooms, halls, KG, mining)
-│   │   ├── marketplace.ts            # Skill/plugin catalog
 │   │   ├── telegram.ts               # Telegram topic helpers
 │   │   ├── version.ts                # App version constant
 │   │   └── storage.ts                # Local storage abstraction

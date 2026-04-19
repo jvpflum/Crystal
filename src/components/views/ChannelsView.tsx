@@ -688,9 +688,11 @@ export function ChannelsView() {
                   disabled={actionLoading === selected.name}
                   onMouseDown={pressDown}
                   onMouseUp={pressUp}
+                  title={`Remove ${selected.name}`}
+                  aria-label={`Remove channel ${selected.name}`}
                   style={{ ...btnSecondary, display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", background: "rgba(248,113,113,0.1)", color: "var(--error)" }}
                 >
-                  <Trash2 style={{ width: 12, height: 12 }} />
+                  <Trash2 style={{ width: 12, height: 12 }} aria-hidden="true" />
                 </button>
               </div>
             </div>

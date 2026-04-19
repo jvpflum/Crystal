@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Activity, Trash2, Terminal, MessageSquare, AlertTriangle, Heart, Zap, Radio, Search, Copy, Check, RefreshCw, ArrowDown, ScrollText, Pause, Play } from "lucide-react";
+import { Activity, Trash2, Terminal, MessageSquare, AlertTriangle, Heart, Zap, Radio, Search, Copy, Check, RefreshCw, ArrowDown, ScrollText, Pause, Play, Loader2 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { openclawClient, ActivityEntry } from "@/lib/openclaw";
 import { useAppStore } from "@/stores/appStore";
@@ -442,30 +442,40 @@ function GatewayLogsTab() {
       >
         {error ? (
           <div style={emptyState}>
-            <AlertTriangle style={{ width: 24, height: 24, color: "#f87171" }} />
-            <p style={{ fontSize: 12, color: "#f87171", textAlign: "center", margin: 0 }}>
+            <AlertTriangle style={{ width: 24, height: 24, color: "var(--error, #f87171)" }} aria-hidden="true" />
+            <p style={{ fontSize: 12, color: "var(--error, #f87171)", textAlign: "center", margin: 0 }}>
               Failed to fetch logs
             </p>
-            <p style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", textAlign: "center", margin: 0, maxWidth: 300 }}>
+            <p style={{ fontSize: 10, color: "var(--text-muted)", textAlign: "center", margin: 0, maxWidth: 300 }}>
               {error}
             </p>
             <button
               onClick={() => fetchLogs(false)}
               style={{
                 marginTop: 8, padding: "6px 14px", borderRadius: 6,
-                border: "1px solid rgba(59,130,246,0.3)",
-                background: "rgba(59,130,246,0.1)",
-                color: "#60a5fa", fontSize: 11, cursor: "pointer",
+                border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
+                background: "color-mix(in srgb, var(--accent) 10%, transparent)",
+                color: "var(--accent)", fontSize: 11, cursor: "pointer",
               }}
             >
               Retry
             </button>
           </div>
+        ) : loading && filteredEntries.length === 0 ? (
+          <div style={emptyState}>
+            <Loader2
+              style={{ width: 20, height: 20, color: "var(--text-muted)", animation: "spin 1s linear infinite" }}
+              aria-hidden="true"
+            />
+            <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
+              Fetching logs...
+            </p>
+          </div>
         ) : filteredEntries.length === 0 ? (
           <div style={emptyState}>
-            <Terminal style={{ width: 24, height: 24, color: "rgba(255,255,255,0.15)" }} />
+            <Terminal style={{ width: 24, height: 24, color: "rgba(255,255,255,0.15)" }} aria-hidden="true" />
             <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0 }}>
-              {loading ? "Fetching logs..." : searchQuery ? "No matching log entries" : "No log entries found"}
+              {searchQuery ? "No matching log entries" : "No log entries found"}
             </p>
           </div>
         ) : (

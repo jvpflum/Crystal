@@ -462,8 +462,14 @@ export function AgentsView() {
             <input value={taskPrompt} onChange={e => setTaskPrompt(e.target.value)}
               onKeyDown={e => e.key === "Enter" && dispatchTask()}
               placeholder="Send a task..." style={{ ...INPUT, flex: 1, fontSize: 10, padding: "5px 8px" }} />
-            <button onClick={dispatchTask} disabled={!taskPrompt.trim()} style={{ ...BTN_P, padding: "5px 8px" }}>
-              <Send style={{ width: 10, height: 10 }} />
+            <button
+              onClick={dispatchTask}
+              disabled={!taskPrompt.trim()}
+              aria-label="Dispatch task to agent"
+              title="Send task"
+              style={{ ...BTN_P, padding: "5px 8px" }}
+            >
+              <Send style={{ width: 10, height: 10 }} aria-hidden="true" />
             </button>
           </div>
         </div>

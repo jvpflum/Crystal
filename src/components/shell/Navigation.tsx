@@ -52,27 +52,41 @@ export function Navigation() {
   const currentView = useAppStore(s => s.currentView);
   const setView = useAppStore(s => s.setView);
   const gatewayConnected = useAppStore(s => s.gatewayConnected);
+  const serviceStatus = useAppStore(s => s.serviceStatus);
   const [mcCollapsed, setMcCollapsed] = useState(false);
   const [ocCollapsed, setOcCollapsed] = useState(false);
   const [sysCollapsed, setSysCollapsed] = useState(false);
+
+  const svcDotColor = (s: "off" | "starting" | "ready") =>
+    s === "ready" ? "var(--success)" : s === "starting" ? "var(--warning, #f59e0b)" : "rgba(255,255,255,0.12)";
+  const svcDotGlow = (s: "off" | "starting" | "ready") =>
+    s === "ready" ? "0 0 5px rgba(52,211,153,0.5)" : "none";
 
   return (
     <nav className="glass-nav" style={{
       width: 58, flexShrink: 0, display: "flex", flexDirection: "column",
       alignItems: "center", padding: "8px 0 6px",
     }}>
-      {/* Gateway indicator */}
-      <div style={{
+      {/* Service status indicators */}
+      <div title={`Gateway: ${serviceStatus.gateway}\nvLLM: ${serviceStatus.vllm}\nVoice: ${serviceStatus.voice}`}
+        style={{
         marginBottom: 8, display: "flex", flexDirection: "column",
         alignItems: "center", gap: 3, padding: "2px 0",
       }}>
-        <div style={{
-          width: 7, height: 7, borderRadius: "50%",
-          background: gatewayConnected ? "var(--success)" : "rgba(255,255,255,0.12)",
-          boxShadow: gatewayConnected ? "0 0 6px rgba(52,211,153,0.5)" : "none",
-          transition: "all 0.4s ease",
-        }} />
-        <span style={{ fontSize: 7, color: "var(--text-muted)", letterSpacing: 0.8, fontWeight: 600 }}>OC</span>
+        <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+          {(["gateway", "vllm", "voice"] as const).map(svc => (
+            <div key={svc} style={{
+              width: 5, height: 5, borderRadius: "50%",
+              background: svcDotColor(serviceStatus[svc]),
+              boxShadow: svcDotGlow(serviceStatus[svc]),
+              transition: "all 0.4s ease",
+              animation: serviceStatus[svc] === "starting" ? "pulse-dot 1.5s infinite" : undefined,
+            }} />
+          ))}
+        </div>
+        <span style={{ fontSize: 7, color: "var(--text-muted)", letterSpacing: 0.8, fontWeight: 600 }}>
+          {gatewayConnected ? "LIVE" : "BOOT"}
+        </span>
       </div>
 
       {/* Mission Control – collapsible */}
@@ -112,18 +126,24 @@ export function Navigation() {
       )}
 
       {/* Ctrl+K launcher */}
-      <div className="glass-cmd-chip" style={{
-        marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center",
-        width: 34, height: 22, borderRadius: 6,
-        cursor: "pointer", transition: "all 0.15s",
-      }}
+      <button
+        type="button"
+        className="glass-cmd-chip"
+        style={{
+          marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center",
+          width: 34, height: 22, borderRadius: 6,
+          cursor: "pointer", transition: "all 0.15s",
+          background: "transparent", border: "1px solid var(--border-subtle)",
+          padding: 0,
+        }}
         title="Command Palette (Ctrl+K)"
+        aria-label="Open Command Palette"
         onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }))}
         onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--accent)"; }}
         onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border-subtle)"; }}
       >
-        <Command style={{ width: 9, height: 9, color: "var(--text-muted)" }} />
-      </div>
+        <Command style={{ width: 9, height: 9, color: "var(--text-muted)" }} aria-hidden="true" />
+      </button>
     </nav>
   );
 }

@@ -66,6 +66,14 @@ interface AppState {
   gatewayConnected: boolean;
   setGatewayConnected: (c: boolean) => void;
 
+  serviceStatus: {
+    gateway: "off" | "starting" | "ready";
+    vllm: "off" | "starting" | "ready";
+    voice: "off" | "starting" | "ready";
+  };
+  setServiceStatus: (svc: keyof AppState["serviceStatus"], status: "off" | "starting" | "ready") => void;
+  allServicesReady: () => boolean;
+
   thinkingLevel: ThinkingLevel | undefined;
   setThinkingLevel: (level: ThinkingLevel | undefined) => void;
   cycleThinkingLevel: () => void;
@@ -131,6 +139,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   gatewayConnected: false,
   setGatewayConnected: (c) => set({ gatewayConnected: c }),
+
+  serviceStatus: { gateway: "off", vllm: "off", voice: "off" },
+  setServiceStatus: (svc, status) => set((s) => ({
+    serviceStatus: { ...s.serviceStatus, [svc]: status },
+  })),
+  allServicesReady: () => {
+    const ss = get().serviceStatus;
+    return ss.gateway === "ready";
+  },
 
   thinkingLevel: (localStorage.getItem("crystal_thinking_level") as ThinkingLevel) || undefined,
   setThinkingLevel: (level) => {

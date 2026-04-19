@@ -4,10 +4,11 @@ import {
   Edit3, Database, Copy, CheckCircle2, XCircle, ChevronDown, ChevronUp,
   BookOpen, Save, Eye,
   Castle, DoorOpen, Archive, GitBranch, Clock, Sparkles, Shield, Zap, ArrowRight,
+  Pickaxe, Network,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { openclawClient } from "@/lib/openclaw";
-import { memoryPalaceClient, type PalaceStatus, type PalaceDrawer, type KGTriple, type PalaceTunnel } from "@/lib/memory-palace";
+import { memoryPalaceClient, type PalaceStatus, type PalaceDrawer, type KGTriple, type PalaceTunnel, type KGEntity } from "@/lib/memory-palace";
 import { cachedCommand } from "@/lib/cache";
 import { EASE, SPRING, glowCard, hoverLift, hoverReset, pressDown, pressUp, innerPanel, sectionLabel, mutedCaption, iconTile, inputStyle, btnPrimary, btnSecondary, viewContainer, headerRow, scrollArea, badge, emptyState, MONO } from "@/styles/viewStyles";
 
@@ -15,7 +16,7 @@ interface WorkspaceFile {
   name: string; path: string; size: number; modified: string; category: string;
 }
 
-type TabId = "palace" | "kb";
+type TabId = "palace" | "kb" | "mining" | "kgextract";
 
 const FILE_CATEGORIES: Record<string, string> = {
   "SOUL.md": "identity", "USER.md": "identity", "IDENTITY.md": "identity",
@@ -159,6 +160,8 @@ export function MemoryView() {
   const tabDefs: { id: TabId; icon: typeof Brain; label: string }[] = [
     { id: "palace", icon: Castle, label: "Palace" },
     { id: "kb", icon: BookOpen, label: "Knowledge Base" },
+    { id: "mining", icon: Pickaxe, label: "Mining" },
+    { id: "kgextract", icon: Network, label: "KG Extract" },
   ];
 
   return (
@@ -199,6 +202,12 @@ export function MemoryView() {
 
         {/* ─── Palace Tab ─── */}
         {tab === "palace" && <PalaceTab />}
+
+        {/* ─── Mining Tab ─── */}
+        {tab === "mining" && <CronJobTab jobName="palace-mine-incremental" jobLabel="Palace Mine (Incremental)" jobId="palace-mine-incremental-2026" iconColor="#f59e0b" />}
+
+        {/* ─── KG Extract Tab ─── */}
+        {tab === "kgextract" && <CronJobTab jobName="palace-kg-extract" jobLabel="Palace KG Extract (Nightly)" jobId="palace-kg-extract-nightly-2026" iconColor="#06b6d4" />}
 
         {/* ─── Knowledge Base Tab ─── */}
         {tab === "kb" && (
@@ -340,6 +349,11 @@ function PalaceTab() {
   const [kgEntity, setKgEntity] = useState("");
   const [kgResults, setKgResults] = useState<KGTriple[] | null>(null);
   const [kgLoading, setKgLoading] = useState(false);
+  const [kgEntities, setKgEntities] = useState<KGEntity[] | null>(null);
+  const [kgEntitiesLoading, setKgEntitiesLoading] = useState(false);
+  const [kgEntityFilter, setKgEntityFilter] = useState("");
+  const [kgRecentTriples, setKgRecentTriples] = useState<KGTriple[] | null>(null);
+  const [kgRecentLoading, setKgRecentLoading] = useState(false);
   const [identityText, setIdentityText] = useState<string | null>(null);
   const [identityEditing, setIdentityEditing] = useState(false);
   const [identityDraft, setIdentityDraft] = useState("");
@@ -383,20 +397,53 @@ function PalaceTab() {
     try {
       const result = await memoryPalaceClient.search(searchQuery);
       setSearchResults(result.results);
-    } catch (e) { console.error("[Palace] search failed:", e); }
+    } catch (e) {
+      if (import.meta.env.DEV) console.error("[Palace] search failed:", e);
+      showFeedback("error", e instanceof Error ? e.message : "Search failed");
+      setSearchResults([]);
+    }
     finally { setSearchLoading(false); }
   };
 
-  const handleKgQuery = async () => {
-    if (!kgEntity.trim()) return;
+  const runKgQuery = useCallback(async (name: string) => {
+    if (!name.trim()) return;
+    setKgEntity(name);
     setKgLoading(true);
     setView("graph");
     try {
-      const results = await memoryPalaceClient.queryEntity(kgEntity);
+      const results = await memoryPalaceClient.queryEntity(name);
       setKgResults(results);
-    } catch (e) { console.error("[Palace] KG query failed:", e); }
+    } catch (e) {
+      if (import.meta.env.DEV) console.error("[Palace] KG query failed:", e);
+      showFeedback("error", e instanceof Error ? e.message : "Knowledge graph query failed");
+      setKgResults([]);
+    }
     finally { setKgLoading(false); }
-  };
+  }, []);
+
+  const handleKgQuery = () => runKgQuery(kgEntity);
+
+  const loadKgEntities = useCallback(async () => {
+    setKgEntitiesLoading(true);
+    try {
+      const entities = await memoryPalaceClient.listEntities(500);
+      setKgEntities(entities);
+    } catch (e) {
+      if (import.meta.env.DEV) console.error("[Palace] list entities failed:", e);
+      setKgEntities([]);
+    } finally { setKgEntitiesLoading(false); }
+  }, []);
+
+  const loadKgRecentTriples = useCallback(async () => {
+    setKgRecentLoading(true);
+    try {
+      const triples = await memoryPalaceClient.listAllTriples(50, false);
+      setKgRecentTriples(triples);
+    } catch (e) {
+      if (import.meta.env.DEV) console.error("[Palace] list triples failed:", e);
+      setKgRecentTriples([]);
+    } finally { setKgRecentLoading(false); }
+  }, []);
 
   const handleMine = async () => {
     setMining(true);
@@ -563,7 +610,15 @@ function PalaceTab() {
         ]).map(v => {
           const Icon = v.icon;
           return (
-            <button key={v.id} onClick={() => { setView(v.id); if (v.id === "identity" && identityText === null) loadIdentity(); if (v.id === "tunnels" && tunnels === null) loadTunnels(); }}
+            <button key={v.id} onClick={() => {
+              setView(v.id);
+              if (v.id === "identity" && identityText === null) loadIdentity();
+              if (v.id === "tunnels" && tunnels === null) loadTunnels();
+              if (v.id === "graph") {
+                if (kgEntities === null) loadKgEntities();
+                if (kgRecentTriples === null) loadKgRecentTriples();
+              }
+            }}
               style={{
                 padding: "4px 10px", borderRadius: 6, border: "none", fontSize: 11, cursor: "pointer",
                 display: "flex", alignItems: "center", gap: 4, transition: `all 0.2s ${EASE}`,
@@ -579,6 +634,45 @@ function PalaceTab() {
       {/* ─── Overview: Wings & Rooms ─── */}
       {view === "overview" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* Flat-import detection: most memories live in a single dumping-ground wing */}
+          {(() => {
+            const wings = status?.wings ?? [];
+            const flatWing = wings.find(w =>
+              w.name === "memory_palace_import" ||
+              (w.rooms.length === 1 && w.rooms[0].name === "general" && w.drawerCount > 100),
+            );
+            const total = status?.totalDrawers ?? 0;
+            if (!flatWing || total === 0) return null;
+            const pct = Math.round((flatWing.drawerCount / total) * 100);
+            if (pct < 40) return null;
+            return (
+              <div style={{
+                display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 14px", borderRadius: 10,
+                background: "rgba(255,184,0,0.06)", border: "1px solid rgba(255,184,0,0.22)",
+              }}>
+                <Zap style={{ width: 14, height: 14, color: "#ffb800", marginTop: 2, flexShrink: 0 }} />
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
+                    {pct}% of drawers live in a single "{flatWing.name}" wing
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                    Your {flatWing.drawerCount.toLocaleString()} imported memories aren't organised into proper project / domain wings yet.
+                    Re-mining the workspace lets MemPalace auto-classify them into wings &amp; rooms based on content.
+                  </div>
+                </div>
+                <button onClick={handleMine} disabled={mining}
+                  style={{ ...btnPrimary, padding: "6px 12px", fontSize: 11, display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}
+                  onMouseDown={pressDown} onMouseUp={pressUp}
+                  title="Re-mine workspace and classify into wings/rooms">
+                  {mining
+                    ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />
+                    : <Sparkles style={{ width: 12, height: 12 }} />}
+                  {mining ? "Organizing…" : "Organize Memories"}
+                </button>
+              </div>
+            );
+          })()}
+
           {/* Wake-up context */}
           <div style={glowCard("#b744ff", { padding: "12px 14px" })} data-glow="#b744ff" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
@@ -807,10 +901,135 @@ function PalaceTab() {
             </div>
           )}
 
+          {/* Entity browser — always visible so users can explore */}
+          <div style={{ ...innerPanel, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Archive style={{ width: 12, height: 12, color: "#0088ff" }} />
+                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>Entities</span>
+                <span style={mutedCaption}>
+                  {kgEntities ? `${kgEntities.length} discovered — click to explore` : "loading…"}
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input value={kgEntityFilter} onChange={e => setKgEntityFilter(e.target.value)}
+                  placeholder="Filter…"
+                  style={{ ...inputStyle, padding: "4px 8px", fontSize: 10, height: 24, width: 140 }} />
+                <button onClick={loadKgEntities} disabled={kgEntitiesLoading}
+                  style={{ ...btnSecondary, padding: "4px 8px", fontSize: 10, display: "flex", alignItems: "center", gap: 4 }}
+                  aria-label="Refresh entities">
+                  {kgEntitiesLoading
+                    ? <Loader2 style={{ width: 10, height: 10, animation: "spin 1s linear infinite" }} />
+                    : <RefreshCw style={{ width: 10, height: 10 }} />}
+                </button>
+              </div>
+            </div>
+            {kgEntitiesLoading && !kgEntities && (
+              <div style={{ display: "flex", justifyContent: "center", padding: 12 }}>
+                <Loader2 style={{ width: 14, height: 14, color: "#b744ff", animation: "spin 1s linear infinite" }} />
+              </div>
+            )}
+            {kgEntities && kgEntities.length === 0 && !kgEntitiesLoading && (
+              <div style={{ ...mutedCaption, padding: "6px 0" }}>
+                No entities yet. Mine your workspace or add a triple to seed the graph.
+              </div>
+            )}
+            {kgEntities && kgEntities.length > 0 && (() => {
+              const q = kgEntityFilter.trim().toLowerCase();
+              const filtered = q ? kgEntities.filter(e => e.name.toLowerCase().includes(q)) : kgEntities;
+              const maxCnt = Math.max(1, ...filtered.map(e => e.tripleCount));
+              return (
+                <div style={{
+                  display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+                  gap: 4, maxHeight: 260, overflowY: "auto", paddingRight: 4,
+                }}>
+                  {filtered.map(ent => {
+                    const intensity = 0.08 + 0.35 * (ent.tripleCount / maxCnt);
+                    return (
+                      <button key={ent.name} onClick={() => runKgQuery(ent.name)}
+                        title={`${ent.tripleCount} triple${ent.tripleCount === 1 ? "" : "s"}${ent.type ? ` · ${ent.type}` : ""}`}
+                        style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6,
+                          padding: "5px 8px", borderRadius: 6, cursor: "pointer",
+                          background: `rgba(183,68,255,${intensity.toFixed(3)})`,
+                          border: "1px solid rgba(183,68,255,0.18)",
+                          color: "var(--text)", fontSize: 11, textAlign: "left", transition: `all 0.15s ${EASE}`,
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = "#b744ff"; }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(183,68,255,0.18)"; }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 600 }}>
+                          {ent.name}
+                        </span>
+                        <span style={{ fontSize: 9, color: "var(--text-muted)", fontFamily: MONO, flexShrink: 0 }}>
+                          {ent.tripleCount}
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {filtered.length === 0 && (
+                    <div style={{ ...mutedCaption, gridColumn: "1 / -1", padding: "8px 0" }}>
+                      No entities match "{kgEntityFilter}".
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Recent facts — when no query is active, show what's in the graph */}
           {!kgResults && !kgLoading && (
-            <div style={emptyState}>
-              <GitBranch style={{ width: 24, height: 24, opacity: 0.4 }} />
-              <p style={{ margin: 0 }}>Query the temporal knowledge graph. Entity-relationship triples with time validity windows.</p>
+            <div style={{ ...innerPanel, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Clock style={{ width: 12, height: 12, color: "#4ade80" }} />
+                  <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>Recent Facts</span>
+                  <span style={mutedCaption}>
+                    {kgRecentTriples ? `latest ${kgRecentTriples.length} triples` : "loading…"}
+                  </span>
+                </div>
+                <button onClick={loadKgRecentTriples} disabled={kgRecentLoading}
+                  style={{ ...btnSecondary, padding: "4px 8px", fontSize: 10, display: "flex", alignItems: "center", gap: 4 }}
+                  aria-label="Refresh recent facts">
+                  {kgRecentLoading
+                    ? <Loader2 style={{ width: 10, height: 10, animation: "spin 1s linear infinite" }} />
+                    : <RefreshCw style={{ width: 10, height: 10 }} />}
+                </button>
+              </div>
+              {kgRecentLoading && !kgRecentTriples && (
+                <div style={{ display: "flex", justifyContent: "center", padding: 12 }}>
+                  <Loader2 style={{ width: 14, height: 14, color: "#4ade80", animation: "spin 1s linear infinite" }} />
+                </div>
+              )}
+              {kgRecentTriples && kgRecentTriples.length === 0 && !kgRecentLoading && (
+                <div style={mutedCaption}>No triples stored yet.</div>
+              )}
+              {kgRecentTriples && kgRecentTriples.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 320, overflowY: "auto", paddingRight: 4 }}>
+                  {kgRecentTriples.map((triple, i) => (
+                    <button key={i} onClick={() => runKgQuery(triple.subject)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
+                        borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-elevated)",
+                        cursor: "pointer", textAlign: "left", transition: `all 0.15s ${EASE}`,
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = "#b744ff55"; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; }}
+                      title={`Query ${triple.subject}`}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#b744ff", minWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {triple.subject}
+                      </span>
+                      <ArrowRight style={{ width: 10, height: 10, color: "var(--text-muted)", flexShrink: 0 }} />
+                      <span style={badge(triple.current ? "#4ade80" : "#f87171")}>{triple.predicate}</span>
+                      <ArrowRight style={{ width: 10, height: 10, color: "var(--text-muted)", flexShrink: 0 }} />
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#0088ff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {triple.object}
+                      </span>
+                      <span style={{ flex: 1 }} />
+                      {triple.validTo && <span style={{ ...mutedCaption, color: "#f87171", fontSize: 9 }}>expired</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -999,6 +1218,224 @@ function PalaceTab() {
           {status?.palacePath || "~/.openclaw/mempalace"}
         </span>
       </div>
+    </div>
+  );
+}
+
+/* ─── Cron Job Tab (shared by Mining + KG Extract) ─── */
+
+interface CronLedgerEntry {
+  at?: string;
+  name?: string;
+  job?: string;
+  status?: string;
+  duration_ms?: number;
+  exit?: number;
+  details?: string;
+  drawers_seen?: number;
+  drawers_processed?: number;
+  triples_added?: number;
+  errors?: number;
+  targets?: { target?: string; status?: string; details?: string }[];
+}
+
+interface CronJobMeta {
+  name?: string;
+  enabled?: boolean;
+  schedule?: { expr?: string; tz?: string };
+  state?: {
+    nextRunAtMs?: number;
+    lastRunAtMs?: number;
+    lastRunStatus?: string;
+    lastDurationMs?: number;
+    consecutiveErrors?: number;
+  };
+}
+
+function relativeAge(iso: string | null | undefined): string {
+  if (!iso) return "never";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "never";
+  const diff = Date.now() - t;
+  if (diff < 0) return "scheduled";
+  const m = Math.floor(diff / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function relativeFutureMs(ms: number | null | undefined): string {
+  if (!ms || !Number.isFinite(ms)) return "—";
+  const diff = ms - Date.now();
+  if (diff <= 0) return "due now";
+  const m = Math.floor(diff / 60_000);
+  if (m < 60) return `in ${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `in ${h}h ${m % 60}m`;
+  return `in ${Math.floor(h / 24)}d`;
+}
+
+function CronJobTab({
+  jobName, jobLabel, jobId, iconColor,
+}: { jobName: string; jobLabel: string; jobId: string; iconColor: string }) {
+  const [entries, setEntries] = useState<CronLedgerEntry[]>([]);
+  const [meta, setMeta] = useState<CronJobMeta | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const home = await invoke<{ stdout: string }>("execute_command", { command: "echo $env:USERPROFILE\\.openclaw", cwd: null });
+      const root = home.stdout.trim().replace(/\r?\n/g, "");
+
+      const ledgerCmd = await cachedCommand(
+        `powershell -Command "Get-Content '${root}\\cron\\cron-ledger.jsonl' -Tail 500 -ErrorAction SilentlyContinue"`,
+        { ttl: 30_000 },
+      );
+      const ledger: CronLedgerEntry[] = [];
+      if (ledgerCmd.code === 0 && ledgerCmd.stdout.trim()) {
+        for (const line of ledgerCmd.stdout.split(/\r?\n/)) {
+          const t = line.trim();
+          if (!t) continue;
+          try {
+            const obj = JSON.parse(t) as CronLedgerEntry;
+            const n = (obj.name || obj.job || "").toString();
+            if (n.includes(jobName)) ledger.push(obj);
+          } catch { /* ignore malformed */ }
+        }
+      }
+      ledger.reverse();
+      setEntries(ledger.slice(0, 50));
+
+      try {
+        const cfg = await invoke<string>("read_file", { path: `${root}\\cron\\jobs.json` });
+        const parsed = JSON.parse(cfg) as { jobs?: CronJobMeta[] };
+        const j = (parsed.jobs || []).find((x) => (x as CronJobMeta & { id?: string }).id === jobId) || null;
+        setMeta(j);
+      } catch {
+        setMeta(null);
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    }
+    setLoading(false);
+  }, [jobName, jobId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const lastOk = entries.find((e) => (e.status || "").toLowerCase() === "ok") || null;
+
+  const totalsLast24h = entries
+    .filter((e) => e.at && Date.parse(e.at) > Date.now() - 24 * 3600_000)
+    .reduce(
+      (acc, e) => {
+        acc.runs += 1;
+        if ((e.status || "").toLowerCase() !== "ok") acc.errors += 1;
+        acc.triples += e.triples_added ?? 0;
+        acc.drawers += e.drawers_processed ?? 0;
+        return acc;
+      },
+      { runs: 0, errors: 0, triples: 0, drawers: 0 },
+    );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Pickaxe style={{ width: 14, height: 14, color: iconColor }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{jobLabel}</span>
+          <span style={badge(meta?.enabled === false ? "#f87171" : "#4ade80")}>
+            {meta?.enabled === false ? "disabled" : "enabled"}
+          </span>
+        </div>
+        <button onClick={load} disabled={loading}
+          style={{ ...btnSecondary, padding: "4px 10px", fontSize: 10, display: "flex", alignItems: "center", gap: 4 }}
+          onMouseDown={pressDown} onMouseUp={pressUp}>
+          {loading ? <Loader2 style={{ width: 10, height: 10, animation: "spin 1s linear infinite" }} /> : <RefreshCw style={{ width: 10, height: 10 }} />}
+          Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div style={emptyState}>
+          <XCircle style={{ width: 14, height: 14, color: "#f87171", display: "inline", marginRight: 6 }} />
+          {error}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+        <CronStatCard label="Schedule" value={meta?.schedule?.expr || "—"} sub={meta?.schedule?.tz || ""} color={iconColor} />
+        <CronStatCard label="Next Run" value={relativeFutureMs(meta?.state?.nextRunAtMs)} sub="" color={iconColor} />
+        <CronStatCard label="Last Run" value={relativeAge(lastOk?.at || (meta?.state?.lastRunAtMs ? new Date(meta.state.lastRunAtMs).toISOString() : null))} sub={lastOk?.status || meta?.state?.lastRunStatus || "—"} color={iconColor} />
+        <CronStatCard
+          label="Last 24h"
+          value={`${totalsLast24h.runs} runs`}
+          sub={totalsLast24h.triples ? `${totalsLast24h.triples} triples` : (totalsLast24h.drawers ? `${totalsLast24h.drawers} drawers` : `${totalsLast24h.errors} errors`)}
+          color={iconColor}
+        />
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <span style={sectionLabel}>Recent runs ({entries.length})</span>
+        {loading && entries.length === 0 ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: 30 }}>
+            <Loader2 style={{ width: 20, height: 20, color: "var(--accent)", animation: "spin 1s linear infinite" }} />
+          </div>
+        ) : entries.length === 0 ? (
+          <div style={emptyState}>No ledger entries for {jobName} yet. The cron writes to ~/.openclaw/cron/cron-ledger.jsonl after each run.</div>
+        ) : (
+          <div style={{ ...innerPanel, padding: 0, maxHeight: 380, overflow: "auto" }}>
+            {entries.map((e, i) => {
+              const ok = (e.status || "").toLowerCase() === "ok";
+              return (
+                <div key={i} style={{
+                  padding: "8px 12px",
+                  borderBottom: i === entries.length - 1 ? "none" : "1px solid var(--border)",
+                  display: "flex", flexDirection: "column", gap: 2,
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: ok ? "#4ade80" : "#f87171", boxShadow: ok ? "0 0 4px #4ade80" : "0 0 4px #f87171", flexShrink: 0 }} />
+                    <span style={{ fontSize: 11, color: "var(--text)", fontFamily: MONO }}>{e.at || "—"}</span>
+                    <span style={badge(ok ? "#4ade80" : "#f87171")}>{e.status || "?"}</span>
+                    {typeof e.duration_ms === "number" && (
+                      <span style={mutedCaption}>{(e.duration_ms / 1000).toFixed(2)}s</span>
+                    )}
+                    {typeof e.triples_added === "number" && e.triples_added > 0 && (
+                      <span style={badge("#06b6d4")}>+{e.triples_added} triples</span>
+                    )}
+                    {typeof e.drawers_processed === "number" && e.drawers_processed > 0 && (
+                      <span style={badge("#a78bfa")}>{e.drawers_processed} drawers</span>
+                    )}
+                    {typeof e.errors === "number" && e.errors > 0 && (
+                      <span style={badge("#f87171")}>{e.errors} errors</span>
+                    )}
+                  </div>
+                  {(e.details || (e.targets && e.targets.length)) && (
+                    <span style={{ ...mutedCaption, fontFamily: MONO, fontSize: 10, marginLeft: 14, wordBreak: "break-word" }}>
+                      {e.details || (e.targets || []).map(t => `${t.target}:${t.status}`).join(" · ")}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CronStatCard({ label, value, sub, color }: { label: string; value: string; sub: string; color: string }) {
+  return (
+    <div style={glowCard(color, { padding: "10px 12px" })} data-glow={color}
+      onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+      <div style={{ ...sectionLabel, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", fontFamily: MONO }}>{value}</div>
+      {sub && <div style={mutedCaption}>{sub}</div>}
     </div>
   );
 }

@@ -3,7 +3,7 @@
  *
  * Owns:
  *   - Microphone input (AudioInputManager)
- *   - Speech-to-text (SpeechToTextProvider — NVIDIA Nemotron primary)
+ *   - Speech-to-text (SpeechToTextProvider — NVIDIA Parakeet primary)
  *   - OpenClaw delegation (OpenClawAdapter)
  *   - Text-to-speech (TextToSpeechProvider — NVIDIA Magpie primary)
  *   - Audio playback (AudioOutputManager)
@@ -115,15 +115,17 @@ export class ConversationAgent {
 
     await this._resolveProviders();
 
-    if (this._sttProvider) {
-      console.log(`[ConversationAgent] STT provider: ${this._sttProvider.name}`);
-    } else {
-      console.warn("[ConversationAgent] No STT provider available");
-    }
-    if (this._ttsProvider) {
-      console.log(`[ConversationAgent] TTS provider: ${this._ttsProvider.name}`);
-    } else {
-      console.warn("[ConversationAgent] No TTS provider available");
+    if (import.meta.env.DEV) {
+      if (this._sttProvider) {
+        console.log(`[ConversationAgent] STT provider: ${this._sttProvider.name}`);
+      } else {
+        console.warn("[ConversationAgent] No STT provider available");
+      }
+      if (this._ttsProvider) {
+        console.log(`[ConversationAgent] TTS provider: ${this._ttsProvider.name}`);
+      } else {
+        console.warn("[ConversationAgent] No TTS provider available");
+      }
     }
   }
 

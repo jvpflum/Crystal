@@ -747,7 +747,7 @@ class OpenClawClient {
         }
 
         if (Date.now() - startTime > TIMEOUT) {
-          console.log("[streamingChat] TIMEOUT after 3 min");
+          if (import.meta.env.DEV) console.log("[streamingChat] TIMEOUT after 3 min");
           await invoke("kill_streaming_command", { id: streamId });
           yield "\n\n*[Timed out after 3 minutes]*";
           break;
@@ -1334,7 +1334,7 @@ class OpenClawClient {
     // Primary: read directly from config file (no gateway dependency)
     try {
       const cfg = await this.getConfig(true);
-      const defaults = cfg?.agents?.defaults;
+      const defaults = cfg?.agents?.defaults as { model?: { primary?: string }; workspace?: string } | undefined;
       const list = cfg?.agents?.list as { id: string; name?: string; workspace?: string; agentDir?: string; model?: string }[] | undefined;
       if (list && list.length > 0) {
         const primaryModel = defaults?.model?.primary || "";
