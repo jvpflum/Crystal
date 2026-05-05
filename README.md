@@ -5,7 +5,7 @@
 <h1 align="center">Crystal</h1>
 
 <p align="center">
-  <strong>The most complete desktop frontend for <a href="https://github.com/nichochar/open-claw">OpenClaw</a>.</strong><br/>
+  <strong>The most complete desktop frontend for <a href="https://github.com/openclaw/openclaw">OpenClaw</a>.</strong><br/>
   A native AI command center with 30 views, AI-powered search, 70+ slash commands, NVIDIA-accelerated voice, 7-provider LLM support with offline mode, MemPalace canonical memory (drawers + knowledge graph + automated mining), 1Password secret management, token cost analytics, a unified voice gateway, and a full agent workspace — all in a single desktop app.
 </p>
 
@@ -163,7 +163,6 @@ The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects
 #### Tools & Skills Management
 - **Skill Enable/Disable Toggles** — Each skill card in the Tools → Skills tab now has an inline toggle switch. Skills can be enabled/disabled directly from the UI without CLI or config file edits. Disabled skills are visually dimmed with an "OFF" badge.
 - **ClawHub Tab** — New "Hub" tab in Tools for discovering and installing verified 3rd-party skills from ClawHub. Includes search, install, update individual skills, update all, and sync. Installed skills displayed in a grid with version badges.
-- **OpenShell Sandbox in Tools** — Full sandbox management (install, enable/disable, Docker detection, sandbox listing, logs) duplicated from Settings into the Tools → Sandbox tab for easier access.
 
 #### Token Usage & Cost Estimation
 - **Estimated Costs** — Usage page now calculates estimated dollar costs for all providers: cloud APIs (OpenAI, Anthropic, DeepSeek, xAI, Google) use published per-million-token rates; local GPU (vLLM, NVIDIA STT/TTS) uses electricity-based estimates (configurable wattage and $/kWh).
@@ -181,10 +180,10 @@ The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects
 - **Skills Nav Entry** — New sidebar entry for Skills/Marketplace under the Claw section.
 
 #### AI Search & Command Intelligence
-- **System Prompt Rewrite** — The Crystal AI chatbot (Ctrl+K search and slash commands) now has comprehensive knowledge of all 30+ views, including Dashboard sections (ring gauges, vector store, GPU), Command Center tabs, Agents monitoring, Forge capabilities, Memory tiers and vector DB, Tools tabs (Skills/Hub/Sandbox), Usage analytics, and all extended views.
+- **System Prompt Rewrite** — The Crystal AI chatbot (Ctrl+K search and slash commands) now has comprehensive knowledge of all 30+ views, including Dashboard sections (ring gauges, vector store, GPU), Command Center tabs, Agents monitoring, Forge capabilities, Memory tiers and vector DB, Tools tabs (Skills/Hub/Keys/Sandbox & Tools), Usage analytics, and all extended views.
 - **Navigation Tips** — AI responses now include actionable tips like "To manage cron jobs: Navigate to Command Center → Scheduled tab".
 - **Expanded View Map** — 80+ keyword-to-view mappings (up from ~45), covering aliases like `"forge"`, `"vector store"`, `"clawhub"`, `"sandbox"`, `"api costs"`, `"gpu monitor"`, etc.
-- **Slash Commands Sync** — 30+ navigation slash commands added/updated, stale duplicates removed (`/office`, duplicate `/agents`), new commands: `/city`, `/calendar`, `/heartbeat`, `/forge`, `/usage`, `/hub`, `/sandbox`, `/sessions`, `/tasks`, `/approvals`, `/subagents`, `/webhooks`, `/voice`, `/devices`.
+- **Slash Commands Sync** — 30+ navigation slash commands added/updated, stale duplicates removed (`/office`, duplicate `/agents`), new commands: `/city`, `/calendar`, `/heartbeat`, `/forge`, `/usage`, `/hub`, `/sessions`, `/tasks`, `/approvals`, `/subagents`, `/webhooks`, `/voice`, `/devices`.
 - **Command Palette Refresh** — Updated icons (LayoutDashboard for Command Center), added City and Usage as top-level entries, accurate descriptions matching current functionality.
 
 ### April 2026 — v0.6.0.1 Dashboard Polish, Audit & Bug Fixes
@@ -206,9 +205,8 @@ The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects
 - **Version Sync** — `Cargo.toml` and `tauri.conf.json` both aligned to v0.6.0.
 - **CSS Animations** — Added `pulse-dot` keyframe for disconnected status indicators.
 
-### April 2026 — v0.6.0 Sandbox, City, Memory & Performance
+### April 2026 — v0.6.0 City, Memory & Performance
 
-- **NVIDIA OpenShell Sandbox** — One-toggle sandbox mode in Settings. Agents execute inside isolated [OpenShell](https://github.com/NVIDIA/OpenShell) containers with filesystem, network, and process isolation. Auto-detects Docker, creates sandboxes from the `openclaw` community image, and reverts cleanly if anything fails. Requires Docker Desktop.
 - **Crystal City — Future-Punk Visualization** — Full cyberpunk isometric city with neon buildings, holographic billboards, flying drones, electric arcs, rain, steam vents, scanlines, and shooting stars. Agents walk between buildings, display current tasks in speech bubbles, and show status rings. HUD includes activity feed, agent roster, and live clock.
 - **Memory System Overhaul** — New Knowledge Base tab for browsing, viewing, and editing all workspace `.md` files (SOUL.md, USER.md, AGENTS.md, etc.). MemPalace integration with spatial hierarchy, Knowledge Graph, and AAAK compression.
 - **Sidebar Consolidation** — Navigation reduced from 31 to 15 items with collapsible OpenClaw section. All views remain accessible via Ctrl+K command palette.
@@ -246,7 +244,7 @@ The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects
 
 ## What is Crystal?
 
-Crystal wraps [OpenClaw](https://github.com/nichochar/open-claw) — an open-source autonomous AI agent framework — in a native desktop application with a real GUI. Instead of terminal commands and config files, you get a polished Windows app where everything is one click (or one voice command) away.
+Crystal wraps [OpenClaw](https://github.com/openclaw/openclaw) — an open-source autonomous AI agent framework — in a native desktop application with a real GUI. Instead of terminal commands and config files, you get a polished Windows app where everything is one click (or one voice command) away.
 
 ### Crystal vs. OpenClaw CLI
 
@@ -423,8 +421,8 @@ Centralized management hub with four tabs:
 
 - **Skills** — All loaded OpenClaw skills with inline enable/disable toggle switches. Stats bar shows enabled/disabled/eligible counts. Disabled skills are visually dimmed with "OFF" badge. Dependency warnings before enabling.
 - **Hub** — ClawHub integration for discovering and installing verified 3rd-party skills. Search, one-click install, update individual or all skills, sync with registry.
-- **Sandbox** — Full OpenShell sandbox management (install, enable/disable, Docker status, sandbox listing, and live log tailing) — same functionality as Settings but more accessible.
-- **Permissions** — Tool permission management and configuration.
+- **Keys** — Cloud LLM API key management (Anthropic, OpenAI, Google, OpenRouter, Groq, Mistral) with per-provider connectivity tests, mask/reveal, and direct writes to `auth-profiles.json`.
+- **Sandbox & Tools** — OpenClaw sandbox container/browser inventory, sandbox policy explanation, and tool permission inspection.
 
 ### Usage & Cost Analytics
 
@@ -489,28 +487,18 @@ Per-channel: add/remove, login/logout, view capabilities, configure tokens, reso
 
 ---
 
-### OpenShell Sandbox
+### Sandboxing
 
-Crystal integrates [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) for secure, sandboxed agent execution. Toggle it on/off from **Settings → OpenShell Sandbox**.
-
-| Feature | Details |
-|---------|---------|
-| **One-click toggle** | Enable/disable sandbox mode without leaving Crystal |
-| **Auto-provisioning** | Creates an OpenClaw sandbox from the community image on first enable |
-| **Docker detection** | Pre-checks that Docker is running before creating sandboxes |
-| **Graceful fallback** | If sandbox creation fails, config reverts automatically — nothing breaks |
-| **Sandbox monitoring** | View active sandboxes, status indicators, and tail logs from the panel |
-
-**Protection layers when enabled:**
+Crystal currently relies on **OpenClaw's native tool policy layer** for agent containment on Windows:
 
 | Layer | What It Does |
 |-------|-------------|
-| Filesystem | Agents can only access allowed paths |
-| Network | All outbound blocked by default; whitelist via YAML policy |
-| Process | No privilege escalation; dangerous syscalls blocked (seccomp) |
-| Inference | LLM calls routed through privacy-aware proxy |
+| Tool policy | `tools.allow` / `tools.deny` allowlists in `openclaw.json` gate which tools an agent can invoke |
+| Gateway routing | `tools.exec.host = gateway` routes shell exec through the gateway process rather than direct host spawn |
+| Workload isolation | Heavy/risky workloads (vLLM, voice workers) run in Docker containers via NVIDIA Container Toolkit |
+| Permissions UI | Tools → Sandbox & Tools tab inspects active containers, sandbox policy, and tool permissions |
 
-**Requirements:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) must be installed and running. Install OpenShell via `uv tool install -U openshell` or use the in-app install button.
+> **OpenShell on Windows:** [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) (Landlock + seccomp + OPA proxy) is Linux-kernel-dependent and ships wheels only for `manylinux` and `macosx_arm64`. There is no native `win_amd64` build, and a port would require either AppContainer/Job-Object/Hyper-V rewrites or a WSL2 forwarder shim. On Linux/macOS hosts, Crystal still understands `agents.defaults.sandbox.mode = openshell` and will route accordingly when the CLI is present.
 
 ---
 
@@ -714,7 +702,7 @@ Crystal is engineered to feel instant:
 | Desktop Runtime | [Tauri 2.0](https://v2.tauri.app/) (~3 MB runtime) |
 | Frontend | React 19, TypeScript, Tailwind CSS 4, Zustand |
 | Backend | Rust (Tokio, Reqwest, Serde) |
-| AI Agent | [OpenClaw](https://github.com/nichochar/open-claw) |
+| AI Agent | [OpenClaw](https://github.com/openclaw/openclaw) |
 | LLM (Local) | [vLLM](https://github.com/vllm-project/vllm) via Docker (auto-started) |
 | LLM (Cloud) | OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral |
 | Voice Gateway | FastAPI (`voice_gateway.py`, port 6500) |
@@ -724,7 +712,7 @@ Crystal is engineered to feel instant:
 | Memory Embeddings | Local ONNX MiniLM-L6-v2 (no cloud) |
 | Memory Hook | `palace-recall` OpenClaw extension (channel-scoped two-stage retrieval) |
 | Image Gen | OpenAI DALL·E (via OpenClaw skill) |
-| Sandbox | [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) *(optional)* |
+| Sandbox | OpenClaw native tool policy (Linux/macOS may opt into [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell); no native Windows support yet) |
 | Icons | Lucide React |
 | Markdown | react-markdown + remark-gfm + rehype-highlight |
 | Animations | Framer Motion |
@@ -740,7 +728,7 @@ Crystal is engineered to feel instant:
 | **Node.js** | v18+ |
 | **Package Manager** | pnpm |
 | **Rust** | Latest stable toolchain |
-| **Docker** | Docker Desktop with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) *(for vLLM local inference and OpenShell sandbox)* |
+| **Docker** | Docker Desktop with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) *(for vLLM local inference)* |
 | **Python** | 3.10+ *(optional, for Voice Gateway and NVIDIA STT/TTS workers)* |
 
 > **Cloud-only mode:** If you don't have an NVIDIA GPU, you can still use Crystal with cloud LLM providers and browser-based voice. Set your API keys in Settings and you're good to go.
