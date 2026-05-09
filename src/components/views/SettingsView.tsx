@@ -4,7 +4,10 @@ import { homeDir } from "@tauri-apps/api/path";
 import { cachedCommand } from "@/lib/cache";
 import { useOpenClaw } from "@/hooks/useOpenClaw";
 import { useVoice } from "@/hooks/useVoice";
-import { openclawClient, getSystemPromptFromOpenClawConfig } from "@/lib/openclaw";
+import {
+  openclawClient,
+  getSystemPromptFromOpenClawConfig,
+} from "@/lib/openclaw";
 import { useAppStore, type ThinkingLevel } from "@/stores/appStore";
 import { useThemeStore, THEMES } from "@/stores/themeStore";
 import {
@@ -15,74 +18,164 @@ import {
 } from "@/stores/tokenUsageStore";
 import { LobsterIcon } from "@/components/LobsterIcon";
 import { parseOpenClawSecurityAuditJson } from "@/lib/securityAudit";
-import { EASE, glowCard, hoverLift, hoverReset, pressDown, pressUp, innerPanel, sectionLabel, monoValue, mutedCaption, iconTile, inputStyle, btnPrimary, btnSecondary, viewContainer, scrollArea, row as rowStyle, MONO } from "@/styles/viewStyles";
-
-/* ── Keyframes ── */
-
-const KEYFRAMES = `
-@keyframes _spin { to { transform: rotate(360deg) } }
-@keyframes _pulse { 0%,100% { opacity:1 } 50% { opacity:.4 } }
-`;
-
+import {
+  EASE,
+  glowCard,
+  hoverLift,
+  hoverReset,
+  pressDown,
+  pressUp,
+  innerPanel,
+  sectionLabel,
+  monoValue,
+  mutedCaption,
+  inputStyle,
+  btnPrimary,
+  btnSecondary,
+  viewContainer,
+  scrollArea,
+  row as rowStyle,
+  MONO,
+} from "@/styles/viewStyles";
+/* ── Keyframes ── */ const KEYFRAMES = `@keyframes _spin { to { transform: rotate(360deg) } }@keyframes _pulse { 0%,100% { opacity:1 } 50% { opacity:.4 } }`;
 const LEGACY_AI_SYSTEM_PROMPT_KEY = "crystal_ai_system_prompt";
 const DEFAULT_AI_SYSTEM_PROMPT_FALLBACK =
   "You are Crystal, an intelligent AI assistant powered by OpenClaw.";
-
-/* ── Local style tokens ── */
-
-const LABEL: CSSProperties = { fontSize: 12, color: "var(--text-secondary)" };
+/* ── Local style tokens ── */ const LABEL: CSSProperties = {
+  fontSize: 12,
+  color: "var(--text-secondary)",
+};
 const VALUE: CSSProperties = { fontSize: 12, color: "var(--text)" };
-
 const dot = (color: string): CSSProperties => ({
-  width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0,
+  width: 6,
+  height: 6,
+  borderRadius: "50%",
+  background: color,
+  flexShrink: 0,
 });
-
 const VOICE_PROVIDER_META: Record<string, { label: string; port?: string }> = {
   "nvidia-nemotron": { label: "NVIDIA Parakeet (NeMo)", port: "8090" },
-  "browser-stt":     { label: "Browser Speech API" },
-  "nvidia-magpie":   { label: "NVIDIA Magpie TTS", port: "8091" },
-  "browser-tts":     { label: "Browser TTS" },
+  "browser-stt": { label: "Browser Speech API" },
+  "nvidia-magpie": { label: "NVIDIA Magpie TTS", port: "8091" },
+  "browser-tts": { label: "Browser TTS" },
 };
-
-/* ── SVG helpers ── */
-
-function IconRefresh({ spin }: { spin?: boolean }) {
+/* ── SVG helpers ── */ function IconRefresh({ spin }: { spin?: boolean }) {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={spin ? { animation: "_spin .8s linear infinite" } : undefined}>
-      <path d="M21.5 2v6h-6M2.5 22v-6h6" /><path d="M2.5 11.5a10 10 0 0 1 18.37-4.5M21.5 12.5a10 10 0 0 1-18.37 4.5" />
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={spin ? { animation: "_spin .8s linear infinite" } : undefined}
+    >
+      {" "}
+      <path d="M21.5 2v6h-6M2.5 22v-6h6" />
+      <path d="M2.5 11.5a10 10 0 0 1 18.37-4.5M21.5 12.5a10 10 0 0 1-18.37 4.5" />{" "}
     </svg>
   );
 }
-
 function IconCheck() {
-  return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>;
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
 }
-
 function IconEye({ open }: { open: boolean }) {
-  if (open) return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" /><circle cx="12" cy="12" r="3" /></svg>;
-  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" /><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" /><line x1="1" y1="1" x2="23" y2="23" /></svg>;
+  if (open)
+    return (
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+    );
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  );
 }
-
 function IconExternal() {
-  return <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>;
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+      <polyline points="15 3 21 3 21 9" />
+      <line x1="10" y1="14" x2="21" y2="3" />
+    </svg>
+  );
 }
-
 function IconCopy() {
-  return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>;
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
 }
-
-/* ── Main component ── */
-
-export function SettingsView() {
+/* ── Main component ── */ export function SettingsView() {
   const { isConnected, checkConnection } = useOpenClaw();
-  const setView = useAppStore(s => s.setView);
+  const setView = useAppStore((s) => s.setView);
   const {
-    checkConnections, providerStatuses,
-    preferredStt, preferredTts, setSttProvider, setTtsProvider,
+    checkConnections,
+    providerStatuses,
+    preferredStt,
+    preferredTts,
+    setSttProvider,
+    setTtsProvider,
   } = useVoice();
-  const gatewayConnected = useAppStore(s => s.gatewayConnected);
+  const gatewayConnected = useAppStore((s) => s.gatewayConnected);
   const { themeId, setTheme } = useThemeStore();
-
   const [checking, setChecking] = useState(false);
   const [checkingVoice, setCheckingVoice] = useState(false);
   const [showAuthToken, setShowAuthToken] = useState(false);
@@ -90,109 +183,133 @@ export function SettingsView() {
   const [tokenCopied, setTokenCopied] = useState(false);
   const [gatewayPort] = useState("18789");
   const [gatewayLatency, setGatewayLatency] = useState<number | null>(null);
-
-  const [temperature, setTemperature] = useState(() => parseFloat(localStorage.getItem("crystal_ai_temperature") || "0.7"));
-  const [maxTokens, setMaxTokens] = useState(() => localStorage.getItem("crystal_ai_max_tokens") || "1024");
-  const [contextWindow, setContextWindow] = useState(() => localStorage.getItem("crystal_ai_context_window") || "32768");
-  const [systemPrompt, setSystemPrompt] = useState(
-    () => localStorage.getItem(LEGACY_AI_SYSTEM_PROMPT_KEY) || DEFAULT_AI_SYSTEM_PROMPT_FALLBACK,
+  const [temperature, setTemperature] = useState(() =>
+    parseFloat(localStorage.getItem("crystal_ai_temperature") || "0.7"),
   );
-  const [systemPromptSaveError, setSystemPromptSaveError] = useState<string | null>(null);
-
-  const [auditResult, setAuditResult] = useState<{ pass: number; warn: number; fail: number; details?: string } | null>(null);
+  const [maxTokens, setMaxTokens] = useState(
+    () => localStorage.getItem("crystal_ai_max_tokens") || "1024",
+  );
+  const [contextWindow, setContextWindow] = useState(
+    () => localStorage.getItem("crystal_ai_context_window") || "32768",
+  );
+  const [systemPrompt, setSystemPrompt] = useState(
+    () =>
+      localStorage.getItem(LEGACY_AI_SYSTEM_PROMPT_KEY) ||
+      DEFAULT_AI_SYSTEM_PROMPT_FALLBACK,
+  );
+  const [systemPromptSaveError, setSystemPromptSaveError] = useState<
+    string | null
+  >(null);
+  const [auditResult, setAuditResult] = useState<{
+    pass: number;
+    warn: number;
+    fail: number;
+    details?: string;
+  } | null>(null);
   const [auditing, setAuditing] = useState(false);
-
   const [appVersion] = useState("0.1.0");
   const [openclawVersion, setOpenclawVersion] = useState("...");
-  const [updateChannel, setUpdateChannel] = useState<"stable" | "beta" | "dev">("stable");
+  const [updateChannel, setUpdateChannel] = useState<"stable" | "beta" | "dev">(
+    "stable",
+  );
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updateOutput, setUpdateOutput] = useState<string | null>(null);
   const [updateSuccess, setUpdateSuccess] = useState<boolean | null>(null);
   const [restarting, setRestarting] = useState(false);
-
   const [configText, setConfigText] = useState("");
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [configSaved, setConfigSaved] = useState(false);
   const [configPath] = useState("~/.openclaw/openclaw.json");
-
-
   const [daemonInstalled, setDaemonInstalled] = useState(false);
   const [daemonBusy, setDaemonBusy] = useState(false);
   const [daemonOutput, setDaemonOutput] = useState("");
-
   const [configKey, setConfigKey] = useState("");
   const [configValue, setConfigValue] = useState("");
   const [configOutput, setConfigOutput] = useState("");
-
   const [dnsExpanded, setDnsExpanded] = useState(false);
-  const [dnsConfig, setDnsConfig] = useState<Record<string, unknown> | null>(null);
+  const [dnsConfig, setDnsConfig] = useState<Record<string, unknown> | null>(
+    null,
+  );
   const [dnsLoading, setDnsLoading] = useState(false);
   const [dnsStatusOutput, setDnsStatusOutput] = useState<string | null>(null);
   const [dnsStatusLoading, setDnsStatusLoading] = useState(false);
   const [dnsDomain, setDnsDomain] = useState("");
   const [dnsSaving, setDnsSaving] = useState(false);
   const [dnsSaveResult, setDnsSaveResult] = useState<string | null>(null);
-
-  /* OpenClaw Configuration panel state */
-  const [ocExpanded, setOcExpanded] = useState<Record<string, boolean>>({});
+  /* OpenClaw Configuration panel state */ const [ocExpanded, setOcExpanded] =
+    useState<Record<string, boolean>>({});
   const [ocValidating, setOcValidating] = useState(false);
-  const [ocValidateResult, setOcValidateResult] = useState<{ valid: boolean; errors?: string[] } | null>(null);
-  const [ocMemoryConfig, setOcMemoryConfig] = useState<Record<string, unknown> | null>(null);
+  const [ocValidateResult, setOcValidateResult] = useState<{
+    valid: boolean;
+    errors?: string[];
+  } | null>(null);
+  const [ocMemoryConfig, setOcMemoryConfig] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
   const [ocMemoryLoading, setOcMemoryLoading] = useState(false);
   const [ocReindexing, setOcReindexing] = useState(false);
   const [ocReindexResult, setOcReindexResult] = useState<string | null>(null);
-  const [ocSessionConfig, setOcSessionConfig] = useState<Record<string, unknown> | null>(null);
+  const [ocSessionConfig, setOcSessionConfig] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
   const [ocSessionLoading, setOcSessionLoading] = useState(false);
-  const [ocHeartbeatConfig, setOcHeartbeatConfig] = useState<Record<string, unknown> | null>(null);
+  const [ocHeartbeatConfig, setOcHeartbeatConfig] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
   const [ocHeartbeatLoading, setOcHeartbeatLoading] = useState(false);
   const [ocMaintenanceToggling, setOcMaintenanceToggling] = useState(false);
-
-  const thinkingLevel = useAppStore(s => s.thinkingLevel);
-  const setThinkingLevel = useAppStore(s => s.setThinkingLevel);
-
-  const toggleOcSection = (key: string) => setOcExpanded(prev => ({ ...prev, [key]: !prev[key] }));
-
-  /* ── effects ── */
-
-  useEffect(() => {
+  const thinkingLevel = useAppStore((s) => s.thinkingLevel);
+  const setThinkingLevel = useAppStore((s) => s.setThinkingLevel);
+  const toggleOcSection = (key: string) =>
+    setOcExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+  /* ── effects ── */ useEffect(() => {
     checkConnection();
     checkConnections();
     loadConfig();
     loadOpenClawVersion();
     measureLatency();
     checkDaemonStatus();
-    homeDir().then(home => {
-      const sep = home.endsWith("\\") || home.endsWith("/") ? "" : "\\";
-      const cfgPath = `${home}${sep}.openclaw\\openclaw.json`;
-      invoke<string>("read_file", { path: cfgPath }).then(raw => {
-        try {
-          const cfg = JSON.parse(raw);
-          const t = cfg?.gateway?.auth?.token;
-          if (t && typeof t === "string") setAuthToken(t);
-        } catch { /* malformed config */ }
-      }).catch(() => {});
-    }).catch(() => {});
+    homeDir()
+      .then((home) => {
+        const sep = home.endsWith("\\") || home.endsWith("/") ? "" : "\\";
+        const cfgPath = `${home}${sep}.openclaw\\openclaw.json`;
+        invoke<string>("read_file", { path: cfgPath })
+          .then((raw) => {
+            try {
+              const cfg = JSON.parse(raw);
+              const t = cfg?.gateway?.auth?.token;
+              if (t && typeof t === "string") setAuthToken(t);
+            } catch {
+              /* malformed config */
+            }
+          })
+          .catch(() => {});
+      })
+      .catch(() => {});
   }, []);
-
-  /* ── helpers ── */
-
-  const measureLatency = async () => {
+  /* ── helpers ── */ const measureLatency = async () => {
     try {
       const start = performance.now();
       await invoke<{ openclaw_running: boolean }>("get_server_status");
       setGatewayLatency(Math.round(performance.now() - start));
-    } catch { setGatewayLatency(null); }
+    } catch {
+      setGatewayLatency(null);
+    }
   };
-
   const loadConfig = async () => {
     setLoadingConfig(true);
     setSystemPromptSaveError(null);
     try {
       const cfg = await openclawClient.getConfig(true);
       setConfigText(JSON.stringify(cfg, null, 2));
-      const ocPrompt = getSystemPromptFromOpenClawConfig(cfg as Record<string, unknown>);
+      const ocPrompt = getSystemPromptFromOpenClawConfig(
+        cfg as Record<string, unknown>,
+      );
       if (ocPrompt) {
         setSystemPrompt(ocPrompt);
       } else {
@@ -208,7 +325,6 @@ export function SettingsView() {
     if (savedContext) setContextWindow(savedContext);
     setLoadingConfig(false);
   };
-
   const saveConfig = async () => {
     try {
       const cfg = JSON.parse(configText);
@@ -217,44 +333,52 @@ export function SettingsView() {
       await openclawClient.updateConfig(cfg);
       setConfigSaved(true);
       setTimeout(() => setConfigSaved(false), 2000);
-    } catch { /* invalid json */ }
+    } catch {
+      /* invalid json */
+    }
   };
-
   const loadOpenClawVersion = async () => {
     try {
-      const result = await cachedCommand("openclaw --version", { ttl: 300_000 });
+      const result = await cachedCommand("openclaw --version", {
+        ttl: 300_000,
+      });
       if (result.code === 0) setOpenclawVersion(result.stdout.trim());
-    } catch { setOpenclawVersion("unknown"); }
+    } catch {
+      setOpenclawVersion("unknown");
+    }
   };
-
   const handleRefreshGateway = async () => {
     setChecking(true);
     await checkConnection();
     setChecking(false);
   };
-
   const handleRefreshVoice = async () => {
     setCheckingVoice(true);
     await checkConnections();
     setCheckingVoice(false);
   };
-
   const handleStartGateway = async () => {
     await openclawClient.startDaemon();
     await measureLatency();
   };
-
   const runAudit = async () => {
     setAuditing(true);
     setAuditResult(null);
     try {
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "openclaw security audit --json", cwd: null,
+      const result = await invoke<{
+        stdout: string;
+        stderr: string;
+        code: number;
+      }>("execute_command", {
+        command: "openclaw security audit --json",
+        cwd: null,
       });
-      const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
+      const combined = [result.stdout, result.stderr]
+        .filter(Boolean)
+        .join("\n");
       const parsed = parseOpenClawSecurityAuditJson(combined);
-      const details = combined.trim() || result.stdout?.trim() || result.stderr?.trim();
-
+      const details =
+        combined.trim() || result.stdout?.trim() || result.stderr?.trim();
       if (parsed) {
         setAuditResult({ ...parsed, details });
       } else if (result.code === 0) {
@@ -263,8 +387,8 @@ export function SettingsView() {
           warn: 0,
           fail: 0,
           details:
-            details
-            || "Audit exited successfully but JSON could not be parsed. If the CLI printed only human-readable text, try upgrading OpenClaw or run `openclaw security audit --json` in a terminal and compare output.",
+            details ||
+            "Audit exited successfully but JSON could not be parsed. If the CLI printed only human-readable text, try upgrading OpenClaw or run `openclaw security audit --json` in a terminal and compare output.",
         });
       } else {
         setAuditResult({
@@ -284,30 +408,39 @@ export function SettingsView() {
     }
     setAuditing(false);
   };
-
   const checkForUpdates = async () => {
     setCheckingUpdates(true);
     setUpdateStatus(null);
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw update status --json", cwd: null,
-      });
+      const result = await invoke<{ stdout: string; code: number }>(
+        "execute_command",
+        { command: "openclaw update status --json", cwd: null },
+      );
       if (result.code === 0) {
         const data = JSON.parse(result.stdout);
-        setUpdateStatus(data.updateAvailable ? `Update available: v${data.latestVersion}` : "You're on the latest version");
-      } else { setUpdateStatus("Could not check for updates"); }
-    } catch { setUpdateStatus("Could not check for updates"); }
+        setUpdateStatus(
+          data.updateAvailable
+            ? `Update available: v${data.latestVersion}`
+            : "You're on the latest version",
+        );
+      } else {
+        setUpdateStatus("Could not check for updates");
+      }
+    } catch {
+      setUpdateStatus("Could not check for updates");
+    }
     setCheckingUpdates(false);
   };
-
   const runUpdate = async () => {
     setUpdating(true);
     setUpdateOutput(null);
     setUpdateSuccess(null);
     try {
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "openclaw update --json", cwd: null,
-      });
+      const result = await invoke<{
+        stdout: string;
+        stderr: string;
+        code: number;
+      }>("execute_command", { command: "openclaw update --json", cwd: null });
       const output = result.stdout?.trim() || result.stderr?.trim() || "";
       setUpdateSuccess(result.code === 0);
       if (result.code === 0) {
@@ -315,7 +448,11 @@ export function SettingsView() {
           const data = JSON.parse(output);
           const from = data.previousVersion ?? data.from ?? "";
           const to = data.newVersion ?? data.version ?? data.to ?? "";
-          setUpdateOutput(from && to ? `Updated: v${from} → v${to}` : data.message ?? "Update completed successfully");
+          setUpdateOutput(
+            from && to
+              ? `Updated: v${from} → v${to}`
+              : (data.message ?? "Update completed successfully"),
+          );
         } catch {
           setUpdateOutput(output || "Update completed");
         }
@@ -328,24 +465,32 @@ export function SettingsView() {
     }
     setUpdating(false);
   };
-
   const restartGatewayAfterUpdate = async () => {
     setRestarting(true);
     try {
-      await invoke("execute_command", { command: "openclaw gateway restart", cwd: null });
-      setUpdateOutput(prev => (prev ? prev + "\nGateway restarted successfully." : "Gateway restarted."));
+      await invoke("execute_command", {
+        command: "openclaw gateway restart",
+        cwd: null,
+      });
+      setUpdateOutput((prev) =>
+        prev
+          ? prev + "\nGateway restarted successfully."
+          : "Gateway restarted.",
+      );
     } catch {
-      setUpdateOutput(prev => (prev ? prev + "\nFailed to restart gateway." : "Failed to restart gateway."));
+      setUpdateOutput((prev) =>
+        prev
+          ? prev + "\nFailed to restart gateway."
+          : "Failed to restart gateway.",
+      );
     }
     setRestarting(false);
   };
-
   const persistLocalAIModelSettings = () => {
     localStorage.setItem("crystal_ai_temperature", temperature.toString());
     localStorage.setItem("crystal_ai_max_tokens", maxTokens);
     localStorage.setItem("crystal_ai_context_window", contextWindow);
   };
-
   const flushSystemPromptToOpenClaw = async () => {
     setSystemPromptSaveError(null);
     try {
@@ -358,101 +503,135 @@ export function SettingsView() {
         /* raw JSON panel optional */
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Could not write openclaw.json";
+      const msg =
+        e instanceof Error ? e.message : "Could not write openclaw.json";
       setSystemPromptSaveError(msg);
       localStorage.setItem(LEGACY_AI_SYSTEM_PROMPT_KEY, systemPrompt);
     }
   };
-
   const checkDaemonStatus = async () => {
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw gateway status", cwd: null,
-      });
-      setDaemonInstalled(result.code === 0 && !result.stdout.includes("not installed"));
-    } catch { setDaemonInstalled(false); }
+      const result = await invoke<{ stdout: string; code: number }>(
+        "execute_command",
+        { command: "openclaw gateway status", cwd: null },
+      );
+      setDaemonInstalled(
+        result.code === 0 && !result.stdout.includes("not installed"),
+      );
+    } catch {
+      setDaemonInstalled(false);
+    }
   };
-
   const runDaemonCmd = async (cmd: string) => {
     setDaemonBusy(true);
     setDaemonOutput("");
     try {
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: `openclaw gateway ${cmd}`, cwd: null,
-      });
+      const result = await invoke<{
+        stdout: string;
+        stderr: string;
+        code: number;
+      }>("execute_command", { command: `openclaw gateway ${cmd}`, cwd: null });
       setDaemonOutput(result.stdout || result.stderr);
       await checkDaemonStatus();
-    } catch (e) { setDaemonOutput(e instanceof Error ? e.message : "Command failed"); }
+    } catch (e) {
+      setDaemonOutput(e instanceof Error ? e.message : "Command failed");
+    }
     setDaemonBusy(false);
   };
-
   const restartDaemon = () => runDaemonCmd("restart");
   const stopDaemon = () => runDaemonCmd("stop");
-
   const getConfigValue = async () => {
     if (!configKey.trim()) return;
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", { command: `openclaw config get ${configKey.trim()}`, cwd: null });
+      const result = await invoke<{ stdout: string; code: number }>(
+        "execute_command",
+        { command: `openclaw config get ${configKey.trim()}`, cwd: null },
+      );
       setConfigOutput(result.stdout.trim());
-    } catch { setConfigOutput("Failed to get config value"); }
+    } catch {
+      setConfigOutput("Failed to get config value");
+    }
   };
-
   const setConfigValue_ = async () => {
     if (!configKey.trim() || !configValue.trim()) return;
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", { command: `openclaw config set ${configKey.trim()} ${configValue.trim()}`, cwd: null });
+      const result = await invoke<{ stdout: string; code: number }>(
+        "execute_command",
+        {
+          command: `openclaw config set ${configKey.trim()} ${configValue.trim()}`,
+          cwd: null,
+        },
+      );
       setConfigOutput(result.stdout.trim() || "Value set");
-    } catch { setConfigOutput("Failed to set config value"); }
+    } catch {
+      setConfigOutput("Failed to set config value");
+    }
   };
-
   const unsetConfigValue = async () => {
     if (!configKey.trim()) return;
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", { command: `openclaw config unset ${configKey.trim()}`, cwd: null });
+      const result = await invoke<{ stdout: string; code: number }>(
+        "execute_command",
+        { command: `openclaw config unset ${configKey.trim()}`, cwd: null },
+      );
       setConfigOutput(result.stdout.trim() || "Value unset");
-    } catch { setConfigOutput("Failed to unset config value"); }
+    } catch {
+      setConfigOutput("Failed to unset config value");
+    }
   };
-
-  /* ── DNS helpers ── */
-
-  const loadDnsConfig = async () => {
+  /* ── DNS helpers ── */ const loadDnsConfig = async () => {
     setDnsLoading(true);
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw config get dns --json", cwd: null,
-      });
+      const result = await invoke<{ stdout: string; code: number }>(
+        "execute_command",
+        { command: "openclaw config get dns --json", cwd: null },
+      );
       if (result.code === 0 && result.stdout.trim()) {
         const data = JSON.parse(result.stdout);
         setDnsConfig(data);
         if (data.domain) setDnsDomain(String(data.domain));
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     setDnsLoading(false);
   };
-
   const checkDnsStatus = async () => {
     setDnsStatusLoading(true);
     setDnsStatusOutput(null);
     try {
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "openclaw dns status", cwd: null,
-      });
-      setDnsStatusOutput(result.code === 0 ? (result.stdout.trim() || "DNS status OK") : (result.stderr?.trim() || result.stdout?.trim() || "DNS status check failed"));
+      const result = await invoke<{
+        stdout: string;
+        stderr: string;
+        code: number;
+      }>("execute_command", { command: "openclaw dns status", cwd: null });
+      setDnsStatusOutput(
+        result.code === 0
+          ? result.stdout.trim() || "DNS status OK"
+          : result.stderr?.trim() ||
+              result.stdout?.trim() ||
+              "DNS status check failed",
+      );
     } catch {
       setDnsStatusOutput("DNS status command failed");
     }
     setDnsStatusLoading(false);
   };
-
   const saveDnsDomain = async () => {
     if (!dnsDomain.trim()) return;
     setDnsSaving(true);
     setDnsSaveResult(null);
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: `openclaw config set dns.domain "${dnsDomain.trim()}"`, cwd: null,
-      });
-      setDnsSaveResult(result.code === 0 ? "Domain saved" : "Failed to save domain");
+      const result = await invoke<{ stdout: string; code: number }>(
+        "execute_command",
+        {
+          command: `openclaw config set dns.domain "${dnsDomain.trim()}"`,
+          cwd: null,
+        },
+      );
+      setDnsSaveResult(
+        result.code === 0 ? "Domain saved" : "Failed to save domain",
+      );
       if (result.code === 0) await loadDnsConfig();
     } catch {
       setDnsSaveResult("Failed to save domain");
@@ -460,760 +639,2218 @@ export function SettingsView() {
     setDnsSaving(false);
     setTimeout(() => setDnsSaveResult(null), 3000);
   };
-
-  /* ── OpenClaw Configuration helpers ── */
-
-  const runConfigValidate = async () => {
-    setOcValidating(true);
-    setOcValidateResult(null);
-    try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw config validate --json", cwd: null,
-      });
-      if (result.code === 0) {
-        try {
-          const data = JSON.parse(result.stdout);
-          setOcValidateResult({ valid: data.valid !== false, errors: data.errors });
-        } catch {
-          setOcValidateResult({ valid: true });
+  /* ── OpenClaw Configuration helpers ── */ const runConfigValidate =
+    async () => {
+      setOcValidating(true);
+      setOcValidateResult(null);
+      try {
+        const result = await invoke<{ stdout: string; code: number }>(
+          "execute_command",
+          { command: "openclaw config validate --json", cwd: null },
+        );
+        if (result.code === 0) {
+          try {
+            const data = JSON.parse(result.stdout);
+            setOcValidateResult({
+              valid: data.valid !== false,
+              errors: data.errors,
+            });
+          } catch {
+            setOcValidateResult({ valid: true });
+          }
+        } else {
+          try {
+            const data = JSON.parse(result.stdout);
+            setOcValidateResult({
+              valid: false,
+              errors: data.errors || [result.stdout.trim()],
+            });
+          } catch {
+            setOcValidateResult({
+              valid: false,
+              errors: [result.stdout.trim() || "Validation failed"],
+            });
+          }
         }
-      } else {
-        try {
-          const data = JSON.parse(result.stdout);
-          setOcValidateResult({ valid: false, errors: data.errors || [result.stdout.trim()] });
-        } catch {
-          setOcValidateResult({ valid: false, errors: [result.stdout.trim() || "Validation failed"] });
-        }
+      } catch {
+        setOcValidateResult({
+          valid: false,
+          errors: ["Failed to run config validate"],
+        });
       }
-    } catch {
-      setOcValidateResult({ valid: false, errors: ["Failed to run config validate"] });
-    }
-    setOcValidating(false);
-  };
-
+      setOcValidating(false);
+    };
   const loadMemoryConfig = async () => {
     setOcMemoryLoading(true);
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw config get memory --json", cwd: null,
-      });
+      const result = await invoke<{ stdout: string; code: number }>(
+        "execute_command",
+        { command: "openclaw config get memory --json", cwd: null },
+      );
       if (result.code === 0 && result.stdout.trim()) {
         setOcMemoryConfig(JSON.parse(result.stdout));
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     setOcMemoryLoading(false);
   };
-
   const runReindex = async () => {
     setOcReindexing(true);
     setOcReindexResult(null);
     try {
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "openclaw memory index --force", cwd: null,
+      const result = await invoke<{
+        stdout: string;
+        stderr: string;
+        code: number;
+      }>("execute_command", {
+        command: "openclaw memory index --force",
+        cwd: null,
       });
-      setOcReindexResult(result.code === 0 ? (result.stdout.trim() || "Reindex complete") : (result.stderr?.trim() || result.stdout?.trim() || "Reindex failed"));
+      setOcReindexResult(
+        result.code === 0
+          ? result.stdout.trim() || "Reindex complete"
+          : result.stderr?.trim() || result.stdout?.trim() || "Reindex failed",
+      );
     } catch {
       setOcReindexResult("Reindex command failed");
     }
     setOcReindexing(false);
   };
-
   const loadSessionConfig = async () => {
     setOcSessionLoading(true);
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw config get session --json", cwd: null,
-      });
+      const result = await invoke<{ stdout: string; code: number }>(
+        "execute_command",
+        { command: "openclaw config get session --json", cwd: null },
+      );
       if (result.code === 0 && result.stdout.trim()) {
         setOcSessionConfig(JSON.parse(result.stdout));
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     setOcSessionLoading(false);
   };
-
   const toggleMaintenanceMode = async () => {
     if (!ocSessionConfig) return;
     setOcMaintenanceToggling(true);
     const current = String(ocSessionConfig.maintenanceMode || "off");
-    const next = current === "off" ? "warn" : current === "warn" ? "enforce" : "off";
+    const next =
+      current === "off" ? "warn" : current === "warn" ? "enforce" : "off";
     try {
       await invoke("execute_command", {
-        command: `openclaw config set session.maintenanceMode ${next}`, cwd: null,
+        command: `openclaw config set session.maintenanceMode ${next}`,
+        cwd: null,
       });
-      setOcSessionConfig(prev => prev ? { ...prev, maintenanceMode: next } : prev);
-    } catch { /* ignore */ }
+      setOcSessionConfig((prev) =>
+        prev ? { ...prev, maintenanceMode: next } : prev,
+      );
+    } catch {
+      /* ignore */
+    }
     setOcMaintenanceToggling(false);
   };
-
   const loadHeartbeatConfig = async () => {
     setOcHeartbeatLoading(true);
     try {
-      const result = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw config get agents.defaults.heartbeat --json", cwd: null,
-      });
+      const result = await invoke<{ stdout: string; code: number }>(
+        "execute_command",
+        {
+          command: "openclaw config get agents.defaults.heartbeat --json",
+          cwd: null,
+        },
+      );
       if (result.code === 0 && result.stdout.trim()) {
         setOcHeartbeatConfig(JSON.parse(result.stdout));
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     setOcHeartbeatLoading(false);
   };
-
-  /* ── render ── */
-
-  return (
+  /* ── render ── */ return (
     <div style={{ ...viewContainer, padding: 0 }}>
-      <style>{KEYFRAMES}</style>
-
+      {" "}
+      <style>{KEYFRAMES}</style>{" "}
       <div style={{ padding: "18px 24px 8px", flexShrink: 0 }}>
-        <h2 style={{ color: "var(--text)", fontSize: 16, fontWeight: 700, margin: 0 }}>Settings</h2>
+        {" "}
+        <h2
+          style={{
+            color: "var(--text)",
+            fontSize: 16,
+            fontWeight: 700,
+            margin: 0,
+          }}
+        >
+          Settings
+        </h2>{" "}
         <p style={{ ...mutedCaption, margin: "4px 0 0", fontSize: 11 }}>
-          Crystal &middot; OpenClaw configuration
-        </p>
-      </div>
-
+          {" "}
+          Crystal &middot; OpenClaw configuration{" "}
+        </p>{" "}
+      </div>{" "}
       <div style={{ ...scrollArea, padding: "4px 24px 28px" }}>
-
-        {/* ───────── THEME ───────── */}
+        {" "}
+        {/* ───────── THEME ───────── */}{" "}
         <Section title="THEME">
-          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-            <div style={{ padding: "12px 14px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))", gap: 8 }}>
+          {" "}
+          <div
+            style={glowCard("var(--accent)")}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
+            <div
+              style={{
+                padding: "12px 14px",
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))",
+                gap: 8,
+              }}
+            >
+              {" "}
               {THEMES.map((theme) => {
                 const active = themeId === theme.id;
                 return (
-                  <button key={theme.id} onClick={() => setTheme(theme.id)} style={{
-                    padding: 0, border: active ? "2px solid var(--accent)" : "2px solid var(--border)",
-                    borderRadius: 10, cursor: "pointer", background: "transparent", transition: `all 0.2s ${EASE}`,
-                    overflow: "hidden", transform: active ? "scale(1.02)" : "scale(1)",
-                    boxShadow: active ? "0 0 12px var(--accent-bg)" : "none",
-                  }}>
+                  <button
+                    key={theme.id}
+                    onClick={() => setTheme(theme.id)}
+                    style={{
+                      padding: 0,
+                      border: active
+                        ? "2px solid var(--accent)"
+                        : "2px solid var(--border)",
+                      borderRadius: 10,
+                      cursor: "pointer",
+                      background: "transparent",
+                      transition: `all 0.2s ${EASE}`,
+                      overflow: "hidden",
+                      transform: active ? "scale(1.02)" : "scale(1)",
+                      boxShadow: active ? "0 0 12px var(--accent-bg)" : "none",
+                    }}
+                  >
+                    {" "}
                     <div style={{ display: "flex", height: 32 }}>
-                      {theme.preview.map((color, i) => <div key={i} style={{ flex: 1, background: color }} />)}
-                    </div>
-                    <div style={{ padding: "6px 8px", background: active ? "var(--accent-bg)" : "var(--bg-elevated)", textAlign: "center" }}>
-                      <div style={{ fontSize: 10, fontWeight: 600, color: active ? "var(--accent)" : "var(--text-secondary)" }}>{theme.name}</div>
-                      <div style={{ fontSize: 8, color: "var(--text-muted)", marginTop: 1 }}>{theme.description}</div>
-                    </div>
+                      {" "}
+                      {theme.preview.map((color, i) => (
+                        <div key={i} style={{ flex: 1, background: color }} />
+                      ))}{" "}
+                    </div>{" "}
+                    <div
+                      style={{
+                        padding: "6px 8px",
+                        background: active
+                          ? "var(--accent-bg)"
+                          : "var(--bg-elevated)",
+                        textAlign: "center",
+                      }}
+                    >
+                      {" "}
+                      <div
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          color: active
+                            ? "var(--accent)"
+                            : "var(--text-secondary)",
+                        }}
+                      >
+                        {theme.name}
+                      </div>{" "}
+                      <div
+                        style={{
+                          fontSize: 8,
+                          color: "var(--text-muted)",
+                          marginTop: 1,
+                        }}
+                      >
+                        {theme.description}
+                      </div>{" "}
+                    </div>{" "}
                   </button>
                 );
-              })}
-            </div>
-          </div>
-        </Section>
-
-        <TokenStatsSection />
-
-        {/* ───────── OPENCLAW GATEWAY ───────── */}
+              })}{" "}
+            </div>{" "}
+          </div>{" "}
+        </Section>{" "}
+        <TokenStatsSection /> {/* ───────── OPENCLAW GATEWAY ───────── */}{" "}
         <Section title="OPENCLAW GATEWAY">
-          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+          {" "}
+          <div
+            style={glowCard("var(--accent)")}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
             <div style={rowStyle}>
+              {" "}
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={dot(gatewayConnected ? "var(--success)" : "var(--error)")} />
-                <span style={LABEL}>Connection</span>
-              </div>
-              <span style={{ ...VALUE, color: gatewayConnected ? "var(--success)" : "var(--error)" }}>
-                {gatewayConnected ? "Connected" : "Offline"}
-              </span>
-            </div>
+                {" "}
+                <span
+                  style={dot(
+                    gatewayConnected ? "var(--success)" : "var(--error)",
+                  )}
+                />{" "}
+                <span style={LABEL}>Connection</span>{" "}
+              </div>{" "}
+              <span
+                style={{
+                  ...VALUE,
+                  color: gatewayConnected ? "var(--success)" : "var(--error)",
+                }}
+              >
+                {" "}
+                {gatewayConnected ? "Connected" : "Offline"}{" "}
+              </span>{" "}
+            </div>{" "}
             <div style={rowStyle}>
-              <span style={LABEL}>Port</span>
-              <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{gatewayPort}</span>
-            </div>
+              {" "}
+              <span style={LABEL}>Port</span>{" "}
+              <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>
+                {gatewayPort}
+              </span>{" "}
+            </div>{" "}
             <div style={rowStyle}>
-              <span style={LABEL}>Latency</span>
-              <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11, color: gatewayLatency !== null && gatewayLatency < 100 ? "var(--success)" : "var(--warning)" }}>
-                {gatewayLatency !== null ? `${gatewayLatency}ms` : "—"}
-              </span>
-            </div>
+              {" "}
+              <span style={LABEL}>Latency</span>{" "}
+              <span
+                style={{
+                  ...VALUE,
+                  fontFamily: MONO,
+                  fontSize: 11,
+                  color:
+                    gatewayLatency !== null && gatewayLatency < 100
+                      ? "var(--success)"
+                      : "var(--warning)",
+                }}
+              >
+                {" "}
+                {gatewayLatency !== null ? `${gatewayLatency}ms` : "—"}{" "}
+              </span>{" "}
+            </div>{" "}
             <div style={rowStyle}>
-              <span style={LABEL}>Daemon</span>
+              {" "}
+              <span style={LABEL}>Daemon</span>{" "}
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: daemonInstalled ? "var(--success)" : "var(--error)", flexShrink: 0 }} />
-                <span style={{ ...VALUE, fontSize: 11, color: daemonInstalled ? "var(--success)" : "var(--error)" }}>{daemonInstalled ? "Installed" : "Not Installed"}</span>
-              </div>
-            </div>
-
-            {/* auth token */}
-            <div style={{ ...rowStyle, borderBottom: "none", flexDirection: "column", alignItems: "stretch", gap: 6 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={LABEL}>Gateway Token</span>
-                <span style={{ fontSize: 9, color: "var(--text-muted)" }}>For external clients</span>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, ...innerPanel, padding: "6px 10px" }}>
-                <code style={{ flex: 1, fontSize: 12, fontFamily: MONO, color: authToken ? "var(--text-secondary)" : "var(--text-muted)", letterSpacing: 0.5, wordBreak: "break-all", lineHeight: 1.4, userSelect: showAuthToken ? "text" : "none" }}>
-                  {authToken ? (showAuthToken ? authToken : "••••••••••••••••••••••••••••••••") : "No token found"}
-                </code>
-                <button onClick={() => setShowAuthToken(!showAuthToken)} style={{ ...btnSecondary, padding: 4, flexShrink: 0 }}><IconEye open={showAuthToken} /></button>
-                <button onClick={() => { if (authToken) { navigator.clipboard.writeText(authToken); setTokenCopied(true); setTimeout(() => setTokenCopied(false), 2000); } }} style={{ ...btnSecondary, padding: 4, flexShrink: 0, color: tokenCopied ? "var(--success)" : "var(--text-muted)" }}>
-                  {tokenCopied ? <IconCheck /> : <IconCopy />}
-                </button>
-              </div>
-            </div>
-
-            <div style={{ padding: "8px 14px 10px", display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button onClick={handleStartGateway} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>
-                <IconRefresh /> {gatewayConnected ? "Restart Gateway" : "Start Gateway"}
-              </button>
-              <button onClick={measureLatency} style={{ ...btnSecondary, fontSize: 11 }}>Ping</button>
-              <button onClick={restartDaemon} disabled={daemonBusy} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>{daemonBusy ? <IconRefresh spin /> : null} Restart Daemon</button>
-              <button onClick={stopDaemon} disabled={daemonBusy} style={btnSecondary} onMouseDown={pressDown} onMouseUp={pressUp}>Stop</button>
-            </div>
-            {daemonOutput && <pre style={{ margin: 0, padding: "8px 14px", fontSize: 10, fontFamily: MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 80, overflowY: "auto", borderTop: "1px solid var(--border)" }}>{daemonOutput}</pre>}
-          </div>
-        </Section>
-
-        {/* ───────── DNS ───────── */}
+                {" "}
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: daemonInstalled
+                      ? "var(--success)"
+                      : "var(--error)",
+                    flexShrink: 0,
+                  }}
+                />{" "}
+                <span
+                  style={{
+                    ...VALUE,
+                    fontSize: 11,
+                    color: daemonInstalled ? "var(--success)" : "var(--error)",
+                  }}
+                >
+                  {daemonInstalled ? "Installed" : "Not Installed"}
+                </span>{" "}
+              </div>{" "}
+            </div>{" "}
+            {/* auth token */}{" "}
+            <div
+              style={{
+                ...rowStyle,
+                borderBottom: "none",
+                flexDirection: "column",
+                alignItems: "stretch",
+                gap: 6,
+              }}
+            >
+              {" "}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                {" "}
+                <span style={LABEL}>Gateway Token</span>{" "}
+                <span style={{ fontSize: 9, color: "var(--text-muted)" }}>
+                  For external clients
+                </span>{" "}
+              </div>{" "}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  ...innerPanel,
+                  padding: "6px 10px",
+                }}
+              >
+                {" "}
+                <code
+                  style={{
+                    flex: 1,
+                    fontSize: 12,
+                    fontFamily: MONO,
+                    color: authToken
+                      ? "var(--text-secondary)"
+                      : "var(--text-muted)",
+                    letterSpacing: 0.5,
+                    wordBreak: "break-all",
+                    lineHeight: 1.4,
+                    userSelect: showAuthToken ? "text" : "none",
+                  }}
+                >
+                  {" "}
+                  {authToken
+                    ? showAuthToken
+                      ? authToken
+                      : "••••••••••••••••••••••••••••••••"
+                    : "No token found"}{" "}
+                </code>{" "}
+                <button
+                  onClick={() => setShowAuthToken(!showAuthToken)}
+                  style={{ ...btnSecondary, padding: 4, flexShrink: 0 }}
+                >
+                  <IconEye open={showAuthToken} />
+                </button>{" "}
+                <button
+                  onClick={() => {
+                    if (authToken) {
+                      navigator.clipboard.writeText(authToken);
+                      setTokenCopied(true);
+                      setTimeout(() => setTokenCopied(false), 2000);
+                    }
+                  }}
+                  style={{
+                    ...btnSecondary,
+                    padding: 4,
+                    flexShrink: 0,
+                    color: tokenCopied ? "var(--success)" : "var(--text-muted)",
+                  }}
+                >
+                  {" "}
+                  {tokenCopied ? <IconCheck /> : <IconCopy />}{" "}
+                </button>{" "}
+              </div>{" "}
+            </div>{" "}
+            <div
+              style={{
+                padding: "8px 14px 10px",
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              {" "}
+              <button
+                onClick={handleStartGateway}
+                style={btnPrimary}
+                onMouseDown={pressDown}
+                onMouseUp={pressUp}
+              >
+                {" "}
+                <IconRefresh />{" "}
+                {gatewayConnected ? "Restart Gateway" : "Start Gateway"}{" "}
+              </button>{" "}
+              <button
+                onClick={measureLatency}
+                style={{ ...btnSecondary, fontSize: 11 }}
+              >
+                Ping
+              </button>{" "}
+              <button
+                onClick={restartDaemon}
+                disabled={daemonBusy}
+                style={btnPrimary}
+                onMouseDown={pressDown}
+                onMouseUp={pressUp}
+              >
+                {daemonBusy ? <IconRefresh spin /> : null} Restart Daemon
+              </button>{" "}
+              <button
+                onClick={stopDaemon}
+                disabled={daemonBusy}
+                style={btnSecondary}
+                onMouseDown={pressDown}
+                onMouseUp={pressUp}
+              >
+                Stop
+              </button>{" "}
+            </div>{" "}
+            {daemonOutput && (
+              <pre
+                style={{
+                  margin: 0,
+                  padding: "8px 14px",
+                  fontSize: 10,
+                  fontFamily: MONO,
+                  color: "var(--text-muted)",
+                  whiteSpace: "pre-wrap",
+                  maxHeight: 80,
+                  overflowY: "auto",
+                  borderTop: "1px solid var(--border)",
+                }}
+              >
+                {daemonOutput}
+              </pre>
+            )}{" "}
+          </div>{" "}
+        </Section>{" "}
+        {/* ───────── DNS ───────── */}{" "}
         <Section title="DNS">
-          <div style={{ ...glowCard("var(--accent)"), marginBottom: 8 }} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-            <button onClick={() => { setDnsExpanded(!dnsExpanded); if (!dnsExpanded && !dnsConfig) loadDnsConfig(); }} style={{ ...rowStyle, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
+          {" "}
+          <div
+            style={{ ...glowCard("var(--accent)"), marginBottom: 8 }}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
+            <button
+              onClick={() => {
+                setDnsExpanded(!dnsExpanded);
+                if (!dnsExpanded && !dnsConfig) loadDnsConfig();
+              }}
+              style={{
+                ...rowStyle,
+                cursor: "pointer",
+                border: "none",
+                width: "100%",
+                background: "transparent",
+                textAlign: "left",
+              }}
+            >
+              {" "}
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d={dnsExpanded ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} /></svg>
-                <span style={{ ...LABEL, margin: 0 }}>DNS Configuration</span>
-              </div>
-              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Domain & DNS settings</span>
-            </button>
+                {" "}
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--text-muted)"
+                  strokeWidth="2"
+                >
+                  <path d={dnsExpanded ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} />
+                </svg>{" "}
+                <span style={{ ...LABEL, margin: 0 }}>
+                  DNS Configuration
+                </span>{" "}
+              </div>{" "}
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                Domain & DNS settings
+              </span>{" "}
+            </button>{" "}
             {dnsExpanded && (
               <div style={{ padding: "0 14px 12px" }}>
+                {" "}
                 {dnsLoading ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 0" }}>
-                    <IconRefresh spin /> <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading...</span>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "8px 0",
+                    }}
+                  >
+                    {" "}
+                    <IconRefresh spin />{" "}
+                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      Loading...
+                    </span>{" "}
                   </div>
                 ) : dnsConfig ? (
                   <>
+                    {" "}
                     {Object.entries(dnsConfig).map(([key, val]) => (
                       <div key={key} style={{ ...rowStyle, padding: "8px 0" }}>
-                        <span style={LABEL}>{key}</span>
-                        <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{typeof val === "object" ? JSON.stringify(val) : String(val ?? "—")}</span>
+                        {" "}
+                        <span style={LABEL}>{key}</span>{" "}
+                        <span
+                          style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}
+                        >
+                          {typeof val === "object"
+                            ? JSON.stringify(val)
+                            : String(val ?? "—")}
+                        </span>{" "}
                       </div>
-                    ))}
+                    ))}{" "}
                   </>
                 ) : (
-                  <div style={{ padding: "8px 0", fontSize: 11, color: "var(--text-muted)" }}>No DNS config loaded yet.</div>
-                )}
-
-                <div style={{ marginTop: 8 }}>
-                  <span style={{ ...LABEL, display: "block", marginBottom: 4 }}>Domain</span>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <input type="text" value={dnsDomain} onChange={e => setDnsDomain(e.target.value)} placeholder="example.com" style={{ ...inputStyle, flex: 1 }} />
-                    <button onClick={saveDnsDomain} disabled={dnsSaving || !dnsDomain.trim()} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>
-                      {dnsSaving ? <IconRefresh spin /> : null} {dnsSaving ? "Saving..." : "Save"}
-                    </button>
+                  <div
+                    style={{
+                      padding: "8px 0",
+                      fontSize: 11,
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    No DNS config loaded yet.
                   </div>
+                )}{" "}
+                <div style={{ marginTop: 8 }}>
+                  {" "}
+                  <span style={{ ...LABEL, display: "block", marginBottom: 4 }}>
+                    Domain
+                  </span>{" "}
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {" "}
+                    <input
+                      type="text"
+                      value={dnsDomain}
+                      onChange={(e) => setDnsDomain(e.target.value)}
+                      placeholder="example.com"
+                      style={{ ...inputStyle, flex: 1 }}
+                    />{" "}
+                    <button
+                      onClick={saveDnsDomain}
+                      disabled={dnsSaving || !dnsDomain.trim()}
+                      style={btnPrimary}
+                      onMouseDown={pressDown}
+                      onMouseUp={pressUp}
+                    >
+                      {" "}
+                      {dnsSaving ? <IconRefresh spin /> : null}{" "}
+                      {dnsSaving ? "Saving..." : "Save"}{" "}
+                    </button>{" "}
+                  </div>{" "}
                   {dnsSaveResult && (
-                    <span style={{ fontSize: 10, color: dnsSaveResult.includes("Failed") ? "var(--error)" : "var(--success)", marginTop: 4, display: "inline-block" }}>
-                      {dnsSaveResult}
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: dnsSaveResult.includes("Failed")
+                          ? "var(--error)"
+                          : "var(--success)",
+                        marginTop: 4,
+                        display: "inline-block",
+                      }}
+                    >
+                      {" "}
+                      {dnsSaveResult}{" "}
                     </span>
-                  )}
-                </div>
-
+                  )}{" "}
+                </div>{" "}
                 <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                  <button onClick={checkDnsStatus} disabled={dnsStatusLoading} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>
-                    {dnsStatusLoading ? <IconRefresh spin /> : null} {dnsStatusLoading ? "Checking..." : "DNS Status"}
-                  </button>
-                  <button onClick={loadDnsConfig} style={btnSecondary} onMouseDown={pressDown} onMouseUp={pressUp}><IconRefresh /> Refresh</button>
-                </div>
-
+                  {" "}
+                  <button
+                    onClick={checkDnsStatus}
+                    disabled={dnsStatusLoading}
+                    style={btnPrimary}
+                    onMouseDown={pressDown}
+                    onMouseUp={pressUp}
+                  >
+                    {" "}
+                    {dnsStatusLoading ? <IconRefresh spin /> : null}{" "}
+                    {dnsStatusLoading ? "Checking..." : "DNS Status"}{" "}
+                  </button>{" "}
+                  <button
+                    onClick={loadDnsConfig}
+                    style={btnSecondary}
+                    onMouseDown={pressDown}
+                    onMouseUp={pressUp}
+                  >
+                    <IconRefresh /> Refresh
+                  </button>{" "}
+                </div>{" "}
                 {dnsStatusOutput && (
-                  <pre style={{ marginTop: 8, fontSize: 10, fontFamily: MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 120, overflowY: "auto", ...innerPanel, padding: "8px 10px" }}>
-                    {dnsStatusOutput}
+                  <pre
+                    style={{
+                      marginTop: 8,
+                      fontSize: 10,
+                      fontFamily: MONO,
+                      color: "var(--text-muted)",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      maxHeight: 120,
+                      overflowY: "auto",
+                      ...innerPanel,
+                      padding: "8px 10px",
+                    }}
+                  >
+                    {" "}
+                    {dnsStatusOutput}{" "}
                   </pre>
-                )}
+                )}{" "}
               </div>
-            )}
-          </div>
-        </Section>
-
-        {/* ───────── OPENCLAW MODEL ───────── */}
+            )}{" "}
+          </div>{" "}
+        </Section>{" "}
+        {/* ───────── OPENCLAW MODEL ───────── */}{" "}
         <Section title="OPENCLAW MODEL">
-          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+          {" "}
+          <div
+            style={glowCard("var(--accent)")}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
             <div style={rowStyle}>
+              {" "}
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={dot(openclawClient.getModel() !== "default" ? "var(--accent)" : "var(--text-muted)")} />
+                {" "}
+                <span
+                  style={dot(
+                    openclawClient.getModel() !== "default"
+                      ? "var(--accent)"
+                      : "var(--text-muted)",
+                  )}
+                />{" "}
                 <div>
-                  <span style={{ ...LABEL, display: "block" }}>Active Model</span>
-                  <span style={{ fontSize: 12, color: "var(--text)", fontFamily: MONO, fontWeight: 500 }}>
-                    {openclawClient.getModelDisplayName(openclawClient.getModel())}
-                  </span>
-                </div>
-              </div>
-              <button onClick={() => setView("models")} style={{ ...btnPrimary, padding: "5px 14px" }}>
-                Change Model
-              </button>
-            </div>
-
+                  {" "}
+                  <span style={{ ...LABEL, display: "block" }}>
+                    Active Model
+                  </span>{" "}
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text)",
+                      fontFamily: MONO,
+                      fontWeight: 500,
+                    }}
+                  >
+                    {" "}
+                    {openclawClient.getModelDisplayName(
+                      openclawClient.getModel(),
+                    )}{" "}
+                  </span>{" "}
+                </div>{" "}
+              </div>{" "}
+              <button
+                onClick={() => setView("models")}
+                style={{ ...btnPrimary, padding: "5px 14px" }}
+              >
+                {" "}
+                Change Model{" "}
+              </button>{" "}
+            </div>{" "}
             <div style={rowStyle}>
+              {" "}
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {checking ? <span style={{ animation: "_spin .8s linear infinite", display: "inline-flex" }}><IconRefresh /></span> : <span style={dot(isConnected ? "var(--success)" : "var(--error)")} />}
-                <span style={{ fontSize: 11, color: isConnected ? "var(--success)" : "var(--error)" }}>
-                  {checking ? "Checking..." : isConnected ? "OpenClaw gateway connected" : "Gateway offline"}
-                </span>
-              </div>
-              <button onClick={handleRefreshGateway} style={{ ...btnPrimary, padding: "4px 10px" }}>
-                <IconRefresh spin={checking} /> Test
-              </button>
-            </div>
-
+                {" "}
+                {checking ? (
+                  <span
+                    style={{
+                      animation: "_spin .8s linear infinite",
+                      display: "inline-flex",
+                    }}
+                  >
+                    <IconRefresh />
+                  </span>
+                ) : (
+                  <span
+                    style={dot(isConnected ? "var(--success)" : "var(--error)")}
+                  />
+                )}{" "}
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: isConnected ? "var(--success)" : "var(--error)",
+                  }}
+                >
+                  {" "}
+                  {checking
+                    ? "Checking..."
+                    : isConnected
+                      ? "OpenClaw gateway connected"
+                      : "Gateway offline"}{" "}
+                </span>{" "}
+              </div>{" "}
+              <button
+                onClick={handleRefreshGateway}
+                style={{ ...btnPrimary, padding: "4px 10px" }}
+              >
+                {" "}
+                <IconRefresh spin={checking} /> Test{" "}
+              </button>{" "}
+            </div>{" "}
             <div style={{ ...rowStyle, borderBottom: "none" }}>
-              <span style={LABEL}>Context Window</span>
-              <input type="text" value={contextWindow} onChange={(e) => setContextWindow(e.target.value)} onBlur={persistLocalAIModelSettings} style={{ ...inputStyle, width: 80, textAlign: "right" }} />
-            </div>
-          </div>
-        </Section>
-
-        {/* ───────── API KEYS ───────── */}
+              {" "}
+              <span style={LABEL}>Context Window</span>{" "}
+              <input
+                type="text"
+                value={contextWindow}
+                onChange={(e) => setContextWindow(e.target.value)}
+                onBlur={persistLocalAIModelSettings}
+                style={{ ...inputStyle, width: 80, textAlign: "right" }}
+              />{" "}
+            </div>{" "}
+          </div>{" "}
+        </Section>{" "}
+        {/* ───────── API KEYS ───────── */}{" "}
         <Section title="API KEYS">
-          <ApiKeysSection />
-        </Section>
-
-        {/* ───────── VOICE ───────── */}
+          {" "}
+          <ApiKeysSection />{" "}
+        </Section>{" "}
+        {/* ───────── VOICE ───────── */}{" "}
         <Section title="VOICE">
-          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+          {" "}
+          <div
+            style={glowCard("var(--accent)")}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
             <VoiceProviderRow
               label="Speech to Text"
               providers={providerStatuses?.stt ?? []}
               preferredId={preferredStt}
               onSelect={setSttProvider}
-            />
+            />{" "}
             <VoiceProviderRow
               label="Text to Speech"
               providers={providerStatuses?.tts ?? []}
               preferredId={preferredTts}
               onSelect={setTtsProvider}
-            />
-            <div style={{ padding: "8px 14px 10px", display: "flex", gap: 8, borderTop: "1px solid var(--border)" }}>
-              <button onClick={handleRefreshVoice} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}><IconRefresh spin={checkingVoice} /> Test Connections</button>
-            </div>
-          </div>
-        </Section>
-
-        {/* ───────── AI CONFIGURATION ───────── */}
+            />{" "}
+            <div
+              style={{
+                padding: "8px 14px 10px",
+                display: "flex",
+                gap: 8,
+                borderTop: "1px solid var(--border)",
+              }}
+            >
+              {" "}
+              <button
+                onClick={handleRefreshVoice}
+                style={btnPrimary}
+                onMouseDown={pressDown}
+                onMouseUp={pressUp}
+              >
+                <IconRefresh spin={checkingVoice} /> Test Connections
+              </button>{" "}
+            </div>{" "}
+          </div>{" "}
+        </Section>{" "}
+        {/* ───────── AI CONFIGURATION ───────── */}{" "}
         <Section title="AI CONFIGURATION">
-          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+          {" "}
+          <div
+            style={glowCard("var(--accent)")}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
             <div style={rowStyle}>
-              <span style={LABEL}>Temperature</span>
+              {" "}
+              <span style={LABEL}>Temperature</span>{" "}
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <input type="range" min="0" max="2" step="0.05" value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))} onMouseUp={persistLocalAIModelSettings} style={{ width: 100, height: 4, accentColor: "var(--accent)", cursor: "pointer" }} />
-                <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11, minWidth: 28, textAlign: "right" }}>{temperature.toFixed(2)}</span>
-              </div>
-            </div>
+                {" "}
+                <input
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.05"
+                  value={temperature}
+                  onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                  onMouseUp={persistLocalAIModelSettings}
+                  style={{
+                    width: 100,
+                    height: 4,
+                    accentColor: "var(--accent)",
+                    cursor: "pointer",
+                  }}
+                />{" "}
+                <span
+                  style={{
+                    ...VALUE,
+                    fontFamily: MONO,
+                    fontSize: 11,
+                    minWidth: 28,
+                    textAlign: "right",
+                  }}
+                >
+                  {temperature.toFixed(2)}
+                </span>{" "}
+              </div>{" "}
+            </div>{" "}
             <div style={rowStyle}>
-              <span style={LABEL}>Max Tokens</span>
-              <input type="text" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} onBlur={persistLocalAIModelSettings} style={{ ...inputStyle, width: 80, textAlign: "right" }} />
-            </div>
+              {" "}
+              <span style={LABEL}>Max Tokens</span>{" "}
+              <input
+                type="text"
+                value={maxTokens}
+                onChange={(e) => setMaxTokens(e.target.value)}
+                onBlur={persistLocalAIModelSettings}
+                style={{ ...inputStyle, width: 80, textAlign: "right" }}
+              />{" "}
+            </div>{" "}
             <div style={{ padding: "10px 14px", borderBottom: "none" }}>
-              <span style={{ ...LABEL, display: "block", marginBottom: 4 }}>System Prompt</span>
-              <p style={{ fontSize: 10, color: "var(--text-muted)", margin: "0 0 8px", lineHeight: 1.45 }}>
-                Synced with OpenClaw as <code style={{ fontFamily: MONO, fontSize: 9 }}>agents.defaults.systemPrompt</code> in{" "}
-                <code style={{ fontFamily: MONO, fontSize: 9 }}>~/.openclaw/openclaw.json</code> (merged into the gateway-built system prompt). If that field is empty, Crystal shows{" "}
-                <code style={{ fontFamily: MONO, fontSize: 9 }}>agents.list</code> entry <code style={{ fontFamily: MONO, fontSize: 9 }}>id: &quot;main&quot;</code> when present.
-              </p>
-              <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} onBlur={() => { persistLocalAIModelSettings(); void flushSystemPromptToOpenClaw(); }} spellCheck={false} rows={5} style={{ width: "100%", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 10px", color: "var(--text-secondary)", fontSize: 11, lineHeight: 1.6, resize: "vertical", outline: "none", fontFamily: MONO, boxSizing: "border-box" }} />
+              {" "}
+              <span style={{ ...LABEL, display: "block", marginBottom: 4 }}>
+                System Prompt
+              </span>{" "}
+              <p
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  margin: "0 0 8px",
+                  lineHeight: 1.45,
+                }}
+              >
+                {" "}
+                Synced with OpenClaw as{" "}
+                <code style={{ fontFamily: MONO, fontSize: 9 }}>
+                  agents.defaults.systemPrompt
+                </code>{" "}
+                in{" "}
+                <code style={{ fontFamily: MONO, fontSize: 9 }}>
+                  ~/.openclaw/openclaw.json
+                </code>{" "}
+                (merged into the gateway-built system prompt). If that field is
+                empty, Crystal shows{" "}
+                <code style={{ fontFamily: MONO, fontSize: 9 }}>
+                  agents.list
+                </code>{" "}
+                entry{" "}
+                <code style={{ fontFamily: MONO, fontSize: 9 }}>
+                  id: &quot;main&quot;
+                </code>{" "}
+                when present.{" "}
+              </p>{" "}
+              <textarea
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                onBlur={() => {
+                  persistLocalAIModelSettings();
+                  void flushSystemPromptToOpenClaw();
+                }}
+                spellCheck={false}
+                rows={5}
+                style={{
+                  width: "100%",
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  padding: "8px 10px",
+                  color: "var(--text-secondary)",
+                  fontSize: 11,
+                  lineHeight: 1.6,
+                  resize: "vertical",
+                  outline: "none",
+                  fontFamily: MONO,
+                  boxSizing: "border-box",
+                }}
+              />{" "}
               {systemPromptSaveError && (
-                <p style={{ fontSize: 10, color: "var(--error)", margin: "6px 0 0" }}>
-                  {systemPromptSaveError} — kept a local copy; fix file permissions or path and try again.
+                <p
+                  style={{
+                    fontSize: 10,
+                    color: "var(--error)",
+                    margin: "6px 0 0",
+                  }}
+                >
+                  {" "}
+                  {systemPromptSaveError} — kept a local copy; fix file
+                  permissions or path and try again.{" "}
                 </p>
-              )}
-            </div>
-          </div>
-        </Section>
-
-        {/* ───────── SECURITY ───────── */}
+              )}{" "}
+            </div>{" "}
+          </div>{" "}
+        </Section>{" "}
+        {/* ───────── SECURITY ───────── */}{" "}
         <Section title="SECURITY">
-          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-            <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          {" "}
+          <div
+            style={glowCard("var(--accent)")}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
+            <div
+              style={{
+                padding: "10px 14px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              {" "}
               <div>
-                <span style={{ ...LABEL, display: "block" }}>Security Audit</span>
-                <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Run OpenClaw security checks</span>
-              </div>
-              <button onClick={runAudit} disabled={auditing} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>
-                {auditing ? <IconRefresh spin /> : null} {auditing ? "Auditing..." : "Run Audit"}
-              </button>
-            </div>
+                {" "}
+                <span style={{ ...LABEL, display: "block" }}>
+                  Security Audit
+                </span>{" "}
+                <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                  Run OpenClaw security checks
+                </span>{" "}
+              </div>{" "}
+              <button
+                onClick={runAudit}
+                disabled={auditing}
+                style={btnPrimary}
+                onMouseDown={pressDown}
+                onMouseUp={pressUp}
+              >
+                {" "}
+                {auditing ? <IconRefresh spin /> : null}{" "}
+                {auditing ? "Auditing..." : "Run Audit"}{" "}
+              </button>{" "}
+            </div>{" "}
             {auditResult && (
               <div style={{ padding: "0 14px 10px" }}>
-                <div style={{ display: "flex", gap: 12, padding: "8px 12px", ...innerPanel }}>
-                  <AuditBadge label="PASS" count={auditResult.pass} color="var(--success)" />
-                  <AuditBadge label="WARN" count={auditResult.warn} color="var(--warning)" />
-                  <AuditBadge label="FAIL" count={auditResult.fail} color="var(--error)" />
-                </div>
-                {auditResult.details && <pre style={{ marginTop: 6, fontSize: 10, fontFamily: MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 120, overflowY: "auto" }}>{auditResult.details}</pre>}
+                {" "}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 12,
+                    padding: "8px 12px",
+                    ...innerPanel,
+                  }}
+                >
+                  {" "}
+                  <AuditBadge
+                    label="PASS"
+                    count={auditResult.pass}
+                    color="var(--success)"
+                  />{" "}
+                  <AuditBadge
+                    label="WARN"
+                    count={auditResult.warn}
+                    color="var(--warning)"
+                  />{" "}
+                  <AuditBadge
+                    label="FAIL"
+                    count={auditResult.fail}
+                    color="var(--error)"
+                  />{" "}
+                </div>{" "}
+                {auditResult.details && (
+                  <pre
+                    style={{
+                      marginTop: 6,
+                      fontSize: 10,
+                      fontFamily: MONO,
+                      color: "var(--text-muted)",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      maxHeight: 120,
+                      overflowY: "auto",
+                    }}
+                  >
+                    {auditResult.details}
+                  </pre>
+                )}{" "}
               </div>
-            )}
+            )}{" "}
             <div style={rowStyle}>
-              <span style={LABEL}>Tool Permissions</span>
-              <span style={{ fontSize: 11, color: "var(--success)" }}>All Enabled</span>
-            </div>
+              {" "}
+              <span style={LABEL}>Tool Permissions</span>{" "}
+              <span style={{ fontSize: 11, color: "var(--success)" }}>
+                All Enabled
+              </span>{" "}
+            </div>{" "}
             <div style={{ ...rowStyle, borderBottom: "none" }}>
-              <span style={LABEL}>Gateway Auth</span>
-              <span style={{ fontSize: 11, color: authToken ? "var(--success)" : "var(--text-muted)" }}>{authToken ? "Enabled" : "Disabled"}</span>
-            </div>
-          </div>
-        </Section>
-
-        {/* ───────── UPDATES ───────── */}
+              {" "}
+              <span style={LABEL}>Gateway Auth</span>{" "}
+              <span
+                style={{
+                  fontSize: 11,
+                  color: authToken ? "var(--success)" : "var(--text-muted)",
+                }}
+              >
+                {authToken ? "Enabled" : "Disabled"}
+              </span>{" "}
+            </div>{" "}
+          </div>{" "}
+        </Section>{" "}
+        {/* ───────── UPDATES ───────── */}{" "}
         <Section title="UPDATES">
-          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+          {" "}
+          <div
+            style={glowCard("var(--accent)")}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
             <div style={rowStyle}>
-              <span style={LABEL}>Crystal Version</span>
-              <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>v{appVersion}</span>
-            </div>
+              {" "}
+              <span style={LABEL}>Crystal Version</span>{" "}
+              <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>
+                v{appVersion}
+              </span>{" "}
+            </div>{" "}
             <div style={rowStyle}>
-              <span style={LABEL}>Update Channel</span>
+              {" "}
+              <span style={LABEL}>Update Channel</span>{" "}
               <div style={{ display: "flex", gap: 4 }}>
+                {" "}
                 {(["stable", "beta", "dev"] as const).map((ch) => (
-                  <button key={ch} onClick={() => setUpdateChannel(ch)} style={{
-                    padding: "3px 10px", borderRadius: 5, fontSize: 10, fontWeight: 500, cursor: "pointer", textTransform: "capitalize",
-                    border: updateChannel === ch ? "1px solid var(--accent)" : "1px solid var(--border)",
-                    background: updateChannel === ch ? "var(--accent-bg)" : "var(--bg-elevated)",
-                    color: updateChannel === ch ? "var(--accent)" : "var(--text-muted)", transition: `all 0.15s ${EASE}`,
-                  }}>{ch}</button>
-                ))}
-              </div>
-            </div>
-            <div style={{ padding: "8px 14px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid var(--border)" }}>
-              {updateStatus ? <span style={{ fontSize: 11, color: updateStatus.includes("available") ? "var(--warning)" : "var(--success)" }}>{updateStatus}</span> : <span />}
-              <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={checkForUpdates} disabled={checkingUpdates} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>
-                  {checkingUpdates ? <IconRefresh spin /> : null} {checkingUpdates ? "Checking..." : "Check for Updates"}
-                </button>
-                {updateStatus?.includes("available") && (
-                  <button onClick={runUpdate} disabled={updating} style={{ ...btnPrimary, background: "var(--accent)", color: "#fff" }}>
-                    {updating ? <IconRefresh spin /> : null} {updating ? "Updating..." : "Update Now"}
+                  <button
+                    key={ch}
+                    onClick={() => setUpdateChannel(ch)}
+                    style={{
+                      padding: "3px 10px",
+                      borderRadius: 5,
+                      fontSize: 10,
+                      fontWeight: 500,
+                      cursor: "pointer",
+                      textTransform: "capitalize",
+                      border:
+                        updateChannel === ch
+                          ? "1px solid var(--accent)"
+                          : "1px solid var(--border)",
+                      background:
+                        updateChannel === ch
+                          ? "var(--accent-bg)"
+                          : "var(--bg-elevated)",
+                      color:
+                        updateChannel === ch
+                          ? "var(--accent)"
+                          : "var(--text-muted)",
+                      transition: `all 0.15s ${EASE}`,
+                    }}
+                  >
+                    {ch}
                   </button>
-                )}
-              </div>
-            </div>
+                ))}{" "}
+              </div>{" "}
+            </div>{" "}
+            <div
+              style={{
+                padding: "8px 14px 10px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                borderTop: "1px solid var(--border)",
+              }}
+            >
+              {" "}
+              {updateStatus ? (
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: updateStatus.includes("available")
+                      ? "var(--warning)"
+                      : "var(--success)",
+                  }}
+                >
+                  {updateStatus}
+                </span>
+              ) : (
+                <span />
+              )}{" "}
+              <div style={{ display: "flex", gap: 6 }}>
+                {" "}
+                <button
+                  onClick={checkForUpdates}
+                  disabled={checkingUpdates}
+                  style={btnPrimary}
+                  onMouseDown={pressDown}
+                  onMouseUp={pressUp}
+                >
+                  {" "}
+                  {checkingUpdates ? <IconRefresh spin /> : null}{" "}
+                  {checkingUpdates ? "Checking..." : "Check for Updates"}{" "}
+                </button>{" "}
+                {updateStatus?.includes("available") && (
+                  <button
+                    onClick={runUpdate}
+                    disabled={updating}
+                    style={{
+                      ...btnPrimary,
+                      background: "var(--accent)",
+                      color: "#fff",
+                    }}
+                  >
+                    {" "}
+                    {updating ? <IconRefresh spin /> : null}{" "}
+                    {updating ? "Updating..." : "Update Now"}{" "}
+                  </button>
+                )}{" "}
+              </div>{" "}
+            </div>{" "}
             {(updateOutput || updating) && (
-              <div style={{ padding: "8px 14px 10px", borderTop: "1px solid var(--border)" }}>
-                <div style={{
-                  padding: "8px 12px", borderRadius: 6,
-                  background: updateSuccess === true ? "rgba(74,222,128,0.08)" : updateSuccess === false ? "rgba(248,113,113,0.08)" : "var(--bg-elevated)",
-                  border: `1px solid ${updateSuccess === true ? "rgba(74,222,128,0.2)" : updateSuccess === false ? "rgba(248,113,113,0.2)" : "var(--border)"}`,
-                }}>
+              <div
+                style={{
+                  padding: "8px 14px 10px",
+                  borderTop: "1px solid var(--border)",
+                }}
+              >
+                {" "}
+                <div
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 6,
+                    background:
+                      updateSuccess === true
+                        ? "rgba(74,222,128,0.08)"
+                        : updateSuccess === false
+                          ? "rgba(248,113,113,0.08)"
+                          : "var(--bg-elevated)",
+                    border: `1px solid ${updateSuccess === true ? "rgba(74,222,128,0.2)" : updateSuccess === false ? "rgba(248,113,113,0.2)" : "var(--border)"}`,
+                  }}
+                >
+                  {" "}
                   {updating ? (
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ display: "inline-flex", animation: "_spin .8s linear infinite" }}><IconRefresh /></span>
-                      <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>Updating OpenClaw...</span>
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 8 }}
+                    >
+                      {" "}
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          animation: "_spin .8s linear infinite",
+                        }}
+                      >
+                        <IconRefresh />
+                      </span>{" "}
+                      <span
+                        style={{ fontSize: 11, color: "var(--text-secondary)" }}
+                      >
+                        Updating OpenClaw...
+                      </span>{" "}
                     </div>
                   ) : (
-                    <pre style={{ margin: 0, fontSize: 11, color: updateSuccess ? "var(--success)" : "var(--error)", whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: MONO }}>
-                      {updateOutput}
+                    <pre
+                      style={{
+                        margin: 0,
+                        fontSize: 11,
+                        color: updateSuccess
+                          ? "var(--success)"
+                          : "var(--error)",
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                        fontFamily: MONO,
+                      }}
+                    >
+                      {" "}
+                      {updateOutput}{" "}
                     </pre>
-                  )}
-                </div>
+                  )}{" "}
+                </div>{" "}
                 {updateSuccess === true && (
-                  <button onClick={restartGatewayAfterUpdate} disabled={restarting} style={{ ...btnPrimary, marginTop: 8 }}>
-                    {restarting ? <IconRefresh spin /> : null} {restarting ? "Restarting..." : "Restart Gateway"}
+                  <button
+                    onClick={restartGatewayAfterUpdate}
+                    disabled={restarting}
+                    style={{ ...btnPrimary, marginTop: 8 }}
+                  >
+                    {" "}
+                    {restarting ? <IconRefresh spin /> : null}{" "}
+                    {restarting ? "Restarting..." : "Restart Gateway"}{" "}
                   </button>
-                )}
+                )}{" "}
               </div>
-            )}
-          </div>
-        </Section>
-
-        {/* ───────── OPENCLAW CONFIG ───────── */}
+            )}{" "}
+          </div>{" "}
+        </Section>{" "}
+        {/* ───────── OPENCLAW CONFIG ───────── */}{" "}
         <Section title="OPENCLAW CONFIG">
-          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-            <div style={{ ...rowStyle, borderBottom: "1px solid var(--border)" }}>
+          {" "}
+          <div
+            style={glowCard("var(--accent)")}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
+            <div
+              style={{ ...rowStyle, borderBottom: "1px solid var(--border)" }}
+            >
+              {" "}
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" /></svg>
-                <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO }}>{configPath}</span>
-              </div>
-              <button onClick={() => navigator.clipboard.writeText(configPath)} style={{ ...btnSecondary, padding: 4 }}><IconCopy /></button>
-            </div>
+                {" "}
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--text-muted)"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>{" "}
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: "var(--text-muted)",
+                    fontFamily: MONO,
+                  }}
+                >
+                  {configPath}
+                </span>{" "}
+              </div>{" "}
+              <button
+                onClick={() => navigator.clipboard.writeText(configPath)}
+                style={{ ...btnSecondary, padding: 4 }}
+              >
+                <IconCopy />
+              </button>{" "}
+            </div>{" "}
             <div style={{ padding: "10px 14px" }}>
-              <textarea value={configText} onChange={(e) => setConfigText(e.target.value)} spellCheck={false} style={{ width: "100%", minHeight: 160, maxHeight: 300, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 12px", color: "var(--text-secondary)", fontSize: 11, lineHeight: 1.7, resize: "vertical", outline: "none", fontFamily: MONO, boxSizing: "border-box", tabSize: 2 }} />
-            </div>
-            <div style={{ padding: "0 14px 10px", display: "flex", gap: 8, alignItems: "center" }}>
-              <button onClick={loadConfig} disabled={loadingConfig} style={btnSecondary} onMouseDown={pressDown} onMouseUp={pressUp}><IconRefresh spin={loadingConfig} /> Reload</button>
-              <button onClick={saveConfig} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>{configSaved ? <IconCheck /> : null} {configSaved ? "Saved" : "Save"}</button>
-            </div>
-          </div>
-        </Section>
-
-
-        {/* ───────── CONFIG CLI ───────── */}
+              {" "}
+              <textarea
+                value={configText}
+                onChange={(e) => setConfigText(e.target.value)}
+                spellCheck={false}
+                style={{
+                  width: "100%",
+                  minHeight: 160,
+                  maxHeight: 300,
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  padding: "10px 12px",
+                  color: "var(--text-secondary)",
+                  fontSize: 11,
+                  lineHeight: 1.7,
+                  resize: "vertical",
+                  outline: "none",
+                  fontFamily: MONO,
+                  boxSizing: "border-box",
+                  tabSize: 2,
+                }}
+              />{" "}
+            </div>{" "}
+            <div
+              style={{
+                padding: "0 14px 10px",
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+              }}
+            >
+              {" "}
+              <button
+                onClick={loadConfig}
+                disabled={loadingConfig}
+                style={btnSecondary}
+                onMouseDown={pressDown}
+                onMouseUp={pressUp}
+              >
+                <IconRefresh spin={loadingConfig} /> Reload
+              </button>{" "}
+              <button
+                onClick={saveConfig}
+                style={btnPrimary}
+                onMouseDown={pressDown}
+                onMouseUp={pressUp}
+              >
+                {configSaved ? <IconCheck /> : null}{" "}
+                {configSaved ? "Saved" : "Save"}
+              </button>{" "}
+            </div>{" "}
+          </div>{" "}
+        </Section>{" "}
+        {/* ───────── CONFIG CLI ───────── */}{" "}
         <Section title="CONFIG CLI">
-          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+          {" "}
+          <div
+            style={glowCard("var(--accent)")}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
             <div style={{ padding: "10px 14px" }}>
-              <span style={{ ...LABEL, display: "block", marginBottom: 6 }}>Get / Set Configuration</span>
+              {" "}
+              <span style={{ ...LABEL, display: "block", marginBottom: 6 }}>
+                Get / Set Configuration
+              </span>{" "}
               <div style={{ display: "flex", gap: 6 }}>
-                <input type="text" value={configKey} onChange={(e) => setConfigKey(e.target.value)} placeholder="config.key" style={{ ...inputStyle, flex: 1 }} />
-                <button onClick={getConfigValue} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>Get</button>
-              </div>
+                {" "}
+                <input
+                  type="text"
+                  value={configKey}
+                  onChange={(e) => setConfigKey(e.target.value)}
+                  placeholder="config.key"
+                  style={{ ...inputStyle, flex: 1 }}
+                />{" "}
+                <button
+                  onClick={getConfigValue}
+                  style={btnPrimary}
+                  onMouseDown={pressDown}
+                  onMouseUp={pressUp}
+                >
+                  Get
+                </button>{" "}
+              </div>{" "}
               <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                <input type="text" value={configValue} onChange={(e) => setConfigValue(e.target.value)} placeholder="new value" style={{ ...inputStyle, flex: 1 }} />
-                <button onClick={setConfigValue_} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>Set</button>
-                <button onClick={unsetConfigValue} style={{ ...btnSecondary, color: "var(--error)" }}>Unset</button>
-              </div>
-            </div>
-            {configOutput && <pre style={{ margin: 0, padding: "8px 14px", fontSize: 10, fontFamily: MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: 80, overflowY: "auto", borderTop: "1px solid var(--border)" }}>{configOutput}</pre>}
-          </div>
-        </Section>
-
-        {/* ───────── OPENCLAW CONFIGURATION ───────── */}
+                {" "}
+                <input
+                  type="text"
+                  value={configValue}
+                  onChange={(e) => setConfigValue(e.target.value)}
+                  placeholder="new value"
+                  style={{ ...inputStyle, flex: 1 }}
+                />{" "}
+                <button
+                  onClick={setConfigValue_}
+                  style={btnPrimary}
+                  onMouseDown={pressDown}
+                  onMouseUp={pressUp}
+                >
+                  Set
+                </button>{" "}
+                <button
+                  onClick={unsetConfigValue}
+                  style={{ ...btnSecondary, color: "var(--error)" }}
+                >
+                  Unset
+                </button>{" "}
+              </div>{" "}
+            </div>{" "}
+            {configOutput && (
+              <pre
+                style={{
+                  margin: 0,
+                  padding: "8px 14px",
+                  fontSize: 10,
+                  fontFamily: MONO,
+                  color: "var(--text-muted)",
+                  whiteSpace: "pre-wrap",
+                  maxHeight: 80,
+                  overflowY: "auto",
+                  borderTop: "1px solid var(--border)",
+                }}
+              >
+                {configOutput}
+              </pre>
+            )}{" "}
+          </div>{" "}
+        </Section>{" "}
+        {/* ───────── OPENCLAW CONFIGURATION ───────── */}{" "}
         <Section title="OPENCLAW CONFIGURATION">
-          {/* Config Validate */}
-          <div style={{ ...glowCard("var(--accent)"), marginBottom: 8 }} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-            <button onClick={() => toggleOcSection("validate")} style={{ ...rowStyle, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
+          {" "}
+          {/* Config Validate */}{" "}
+          <div
+            style={{ ...glowCard("var(--accent)"), marginBottom: 8 }}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
+            <button
+              onClick={() => toggleOcSection("validate")}
+              style={{
+                ...rowStyle,
+                cursor: "pointer",
+                border: "none",
+                width: "100%",
+                background: "transparent",
+                textAlign: "left",
+              }}
+            >
+              {" "}
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d={ocExpanded.validate ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} /></svg>
-                <span style={{ ...LABEL, margin: 0 }}>Config Validate</span>
-              </div>
-              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Check config integrity</span>
-            </button>
+                {" "}
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--text-muted)"
+                  strokeWidth="2"
+                >
+                  <path
+                    d={ocExpanded.validate ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"}
+                  />
+                </svg>{" "}
+                <span style={{ ...LABEL, margin: 0 }}>
+                  Config Validate
+                </span>{" "}
+              </div>{" "}
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                Check config integrity
+              </span>{" "}
+            </button>{" "}
             {ocExpanded.validate && (
               <div style={{ padding: "8px 14px 12px" }}>
-                <button onClick={runConfigValidate} disabled={ocValidating} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>
-                  {ocValidating ? <IconRefresh spin /> : null} {ocValidating ? "Validating..." : "Validate Config"}
-                </button>
+                {" "}
+                <button
+                  onClick={runConfigValidate}
+                  disabled={ocValidating}
+                  style={btnPrimary}
+                  onMouseDown={pressDown}
+                  onMouseUp={pressUp}
+                >
+                  {" "}
+                  {ocValidating ? <IconRefresh spin /> : null}{" "}
+                  {ocValidating ? "Validating..." : "Validate Config"}{" "}
+                </button>{" "}
                 {ocValidateResult && (
-                  <div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 6, background: ocValidateResult.valid ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)", border: `1px solid ${ocValidateResult.valid ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)"}` }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={dot(ocValidateResult.valid ? "var(--success)" : "var(--error)")} />
-                      <span style={{ fontSize: 11, fontWeight: 600, color: ocValidateResult.valid ? "var(--success)" : "var(--error)" }}>
-                        {ocValidateResult.valid ? "Valid" : "Invalid"}
-                      </span>
-                    </div>
-                    {ocValidateResult.errors && ocValidateResult.errors.length > 0 && (
-                      <pre style={{ margin: "6px 0 0", fontSize: 10, fontFamily: MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                        {ocValidateResult.errors.join("\n")}
-                      </pre>
-                    )}
+                  <div
+                    style={{
+                      marginTop: 8,
+                      padding: "8px 12px",
+                      borderRadius: 6,
+                      background: ocValidateResult.valid
+                        ? "rgba(74,222,128,0.08)"
+                        : "rgba(248,113,113,0.08)",
+                      border: `1px solid ${ocValidateResult.valid ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)"}`,
+                    }}
+                  >
+                    {" "}
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 6 }}
+                    >
+                      {" "}
+                      <span
+                        style={dot(
+                          ocValidateResult.valid
+                            ? "var(--success)"
+                            : "var(--error)",
+                        )}
+                      />{" "}
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: ocValidateResult.valid
+                            ? "var(--success)"
+                            : "var(--error)",
+                        }}
+                      >
+                        {" "}
+                        {ocValidateResult.valid ? "Valid" : "Invalid"}{" "}
+                      </span>{" "}
+                    </div>{" "}
+                    {ocValidateResult.errors &&
+                      ocValidateResult.errors.length > 0 && (
+                        <pre
+                          style={{
+                            margin: "6px 0 0",
+                            fontSize: 10,
+                            fontFamily: MONO,
+                            color: "var(--text-muted)",
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-word",
+                          }}
+                        >
+                          {" "}
+                          {ocValidateResult.errors.join("\n")}{" "}
+                        </pre>
+                      )}{" "}
                   </div>
-                )}
+                )}{" "}
               </div>
-            )}
-          </div>
-
-          {/* Memory Config */}
-          <div style={{ ...glowCard("var(--accent)"), marginBottom: 8 }} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-            <button onClick={() => { toggleOcSection("memory"); if (!ocExpanded.memory && !ocMemoryConfig) loadMemoryConfig(); }} style={{ ...rowStyle, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
+            )}{" "}
+          </div>{" "}
+          {/* Memory Config */}{" "}
+          <div
+            style={{ ...glowCard("var(--accent)"), marginBottom: 8 }}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
+            <button
+              onClick={() => {
+                toggleOcSection("memory");
+                if (!ocExpanded.memory && !ocMemoryConfig) loadMemoryConfig();
+              }}
+              style={{
+                ...rowStyle,
+                cursor: "pointer",
+                border: "none",
+                width: "100%",
+                background: "transparent",
+                textAlign: "left",
+              }}
+            >
+              {" "}
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d={ocExpanded.memory ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} /></svg>
-                <span style={{ ...LABEL, margin: 0 }}>Memory Config</span>
-              </div>
-              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Embedding & index settings</span>
-            </button>
+                {" "}
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--text-muted)"
+                  strokeWidth="2"
+                >
+                  <path
+                    d={ocExpanded.memory ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"}
+                  />
+                </svg>{" "}
+                <span style={{ ...LABEL, margin: 0 }}>Memory Config</span>{" "}
+              </div>{" "}
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                Embedding & index settings
+              </span>{" "}
+            </button>{" "}
             {ocExpanded.memory && (
               <div style={{ padding: "0 14px 12px" }}>
+                {" "}
                 {ocMemoryLoading ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 0" }}>
-                    <IconRefresh spin /> <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading...</span>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "8px 0",
+                    }}
+                  >
+                    {" "}
+                    <IconRefresh spin />{" "}
+                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      Loading...
+                    </span>{" "}
                   </div>
                 ) : ocMemoryConfig ? (
                   <>
+                    {" "}
                     <div style={{ ...rowStyle, padding: "8px 0" }}>
-                      <span style={LABEL}>Embedding Provider</span>
-                      <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{String(ocMemoryConfig.embeddingProvider || ocMemoryConfig.provider || "—")}</span>
-                    </div>
+                      {" "}
+                      <span style={LABEL}>Embedding Provider</span>{" "}
+                      <span
+                        style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}
+                      >
+                        {String(
+                          ocMemoryConfig.embeddingProvider ||
+                            ocMemoryConfig.provider ||
+                            "—",
+                        )}
+                      </span>{" "}
+                    </div>{" "}
                     <div style={{ ...rowStyle, padding: "8px 0" }}>
-                      <span style={LABEL}>Index Status</span>
-                      <span style={{ ...VALUE, fontSize: 11, color: ocMemoryConfig.indexed ? "var(--success)" : "var(--text-muted)" }}>
-                        {ocMemoryConfig.indexed ? "Indexed" : (ocMemoryConfig.indexStatus ? String(ocMemoryConfig.indexStatus) : "Unknown")}
-                      </span>
-                    </div>
+                      {" "}
+                      <span style={LABEL}>Index Status</span>{" "}
+                      <span
+                        style={{
+                          ...VALUE,
+                          fontSize: 11,
+                          color: ocMemoryConfig.indexed
+                            ? "var(--success)"
+                            : "var(--text-muted)",
+                        }}
+                      >
+                        {" "}
+                        {ocMemoryConfig.indexed
+                          ? "Indexed"
+                          : ocMemoryConfig.indexStatus
+                            ? String(ocMemoryConfig.indexStatus)
+                            : "Unknown"}{" "}
+                      </span>{" "}
+                    </div>{" "}
                     {ocMemoryConfig.totalEntries !== undefined && (
                       <div style={{ ...rowStyle, padding: "8px 0" }}>
-                        <span style={LABEL}>Total Entries</span>
-                        <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{String(ocMemoryConfig.totalEntries)}</span>
+                        {" "}
+                        <span style={LABEL}>Total Entries</span>{" "}
+                        <span
+                          style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}
+                        >
+                          {String(ocMemoryConfig.totalEntries)}
+                        </span>{" "}
                       </div>
-                    )}
+                    )}{" "}
                     <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                      <button onClick={runReindex} disabled={ocReindexing} style={btnPrimary} onMouseDown={pressDown} onMouseUp={pressUp}>
-                        {ocReindexing ? <IconRefresh spin /> : null} {ocReindexing ? "Reindexing..." : "Reindex"}
-                      </button>
-                      <button onClick={loadMemoryConfig} style={btnSecondary} onMouseDown={pressDown} onMouseUp={pressUp}><IconRefresh /> Refresh</button>
-                    </div>
+                      {" "}
+                      <button
+                        onClick={runReindex}
+                        disabled={ocReindexing}
+                        style={btnPrimary}
+                        onMouseDown={pressDown}
+                        onMouseUp={pressUp}
+                      >
+                        {" "}
+                        {ocReindexing ? <IconRefresh spin /> : null}{" "}
+                        {ocReindexing ? "Reindexing..." : "Reindex"}{" "}
+                      </button>{" "}
+                      <button
+                        onClick={loadMemoryConfig}
+                        style={btnSecondary}
+                        onMouseDown={pressDown}
+                        onMouseUp={pressUp}
+                      >
+                        <IconRefresh /> Refresh
+                      </button>{" "}
+                    </div>{" "}
                     {ocReindexResult && (
-                      <pre style={{ marginTop: 6, fontSize: 10, fontFamily: MONO, color: "var(--text-muted)", whiteSpace: "pre-wrap" }}>{ocReindexResult}</pre>
-                    )}
+                      <pre
+                        style={{
+                          marginTop: 6,
+                          fontSize: 10,
+                          fontFamily: MONO,
+                          color: "var(--text-muted)",
+                          whiteSpace: "pre-wrap",
+                        }}
+                      >
+                        {ocReindexResult}
+                      </pre>
+                    )}{" "}
                   </>
                 ) : (
-                  <button onClick={loadMemoryConfig} style={{ ...btnSecondary, marginTop: 4 }}>Load Memory Config</button>
-                )}
+                  <button
+                    onClick={loadMemoryConfig}
+                    style={{ ...btnSecondary, marginTop: 4 }}
+                  >
+                    Load Memory Config
+                  </button>
+                )}{" "}
               </div>
-            )}
-          </div>
-
-          {/* Session Config */}
-          <div style={{ ...glowCard("var(--accent)"), marginBottom: 8 }} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-            <button onClick={() => { toggleOcSection("session"); if (!ocExpanded.session && !ocSessionConfig) loadSessionConfig(); }} style={{ ...rowStyle, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
+            )}{" "}
+          </div>{" "}
+          {/* Session Config */}{" "}
+          <div
+            style={{ ...glowCard("var(--accent)"), marginBottom: 8 }}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
+            <button
+              onClick={() => {
+                toggleOcSection("session");
+                if (!ocExpanded.session && !ocSessionConfig)
+                  loadSessionConfig();
+              }}
+              style={{
+                ...rowStyle,
+                cursor: "pointer",
+                border: "none",
+                width: "100%",
+                background: "transparent",
+                textAlign: "left",
+              }}
+            >
+              {" "}
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d={ocExpanded.session ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} /></svg>
-                <span style={{ ...LABEL, margin: 0 }}>Session Config</span>
-              </div>
-              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>DM scope, reset & maintenance</span>
-            </button>
+                {" "}
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--text-muted)"
+                  strokeWidth="2"
+                >
+                  <path
+                    d={ocExpanded.session ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"}
+                  />
+                </svg>{" "}
+                <span style={{ ...LABEL, margin: 0 }}>Session Config</span>{" "}
+              </div>{" "}
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                DM scope, reset & maintenance
+              </span>{" "}
+            </button>{" "}
             {ocExpanded.session && (
               <div style={{ padding: "0 14px 12px" }}>
+                {" "}
                 {ocSessionLoading ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 0" }}>
-                    <IconRefresh spin /> <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading...</span>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "8px 0",
+                    }}
+                  >
+                    {" "}
+                    <IconRefresh spin />{" "}
+                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      Loading...
+                    </span>{" "}
                   </div>
                 ) : ocSessionConfig ? (
                   <>
+                    {" "}
                     <div style={{ ...rowStyle, padding: "8px 0" }}>
-                      <span style={LABEL}>DM Scope</span>
-                      <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{String(ocSessionConfig.dmScope ?? "—")}</span>
-                    </div>
+                      {" "}
+                      <span style={LABEL}>DM Scope</span>{" "}
+                      <span
+                        style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}
+                      >
+                        {String(ocSessionConfig.dmScope ?? "—")}
+                      </span>{" "}
+                    </div>{" "}
                     <div style={{ ...rowStyle, padding: "8px 0" }}>
-                      <span style={LABEL}>Reset Mode</span>
-                      <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{String(ocSessionConfig.resetMode ?? "—")}</span>
-                    </div>
+                      {" "}
+                      <span style={LABEL}>Reset Mode</span>{" "}
+                      <span
+                        style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}
+                      >
+                        {String(ocSessionConfig.resetMode ?? "—")}
+                      </span>{" "}
+                    </div>{" "}
                     <div style={{ ...rowStyle, padding: "8px 0" }}>
-                      <span style={LABEL}>Maintenance Mode</span>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{
-                          fontSize: 11, fontWeight: 600, fontFamily: MONO,
-                          color: String(ocSessionConfig.maintenanceMode || "off") === "off" ? "var(--success)" : String(ocSessionConfig.maintenanceMode) === "warn" ? "var(--warning)" : "var(--error)",
-                        }}>
-                          {String(ocSessionConfig.maintenanceMode || "off")}
-                        </span>
-                        <button onClick={toggleMaintenanceMode} disabled={ocMaintenanceToggling} style={{ ...btnSecondary, padding: "2px 8px", fontSize: 9 }}>
-                          {ocMaintenanceToggling ? "..." : "Toggle"}
-                        </button>
-                      </div>
-                    </div>
-                    <button onClick={loadSessionConfig} style={{ ...btnSecondary, marginTop: 4 }}><IconRefresh /> Refresh</button>
+                      {" "}
+                      <span style={LABEL}>Maintenance Mode</span>{" "}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        {" "}
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 600,
+                            fontFamily: MONO,
+                            color:
+                              String(
+                                ocSessionConfig.maintenanceMode || "off",
+                              ) === "off"
+                                ? "var(--success)"
+                                : String(ocSessionConfig.maintenanceMode) ===
+                                    "warn"
+                                  ? "var(--warning)"
+                                  : "var(--error)",
+                          }}
+                        >
+                          {" "}
+                          {String(
+                            ocSessionConfig.maintenanceMode || "off",
+                          )}{" "}
+                        </span>{" "}
+                        <button
+                          onClick={toggleMaintenanceMode}
+                          disabled={ocMaintenanceToggling}
+                          style={{
+                            ...btnSecondary,
+                            padding: "2px 8px",
+                            fontSize: 9,
+                          }}
+                        >
+                          {" "}
+                          {ocMaintenanceToggling ? "..." : "Toggle"}{" "}
+                        </button>{" "}
+                      </div>{" "}
+                    </div>{" "}
+                    <button
+                      onClick={loadSessionConfig}
+                      style={{ ...btnSecondary, marginTop: 4 }}
+                    >
+                      <IconRefresh /> Refresh
+                    </button>{" "}
                   </>
                 ) : (
-                  <button onClick={loadSessionConfig} style={{ ...btnSecondary, marginTop: 4 }}>Load Session Config</button>
-                )}
+                  <button
+                    onClick={loadSessionConfig}
+                    style={{ ...btnSecondary, marginTop: 4 }}
+                  >
+                    Load Session Config
+                  </button>
+                )}{" "}
               </div>
-            )}
-          </div>
-
-          {/* Heartbeat Config */}
-          <div style={{ ...glowCard("var(--accent)"), marginBottom: 8 }} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-            <button onClick={() => { toggleOcSection("heartbeat"); if (!ocExpanded.heartbeat && !ocHeartbeatConfig) loadHeartbeatConfig(); }} style={{ ...rowStyle, cursor: "pointer", border: "none", width: "100%", background: "transparent", textAlign: "left" }}>
+            )}{" "}
+          </div>{" "}
+          {/* Heartbeat Config */}{" "}
+          <div
+            style={{ ...glowCard("var(--accent)"), marginBottom: 8 }}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
+            <button
+              onClick={() => {
+                toggleOcSection("heartbeat");
+                if (!ocExpanded.heartbeat && !ocHeartbeatConfig)
+                  loadHeartbeatConfig();
+              }}
+              style={{
+                ...rowStyle,
+                cursor: "pointer",
+                border: "none",
+                width: "100%",
+                background: "transparent",
+                textAlign: "left",
+              }}
+            >
+              {" "}
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d={ocExpanded.heartbeat ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} /></svg>
-                <span style={{ ...LABEL, margin: 0 }}>Heartbeat Config</span>
-              </div>
-              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Read-only summary</span>
-            </button>
+                {" "}
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--text-muted)"
+                  strokeWidth="2"
+                >
+                  <path
+                    d={ocExpanded.heartbeat ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"}
+                  />
+                </svg>{" "}
+                <span style={{ ...LABEL, margin: 0 }}>
+                  Heartbeat Config
+                </span>{" "}
+              </div>{" "}
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                Read-only summary
+              </span>{" "}
+            </button>{" "}
             {ocExpanded.heartbeat && (
               <div style={{ padding: "0 14px 12px" }}>
+                {" "}
                 {ocHeartbeatLoading ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 0" }}>
-                    <IconRefresh spin /> <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading...</span>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "8px 0",
+                    }}
+                  >
+                    {" "}
+                    <IconRefresh spin />{" "}
+                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      Loading...
+                    </span>{" "}
                   </div>
                 ) : ocHeartbeatConfig ? (
                   <>
+                    {" "}
                     <div style={{ ...rowStyle, padding: "8px 0" }}>
-                      <span style={LABEL}>Interval</span>
-                      <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{String(ocHeartbeatConfig.interval ?? ocHeartbeatConfig.intervalMs ?? "—")}</span>
-                    </div>
+                      {" "}
+                      <span style={LABEL}>Interval</span>{" "}
+                      <span
+                        style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}
+                      >
+                        {String(
+                          ocHeartbeatConfig.interval ??
+                            ocHeartbeatConfig.intervalMs ??
+                            "—",
+                        )}
+                      </span>{" "}
+                    </div>{" "}
                     <div style={{ ...rowStyle, padding: "8px 0" }}>
-                      <span style={LABEL}>Target</span>
-                      <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{String(ocHeartbeatConfig.target ?? "—")}</span>
-                    </div>
-                    <div style={{ ...rowStyle, padding: "8px 0", flexDirection: "column", alignItems: "stretch", gap: 4 }}>
-                      <span style={LABEL}>Prompt</span>
-                      <span style={{ ...VALUE, fontFamily: MONO, fontSize: 10, color: "var(--text-muted)", lineHeight: 1.5, maxHeight: 48, overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {String(ocHeartbeatConfig.prompt ?? "—").slice(0, 200)}{String(ocHeartbeatConfig.prompt ?? "").length > 200 ? "..." : ""}
-                      </span>
-                    </div>
+                      {" "}
+                      <span style={LABEL}>Target</span>{" "}
+                      <span
+                        style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}
+                      >
+                        {String(ocHeartbeatConfig.target ?? "—")}
+                      </span>{" "}
+                    </div>{" "}
+                    <div
+                      style={{
+                        ...rowStyle,
+                        padding: "8px 0",
+                        flexDirection: "column",
+                        alignItems: "stretch",
+                        gap: 4,
+                      }}
+                    >
+                      {" "}
+                      <span style={LABEL}>Prompt</span>{" "}
+                      <span
+                        style={{
+                          ...VALUE,
+                          fontFamily: MONO,
+                          fontSize: 10,
+                          color: "var(--text-muted)",
+                          lineHeight: 1.5,
+                          maxHeight: 48,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {" "}
+                        {String(ocHeartbeatConfig.prompt ?? "—").slice(0, 200)}
+                        {String(ocHeartbeatConfig.prompt ?? "").length > 200
+                          ? "..."
+                          : ""}{" "}
+                      </span>{" "}
+                    </div>{" "}
                     {ocHeartbeatConfig.activeHours && (
                       <div style={{ ...rowStyle, padding: "8px 0" }}>
-                        <span style={LABEL}>Active Hours</span>
-                        <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{typeof ocHeartbeatConfig.activeHours === "object" ? JSON.stringify(ocHeartbeatConfig.activeHours) : String(ocHeartbeatConfig.activeHours)}</span>
+                        {" "}
+                        <span style={LABEL}>Active Hours</span>{" "}
+                        <span
+                          style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}
+                        >
+                          {typeof ocHeartbeatConfig.activeHours === "object"
+                            ? JSON.stringify(ocHeartbeatConfig.activeHours)
+                            : String(ocHeartbeatConfig.activeHours)}
+                        </span>{" "}
                       </div>
-                    )}
-                    <button onClick={loadHeartbeatConfig} style={{ ...btnSecondary, marginTop: 4 }}><IconRefresh /> Refresh</button>
+                    )}{" "}
+                    <button
+                      onClick={loadHeartbeatConfig}
+                      style={{ ...btnSecondary, marginTop: 4 }}
+                    >
+                      <IconRefresh /> Refresh
+                    </button>{" "}
                   </>
                 ) : (
-                  <button onClick={loadHeartbeatConfig} style={{ ...btnSecondary, marginTop: 4 }}>Load Heartbeat Config</button>
-                )}
+                  <button
+                    onClick={loadHeartbeatConfig}
+                    style={{ ...btnSecondary, marginTop: 4 }}
+                  >
+                    Load Heartbeat Config
+                  </button>
+                )}{" "}
               </div>
-            )}
-          </div>
-
-          {/* Thinking Level */}
-          <div style={{ ...glowCard("var(--accent)"), marginBottom: 8 }} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+            )}{" "}
+          </div>{" "}
+          {/* Thinking Level */}{" "}
+          <div
+            style={{ ...glowCard("var(--accent)"), marginBottom: 8 }}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
             <div style={rowStyle}>
-              <span style={LABEL}>Thinking Level</span>
+              {" "}
+              <span style={LABEL}>Thinking Level</span>{" "}
               <div style={{ display: "flex", gap: 4 }}>
-                {([undefined, "auto", "minimal", "medium", "high"] as (ThinkingLevel | undefined)[]).map(level => {
+                {" "}
+                {(
+                  [undefined, "auto", "minimal", "medium", "high"] as (
+                    | ThinkingLevel
+                    | undefined
+                  )[]
+                ).map((level) => {
                   const label = level ?? "default";
                   const active = thinkingLevel === level;
                   return (
-                    <button key={label} onClick={() => setThinkingLevel(level)} style={{
-                      padding: "3px 10px", borderRadius: 5, fontSize: 10, fontWeight: 500, cursor: "pointer", textTransform: "capitalize",
-                      border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
-                      background: active ? "var(--accent-bg)" : "var(--bg-elevated)",
-                      color: active ? "var(--accent)" : "var(--text-muted)", transition: `all 0.15s ${EASE}`,
-                    }}>{label}</button>
+                    <button
+                      key={label}
+                      onClick={() => setThinkingLevel(level)}
+                      style={{
+                        padding: "3px 10px",
+                        borderRadius: 5,
+                        fontSize: 10,
+                        fontWeight: 500,
+                        cursor: "pointer",
+                        textTransform: "capitalize",
+                        border: active
+                          ? "1px solid var(--accent)"
+                          : "1px solid var(--border)",
+                        background: active
+                          ? "var(--accent-bg)"
+                          : "var(--bg-elevated)",
+                        color: active ? "var(--accent)" : "var(--text-muted)",
+                        transition: `all 0.15s ${EASE}`,
+                      }}
+                    >
+                      {label}
+                    </button>
                   );
-                })}
-              </div>
-            </div>
-          </div>
-        </Section>
-
-        {/* ───────── OPENSHELL SANDBOX ───────── */}
-        <Section title="OPENSHELL SANDBOX">
-          <SandboxPanel />
-        </Section>
-
-        {/* ───────── ABOUT ───────── */}
+                })}{" "}
+              </div>{" "}
+            </div>{" "}
+          </div>{" "}
+        </Section>{" "}
+        {/* ───────── ABOUT ───────── */}{" "}
         <Section title="ABOUT">
-          <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-            <div style={{ ...rowStyle, gap: 12, borderBottom: "1px solid var(--border)" }}>
-              <div style={{ width: 36, height: 36, borderRadius: 10, overflow: "hidden", flexShrink: 0 }}><LobsterIcon size={36} /></div>
+          {" "}
+          <div
+            style={glowCard("var(--accent)")}
+            data-glow="var(--accent)"
+            onMouseEnter={hoverLift}
+            onMouseLeave={hoverReset}
+          >
+            {" "}
+            <div
+              style={{
+                ...rowStyle,
+                gap: 12,
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
+              {" "}
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  overflow: "hidden",
+                  flexShrink: 0,
+                }}
+              >
+                <LobsterIcon size={36} />
+              </div>{" "}
               <div style={{ flex: 1 }}>
-                <span style={{ color: "var(--text)", fontSize: 14, fontWeight: 600, display: "block" }}>Crystal</span>
-                <span style={{ fontSize: 10, color: "var(--text-muted)" }}>The OpenClaw Desktop Frontend</span>
-              </div>
-            </div>
-            <div style={rowStyle}><span style={LABEL}>App Version</span><span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>v{appVersion}</span></div>
-            <div style={rowStyle}><span style={LABEL}>OpenClaw Version</span><span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>{openclawVersion}</span></div>
-            <div style={rowStyle}><span style={LABEL}>Runtime</span><span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>Tauri 2</span></div>
-            <div style={{ padding: "10px 14px 12px", display: "flex", gap: 12, borderTop: "1px solid var(--border)" }}>
-              <a href="https://docs.openclaw.ai" target="_blank" rel="noopener noreferrer" style={{ ...btnPrimary, textDecoration: "none" }}><IconExternal /> Docs</a>
-              <a href="https://github.com/openclaw" target="_blank" rel="noopener noreferrer" style={{ ...btnSecondary, textDecoration: "none" }}><IconExternal /> GitHub</a>
-            </div>
-          </div>
-        </Section>
-
-        <div style={{ height: 20 }} />
-      </div>
+                {" "}
+                <span
+                  style={{
+                    color: "var(--text)",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    display: "block",
+                  }}
+                >
+                  Crystal
+                </span>{" "}
+                <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                  The OpenClaw Desktop Frontend
+                </span>{" "}
+              </div>{" "}
+            </div>{" "}
+            <div style={rowStyle}>
+              <span style={LABEL}>App Version</span>
+              <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>
+                v{appVersion}
+              </span>
+            </div>{" "}
+            <div style={rowStyle}>
+              <span style={LABEL}>OpenClaw Version</span>
+              <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>
+                {openclawVersion}
+              </span>
+            </div>{" "}
+            <div style={rowStyle}>
+              <span style={LABEL}>Runtime</span>
+              <span style={{ ...VALUE, fontFamily: MONO, fontSize: 11 }}>
+                Tauri 2
+              </span>
+            </div>{" "}
+            <div
+              style={{
+                padding: "10px 14px 12px",
+                display: "flex",
+                gap: 12,
+                borderTop: "1px solid var(--border)",
+              }}
+            >
+              {" "}
+              <a
+                href="https://docs.openclaw.ai"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ ...btnPrimary, textDecoration: "none" }}
+              >
+                <IconExternal /> Docs
+              </a>{" "}
+              <a
+                href="https://github.com/openclaw"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ ...btnSecondary, textDecoration: "none" }}
+              >
+                <IconExternal /> GitHub
+              </a>{" "}
+            </div>{" "}
+          </div>{" "}
+        </Section>{" "}
+        <div style={{ height: 20 }} />{" "}
+      </div>{" "}
     </div>
   );
 }
-
 function TokenStatsSection() {
-  const totalTokens = useTokenUsageStore(s => s.totalTokens);
-  const resetLifetimeStats = useTokenUsageStore(s => s.resetLifetimeStats);
+  const totalTokens = useTokenUsageStore((s) => s.totalTokens);
+  const resetLifetimeStats = useTokenUsageStore((s) => s.resetLifetimeStats);
   const next = nextMilestoneAfter(totalTokens);
-  const progress = next ? Math.min(100, (totalTokens / next.threshold) * 100) : 100;
-
+  const progress = next
+    ? Math.min(100, (totalTokens / next.threshold) * 100)
+    : 100;
   return (
     <Section title="TOKEN STATS & REWARDS">
-      <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
+      {" "}
+      <div
+        style={glowCard("var(--accent)")}
+        data-glow="var(--accent)"
+        onMouseEnter={hoverLift}
+        onMouseLeave={hoverReset}
+      >
+        {" "}
         <div style={{ padding: "14px 14px 10px" }}>
-          <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 8, lineHeight: 1.45 }}>
-            Lifetime total in Crystal. Command-palette AI uses billed tokens when OpenAI returns them; chat uses a rough estimate (~4 characters per token) because the gateway stream does not expose usage.
-          </div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-            <span style={{ ...monoValue, fontSize: 28, fontWeight: 800, color: "var(--accent)" }}>{formatLifetimeTokens(totalTokens)}</span>
-            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>tokens all-time</span>
-          </div>
+          {" "}
+          <div
+            style={{
+              fontSize: 10,
+              color: "var(--text-muted)",
+              marginBottom: 8,
+              lineHeight: 1.45,
+            }}
+          >
+            {" "}
+            Lifetime total in Crystal. Command-palette AI uses billed tokens
+            when OpenAI returns them; chat uses a rough estimate (~4 characters
+            per token) because the gateway stream does not expose usage.{" "}
+          </div>{" "}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            {" "}
+            <span
+              style={{
+                ...monoValue,
+                fontSize: 28,
+                fontWeight: 800,
+                color: "var(--accent)",
+              }}
+            >
+              {formatLifetimeTokens(totalTokens)}
+            </span>{" "}
+            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+              tokens all-time
+            </span>{" "}
+          </div>{" "}
           {next ? (
             <div style={{ marginTop: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text-muted)", marginBottom: 4 }}>
-                <span>Next reward: {next.emoji} {next.title}</span>
-                <span>{formatLifetimeTokens(totalTokens)} / {formatLifetimeTokens(next.threshold)}</span>
-              </div>
-              <div style={{ height: 6, borderRadius: 3, background: "var(--bg-input)", overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${progress}%`, background: "var(--accent)", borderRadius: 3, transition: `width 0.4s ${EASE}` }} />
-              </div>
+              {" "}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  marginBottom: 4,
+                }}
+              >
+                {" "}
+                <span>
+                  Next reward: {next.emoji} {next.title}
+                </span>{" "}
+                <span>
+                  {formatLifetimeTokens(totalTokens)} /{" "}
+                  {formatLifetimeTokens(next.threshold)}
+                </span>{" "}
+              </div>{" "}
+              <div
+                style={{
+                  height: 6,
+                  borderRadius: 3,
+                  background: "var(--bg-input)",
+                  overflow: "hidden",
+                }}
+              >
+                {" "}
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${progress}%`,
+                    background: "var(--accent)",
+                    borderRadius: 3,
+                    transition: `width 0.4s ${EASE}`,
+                  }}
+                />{" "}
+              </div>{" "}
             </div>
           ) : (
-            <div style={{ marginTop: 10, fontSize: 11, color: "var(--success)" }}>Every milestone unlocked. Absolute legend.</div>
-          )}
-        </div>
-        <div style={{ padding: "0 10px 12px", display: "flex", flexWrap: "wrap", gap: 6 }}>
+            <div
+              style={{ marginTop: 10, fontSize: 11, color: "var(--success)" }}
+            >
+              Every milestone unlocked. Absolute legend.
+            </div>
+          )}{" "}
+        </div>{" "}
+        <div
+          style={{
+            padding: "0 10px 12px",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 6,
+          }}
+        >
+          {" "}
           {TOKEN_MILESTONES.map((m) => {
             const ok = totalTokens >= m.threshold;
             return (
@@ -1230,39 +2867,63 @@ function TokenStatsSection() {
                   opacity: ok ? 1 : 0.62,
                 }}
               >
-                {m.emoji} {m.title}
+                {" "}
+                {m.emoji} {m.title}{" "}
               </div>
             );
-          })}
-        </div>
-        <div style={{ ...rowStyle, borderTop: "1px solid var(--border)", borderBottom: "none" }}>
-          <span style={LABEL}>Reset lifetime stats</span>
+          })}{" "}
+        </div>{" "}
+        <div
+          style={{
+            ...rowStyle,
+            borderTop: "1px solid var(--border)",
+            borderBottom: "none",
+          }}
+        >
+          {" "}
+          <span style={LABEL}>Reset lifetime stats</span>{" "}
           <button
             type="button"
             onClick={() => {
-              if (window.confirm("Clear all-time token total and milestone history? This cannot be undone.")) {
+              if (
+                window.confirm(
+                  "Clear all-time token total and milestone history? This cannot be undone.",
+                )
+              ) {
                 resetLifetimeStats();
               }
             }}
             style={{ ...btnSecondary, fontSize: 10 }}
           >
-            Reset
-          </button>
-        </div>
-      </div>
+            {" "}
+            Reset{" "}
+          </button>{" "}
+        </div>{" "}
+      </div>{" "}
     </Section>
   );
 }
-
 function Section({ title, children }: { title: string; children: ReactNode }) {
-  return <div style={{ marginBottom: 18 }}><div style={sectionLabel}>{title}</div>{children}</div>;
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={sectionLabel}>{title}</div>
+      {children}
+    </div>
+  );
 }
-
-/* ── Voice Provider Selector ── */
-
-function VoiceProviderRow({ label, providers, preferredId, onSelect }: {
+/* ── Voice Provider Selector ── */ function VoiceProviderRow({
+  label,
+  providers,
+  preferredId,
+  onSelect,
+}: {
   label: string;
-  providers: Array<{ id: string; name: string; available: boolean; active: boolean }>;
+  providers: Array<{
+    id: string;
+    name: string;
+    available: boolean;
+    active: boolean;
+  }>;
   preferredId: string;
   onSelect: (id: string) => void;
 }) {
@@ -1271,11 +2932,16 @@ function VoiceProviderRow({ label, providers, preferredId, onSelect }: {
   const meta = preferred ? VOICE_PROVIDER_META[preferred.id] : null;
   const activeMeta = active ? VOICE_PROVIDER_META[active.id] : null;
   const isFallback = preferred && active && preferred.id !== active.id;
-
   return (
-    <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
-      <span style={{ ...LABEL, display: "block", marginBottom: 8 }}>{label}</span>
+    <div
+      style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)" }}
+    >
+      {" "}
+      <span style={{ ...LABEL, display: "block", marginBottom: 8 }}>
+        {label}
+      </span>{" "}
       <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+        {" "}
         {providers.map((p) => {
           const isSelected = p.id === preferredId;
           const pmeta = VOICE_PROVIDER_META[p.id];
@@ -1284,123 +2950,266 @@ function VoiceProviderRow({ label, providers, preferredId, onSelect }: {
               key={p.id}
               onClick={() => onSelect(p.id)}
               style={{
-                padding: "5px 12px", borderRadius: 6, fontSize: 10, fontWeight: 500,
-                cursor: "pointer", transition: `all 0.15s ${EASE}`,
-                display: "flex", alignItems: "center", gap: 6,
-                border: isSelected ? "1px solid var(--accent)" : "1px solid var(--border)",
-                background: isSelected ? "var(--accent-bg)" : "var(--bg-elevated)",
+                padding: "5px 12px",
+                borderRadius: 6,
+                fontSize: 10,
+                fontWeight: 500,
+                cursor: "pointer",
+                transition: `all 0.15s ${EASE}`,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                border: isSelected
+                  ? "1px solid var(--accent)"
+                  : "1px solid var(--border)",
+                background: isSelected
+                  ? "var(--accent-bg)"
+                  : "var(--bg-elevated)",
                 color: isSelected ? "var(--accent)" : "var(--text-muted)",
               }}
             >
-              <span style={{
-                width: 5, height: 5, borderRadius: "50%", flexShrink: 0,
-                background: p.available ? "var(--success)" : "var(--text-muted)",
-              }} />
-              {pmeta?.label ?? p.name}
+              {" "}
+              <span
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  background: p.available
+                    ? "var(--success)"
+                    : "var(--text-muted)",
+                }}
+              />{" "}
+              {pmeta?.label ?? p.name}{" "}
             </button>
           );
-        })}
-      </div>
+        })}{" "}
+      </div>{" "}
       {providers.length > 0 && (
-        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+        <div
+          style={{
+            marginTop: 8,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          {" "}
           {preferred?.available ? (
             <>
-              <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--success)", flexShrink: 0 }} />
-              <span style={{ fontSize: 11, color: "var(--success)" }}>Connected</span>
-              {meta?.port && <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO }}>:{meta.port}</span>}
+              {" "}
+              <span
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: "50%",
+                  background: "var(--success)",
+                  flexShrink: 0,
+                }}
+              />{" "}
+              <span style={{ fontSize: 11, color: "var(--success)" }}>
+                Connected
+              </span>{" "}
+              {meta?.port && (
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: "var(--text-muted)",
+                    fontFamily: MONO,
+                  }}
+                >
+                  :{meta.port}
+                </span>
+              )}{" "}
             </>
           ) : (
             <>
-              <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--warning, #f59e0b)", flexShrink: 0 }} />
+              {" "}
+              <span
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: "50%",
+                  background: "var(--warning, #f59e0b)",
+                  flexShrink: 0,
+                }}
+              />{" "}
               <span style={{ fontSize: 11, color: "var(--warning, #f59e0b)" }}>
+                {" "}
                 {isFallback
                   ? `Offline — using ${activeMeta?.label ?? active?.name ?? "fallback"}`
-                  : "Offline"}
-              </span>
+                  : "Offline"}{" "}
+              </span>{" "}
             </>
-          )}
+          )}{" "}
         </div>
-      )}
+      )}{" "}
       {providers.length === 0 && (
-        <span style={{ fontSize: 10, color: "var(--text-muted)", fontStyle: "italic" }}>Loading providers...</span>
-      )}
+        <span
+          style={{
+            fontSize: 10,
+            color: "var(--text-muted)",
+            fontStyle: "italic",
+          }}
+        >
+          Loading providers...
+        </span>
+      )}{" "}
     </div>
   );
 }
-
-/* ── API Keys Manager ── */
-
-const API_PROVIDERS = [
-  { id: "anthropic", label: "Anthropic", placeholder: "sk-ant-...", color: "#d4a574", getUrl: "https://console.anthropic.com/settings/keys" },
-  { id: "openai", label: "OpenAI", placeholder: "sk-...", color: "#10a37f", getUrl: "https://platform.openai.com/api-keys" },
-  { id: "google", label: "Google AI", placeholder: "AIza...", color: "#4285f4", getUrl: "https://aistudio.google.com/apikey" },
-  { id: "openrouter", label: "OpenRouter", placeholder: "sk-or-...", color: "#8b5cf6", getUrl: "https://openrouter.ai/keys" },
-  { id: "groq", label: "Groq", placeholder: "gsk_...", color: "#f55036", getUrl: "https://console.groq.com/keys" },
-  { id: "mistral", label: "Mistral", placeholder: "...", color: "#ff7000", getUrl: "https://console.mistral.ai/api-keys" },
+/* ── API Keys Manager ── */ const API_PROVIDERS = [
+  {
+    id: "anthropic",
+    label: "Anthropic",
+    placeholder: "sk-ant-...",
+    color: "#d4a574",
+    getUrl: "https://console.anthropic.com/settings/keys",
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    placeholder: "sk-...",
+    color: "#10a37f",
+    getUrl: "https://platform.openai.com/api-keys",
+  },
+  {
+    id: "google",
+    label: "Google AI",
+    placeholder: "AIza...",
+    color: "#4285f4",
+    getUrl: "https://aistudio.google.com/apikey",
+  },
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    placeholder: "sk-or-...",
+    color: "#8b5cf6",
+    getUrl: "https://openrouter.ai/keys",
+  },
+  {
+    id: "groq",
+    label: "Groq",
+    placeholder: "gsk_...",
+    color: "#f55036",
+    getUrl: "https://console.groq.com/keys",
+  },
+  {
+    id: "mistral",
+    label: "Mistral",
+    placeholder: "...",
+    color: "#ff7000",
+    getUrl: "https://console.mistral.ai/api-keys",
+  },
 ] as const;
-
-async function testApiKey(providerId: string, apiKey: string): Promise<{ ok: boolean; message: string }> {
+async function testApiKey(
+  providerId: string,
+  apiKey: string,
+): Promise<{ ok: boolean; message: string }> {
   try {
     if (providerId === "openai") {
-      const r = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${apiKey}` } });
+      const r = await fetch("https://api.openai.com/v1/models", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
       if (r.ok) return { ok: true, message: "Connected" };
-      return { ok: false, message: r.status === 401 ? "Invalid key" : `HTTP ${r.status}` };
+      return {
+        ok: false,
+        message: r.status === 401 ? "Invalid key" : `HTTP ${r.status}`,
+      };
     }
     if (providerId === "anthropic") {
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "claude-3-5-haiku-latest", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }),
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "claude-3-5-haiku-latest",
+          max_tokens: 1,
+          messages: [{ role: "user", content: "hi" }],
+        }),
       });
       if (r.ok || r.status === 400) return { ok: true, message: "Connected" };
-      return { ok: false, message: r.status === 401 ? "Invalid key" : `HTTP ${r.status}` };
+      return {
+        ok: false,
+        message: r.status === 401 ? "Invalid key" : `HTTP ${r.status}`,
+      };
     }
     if (providerId === "groq") {
-      const r = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: `Bearer ${apiKey}` } });
+      const r = await fetch("https://api.groq.com/openai/v1/models", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
       if (r.ok) return { ok: true, message: "Connected" };
-      return { ok: false, message: r.status === 401 ? "Invalid key" : `HTTP ${r.status}` };
+      return {
+        ok: false,
+        message: r.status === 401 ? "Invalid key" : `HTTP ${r.status}`,
+      };
     }
     if (providerId === "openrouter") {
-      const r = await fetch("https://openrouter.ai/api/v1/auth/key", { headers: { Authorization: `Bearer ${apiKey}` } });
+      const r = await fetch("https://openrouter.ai/api/v1/auth/key", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
       if (r.ok) return { ok: true, message: "Connected" };
-      return { ok: false, message: r.status === 401 ? "Invalid key" : `HTTP ${r.status}` };
+      return {
+        ok: false,
+        message: r.status === 401 ? "Invalid key" : `HTTP ${r.status}`,
+      };
     }
     if (providerId === "google") {
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+      );
       if (r.ok) return { ok: true, message: "Connected" };
-      return { ok: false, message: r.status === 400 ? "Invalid key" : `HTTP ${r.status}` };
+      return {
+        ok: false,
+        message: r.status === 400 ? "Invalid key" : `HTTP ${r.status}`,
+      };
     }
     if (providerId === "mistral") {
-      const r = await fetch("https://api.mistral.ai/v1/models", { headers: { Authorization: `Bearer ${apiKey}` } });
+      const r = await fetch("https://api.mistral.ai/v1/models", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
       if (r.ok) return { ok: true, message: "Connected" };
-      return { ok: false, message: r.status === 401 ? "Invalid key" : `HTTP ${r.status}` };
+      return {
+        ok: false,
+        message: r.status === 401 ? "Invalid key" : `HTTP ${r.status}`,
+      };
     }
     return { ok: false, message: "Test not implemented" };
   } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "Network error" };
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "Network error",
+    };
   }
 }
-
-
 function ApiKeysSection() {
-  const [profiles, setProfiles] = useState<Record<string, { type: string; provider: string; key: string }>>({});
+  const [profiles, setProfiles] = useState<
+    Record<string, { type: string; provider: string; key: string }>
+  >({});
   const [loading, setLoading] = useState(true);
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [editKey, setEditKey] = useState("");
   const [saving, setSaving] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+  const [feedback, setFeedback] = useState<{
+    type: "success" | "error";
+    msg: string;
+  } | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string }>>({});
-
+  const [testResults, setTestResults] = useState<
+    Record<string, { ok: boolean; message: string }>
+  >({});
   const getProfilePath = async (): Promise<string> => {
     const result = await invoke<{ stdout: string }>("execute_command", {
-      command: "echo $env:USERPROFILE\\.openclaw\\agents\\main\\agent\\auth-profiles.json",
+      command:
+        "echo $env:USERPROFILE\\.openclaw\\agents\\main\\agent\\auth-profiles.json",
       cwd: null,
     });
     return result.stdout.trim().replace(/\r?\n/g, "");
   };
-
   const loadProfiles = async () => {
     try {
       const path = await getProfilePath();
@@ -1412,74 +3221,107 @@ function ApiKeysSection() {
     }
     setLoading(false);
   };
-
-  useEffect(() => { loadProfiles(); }, []);
-
+  useEffect(() => {
+    loadProfiles();
+  }, []);
   useEffect(() => {
     if (feedback) {
       const t = setTimeout(() => setFeedback(null), 4000);
       return () => clearTimeout(t);
     }
   }, [feedback]);
-
   const saveKey = async (providerId: string, apiKey: string) => {
     if (!apiKey.trim()) return;
     setSaving(true);
     setFeedback(null);
     try {
       const path = await getProfilePath();
-
-      let data: Record<string, unknown> = { version: 1, profiles: {}, lastGood: {}, usageStats: {} };
+      let data: Record<string, unknown> = {
+        version: 1,
+        profiles: {},
+        lastGood: {},
+        usageStats: {},
+      };
       try {
         const raw = await invoke<string>("read_file", { path });
         data = JSON.parse(raw);
-      } catch { /* new file */ }
-
+      } catch {
+        /* new file */
+      }
       const profileKey = `${providerId}:default`;
       const profs = (data.profiles || {}) as Record<string, unknown>;
-
       if (providerId === "vllm") {
-        profs[profileKey] = { type: "api_key", provider: providerId, key: "vllm", baseUrl: "http://127.0.0.1:8000/v1" };
+        profs[profileKey] = {
+          type: "api_key",
+          provider: providerId,
+          key: "vllm",
+          baseUrl: "http://127.0.0.1:8000/v1",
+        };
       } else {
-        profs[profileKey] = { type: "api_key", provider: providerId, key: apiKey };
+        profs[profileKey] = {
+          type: "api_key",
+          provider: providerId,
+          key: apiKey,
+        };
       }
       data.profiles = profs;
-
       const lastGood = (data.lastGood || {}) as Record<string, string>;
       lastGood[providerId] = profileKey;
       data.lastGood = lastGood;
-
       const jsonStr = JSON.stringify(data, null, 2);
       await invoke("write_file", { path, content: jsonStr });
-
       const verify = await invoke<string>("read_file", { path });
       const verifyData = JSON.parse(verify);
-      if (verifyData.profiles?.[profileKey]?.key === apiKey || providerId === "vllm") {
-        setFeedback({ type: "success", msg: `${providerId} key saved successfully` });
+      if (
+        verifyData.profiles?.[profileKey]?.key === apiKey ||
+        providerId === "vllm"
+      ) {
+        setFeedback({
+          type: "success",
+          msg: `${providerId} key saved successfully`,
+        });
         await loadProfiles();
         setEditingProvider(null);
         setEditKey("");
       } else {
-        setFeedback({ type: "error", msg: "Key was written but verification failed — file may be locked by gateway" });
+        setFeedback({
+          type: "error",
+          msg: "Key was written but verification failed — file may be locked by gateway",
+        });
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg.includes("EPERM") || msg.includes("Access")) {
-        setFeedback({ type: "error", msg: "File locked by OpenClaw gateway. Trying alternative save..." });
+        setFeedback({
+          type: "error",
+          msg: "File locked by OpenClaw gateway. Trying alternative save...",
+        });
         try {
           const escaped = apiKey.replace(/'/g, "''");
           const cmd = `$p = "$env:USERPROFILE\\.openclaw\\agents\\main\\agent\\auth-profiles.json"; $d = Get-Content $p | ConvertFrom-Json; $d.profiles.'${providerId}:default' = @{type='api_key';provider='${providerId}';key='${escaped}'}; $d | ConvertTo-Json -Depth 10 | Set-Content $p -Encoding UTF8`;
-          const result = await invoke<{ code: number; stderr: string }>("execute_command", { command: cmd, cwd: null });
+          const result = await invoke<{ code: number; stderr: string }>(
+            "execute_command",
+            { command: cmd, cwd: null },
+          );
           if (result.code === 0) {
-            setFeedback({ type: "success", msg: `${providerId} key saved via fallback` });
+            setFeedback({
+              type: "success",
+              msg: `${providerId} key saved via fallback`,
+            });
             await loadProfiles();
             setEditingProvider(null);
             setEditKey("");
           } else {
-            setFeedback({ type: "error", msg: `Save failed: ${result.stderr || "Unknown error"}` });
+            setFeedback({
+              type: "error",
+              msg: `Save failed: ${result.stderr || "Unknown error"}`,
+            });
           }
         } catch (e2) {
-          setFeedback({ type: "error", msg: `Both save methods failed: ${e2 instanceof Error ? e2.message : String(e2)}` });
+          setFeedback({
+            type: "error",
+            msg: `Both save methods failed: ${e2 instanceof Error ? e2.message : String(e2)}`,
+          });
         }
       } else {
         setFeedback({ type: "error", msg: `Save failed: ${msg}` });
@@ -1487,7 +3329,6 @@ function ApiKeysSection() {
     }
     setSaving(false);
   };
-
   const removeKey = async (providerId: string) => {
     setFeedback(null);
     try {
@@ -1498,611 +3339,424 @@ function ApiKeysSection() {
       if (data.profiles) delete data.profiles[profileKey];
       if (data.lastGood) delete data.lastGood[providerId];
       if (data.usageStats) delete data.usageStats[profileKey];
-
-      await invoke("write_file", { path, content: JSON.stringify(data, null, 2) });
+      await invoke("write_file", {
+        path,
+        content: JSON.stringify(data, null, 2),
+      });
       setFeedback({ type: "success", msg: `${providerId} key removed` });
       await loadProfiles();
     } catch (e) {
-      setFeedback({ type: "error", msg: `Remove failed: ${e instanceof Error ? e.message : String(e)}` });
+      setFeedback({
+        type: "error",
+        msg: `Remove failed: ${e instanceof Error ? e.message : String(e)}`,
+      });
     }
   };
-
   const maskKey = (key: string) => {
     if (key.length <= 12) return "••••••••";
     return key.slice(0, 7) + "••••••••" + key.slice(-4);
   };
-
   if (loading) {
-    return <div style={{ ...glowCard("var(--accent)"), padding: 20, textAlign: "center" }}>
-      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Loading API keys...</span>
-    </div>;
-  }
-
-  return (
-    <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-      <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
-        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-          API keys for cloud LLM providers. Stored in OpenClaw's auth-profiles.
-        </span>
+    return (
+      <div
+        style={{
+          ...glowCard("var(--accent)"),
+          padding: 20,
+          textAlign: "center",
+        }}
+      >
+        {" "}
+        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+          Loading API keys...
+        </span>{" "}
       </div>
-
-      {feedback && (
-        <div style={{
-          padding: "8px 14px", display: "flex", alignItems: "center", gap: 8,
-          background: feedback.type === "success" ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
+    );
+  }
+  return (
+    <div
+      style={glowCard("var(--accent)")}
+      data-glow="var(--accent)"
+      onMouseEnter={hoverLift}
+      onMouseLeave={hoverReset}
+    >
+      {" "}
+      <div
+        style={{
+          padding: "10px 14px",
           borderBottom: "1px solid var(--border)",
-        }}>
-          <span style={{
-            width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
-            background: feedback.type === "success" ? "#4ade80" : "#f87171",
-          }} />
-          <span style={{ fontSize: 11, color: feedback.type === "success" ? "#4ade80" : "#f87171", flex: 1 }}>
-            {feedback.msg}
-          </span>
-          <button onClick={() => setFeedback(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 12 }}>×</button>
+        }}
+      >
+        {" "}
+        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+          {" "}
+          API keys for cloud LLM providers. Stored in OpenClaw's
+          auth-profiles.{" "}
+        </span>{" "}
+      </div>{" "}
+      {feedback && (
+        <div
+          style={{
+            padding: "8px 14px",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            background:
+              feedback.type === "success"
+                ? "rgba(74,222,128,0.08)"
+                : "rgba(248,113,113,0.08)",
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          {" "}
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              flexShrink: 0,
+              background: feedback.type === "success" ? "#4ade80" : "#f87171",
+            }}
+          />{" "}
+          <span
+            style={{
+              fontSize: 11,
+              color: feedback.type === "success" ? "#4ade80" : "#f87171",
+              flex: 1,
+            }}
+          >
+            {" "}
+            {feedback.msg}{" "}
+          </span>{" "}
+          <button
+            onClick={() => setFeedback(null)}
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontSize: 12,
+            }}
+          >
+            ×
+          </button>{" "}
         </div>
-      )}
-
-      {API_PROVIDERS.map(provider => {
+      )}{" "}
+      {API_PROVIDERS.map((provider) => {
         const profileKey = `${provider.id}:default`;
         const profile = profiles[profileKey];
         const hasKey = !!profile?.key;
         const isEditing = editingProvider === provider.id;
         const isVisible = showKeys[provider.id];
-
         return (
-          <div key={provider.id} style={{ ...rowStyle, flexDirection: "column", alignItems: "stretch", gap: 6, borderBottom: "1px solid var(--border)" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div
+            key={provider.id}
+            style={{
+              ...rowStyle,
+              flexDirection: "column",
+              alignItems: "stretch",
+              gap: 6,
+              borderBottom: "1px solid var(--border)",
+            }}
+          >
+            {" "}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              {" "}
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: hasKey ? provider.color : "var(--border)", flexShrink: 0 }} />
-                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{provider.label}</span>
-              </div>
+                {" "}
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    background: hasKey ? provider.color : "var(--border)",
+                    flexShrink: 0,
+                  }}
+                />{" "}
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "var(--text)",
+                  }}
+                >
+                  {provider.label}
+                </span>{" "}
+              </div>{" "}
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {" "}
                 {hasKey && !isEditing && (
                   <>
+                    {" "}
                     {testResults[provider.id] ? (
-                      <span style={{
-                        fontSize: 10,
-                        color: testResults[provider.id].ok ? "var(--success)" : "var(--error)",
-                        fontWeight: 500,
-                      }}>
-                        {testResults[provider.id].message}
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: testResults[provider.id].ok
+                            ? "var(--success)"
+                            : "var(--error)",
+                          fontWeight: 500,
+                        }}
+                      >
+                        {" "}
+                        {testResults[provider.id].message}{" "}
                       </span>
                     ) : (
-                      <span style={{ fontSize: 10, color: "var(--success)", fontWeight: 500 }}>Active</span>
-                    )}
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: "var(--success)",
+                          fontWeight: 500,
+                        }}
+                      >
+                        Active
+                      </span>
+                    )}{" "}
                     <button
                       onClick={async () => {
                         setTesting(provider.id);
-                        const result = await testApiKey(provider.id, profile.key);
-                        setTestResults(prev => ({ ...prev, [provider.id]: result }));
+                        const result = await testApiKey(
+                          provider.id,
+                          profile.key,
+                        );
+                        setTestResults((prev) => ({
+                          ...prev,
+                          [provider.id]: result,
+                        }));
                         setTesting(null);
                       }}
                       disabled={testing === provider.id}
                       title="Test API key"
                       aria-label={`Test ${provider.label} API key`}
-                      style={{ background: "none", border: "none", cursor: testing === provider.id ? "wait" : "pointer", padding: "2px 6px", fontSize: 9, color: "var(--text-muted)", borderRadius: 4 }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: testing === provider.id ? "wait" : "pointer",
+                        padding: "2px 6px",
+                        fontSize: 9,
+                        color: "var(--text-muted)",
+                        borderRadius: 4,
+                      }}
                     >
-                      {testing === provider.id ? "Testing..." : "Test"}
-                    </button>
+                      {" "}
+                      {testing === provider.id ? "Testing..." : "Test"}{" "}
+                    </button>{" "}
                     <button
-                      onClick={() => setShowKeys(prev => ({ ...prev, [provider.id]: !prev[provider.id] }))}
+                      onClick={() =>
+                        setShowKeys((prev) => ({
+                          ...prev,
+                          [provider.id]: !prev[provider.id],
+                        }))
+                      }
                       aria-label={isVisible ? "Hide key" : "Show key"}
-                      style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "var(--text-muted)", display: "flex" }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: 2,
+                        color: "var(--text-muted)",
+                        display: "flex",
+                      }}
                     >
-                      <IconEye open={isVisible} />
-                    </button>
+                      {" "}
+                      <IconEye open={isVisible} />{" "}
+                    </button>{" "}
                     <button
-                      onClick={() => { setEditingProvider(provider.id); setEditKey(profile.key); }}
-                      style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 6px", fontSize: 9, color: "var(--accent)", borderRadius: 4 }}
+                      onClick={() => {
+                        setEditingProvider(provider.id);
+                        setEditKey(profile.key);
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: "2px 6px",
+                        fontSize: 9,
+                        color: "var(--accent)",
+                        borderRadius: 4,
+                      }}
                     >
-                      Edit
-                    </button>
+                      {" "}
+                      Edit{" "}
+                    </button>{" "}
                     <button
                       onClick={() => removeKey(provider.id)}
-                      style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 6px", fontSize: 9, color: "var(--error)", borderRadius: 4 }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: "2px 6px",
+                        fontSize: 9,
+                        color: "var(--error)",
+                        borderRadius: 4,
+                      }}
                     >
-                      Remove
-                    </button>
+                      {" "}
+                      Remove{" "}
+                    </button>{" "}
                   </>
-                )}
+                )}{" "}
                 {!hasKey && !isEditing && (
                   <>
+                    {" "}
                     <a
                       href={provider.getUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={(e) => {
                         e.preventDefault();
-                        invoke("plugin:opener|open_url", { url: provider.getUrl }).catch(() => {
+                        invoke("plugin:opener|open_url", {
+                          url: provider.getUrl,
+                        }).catch(() => {
                           window.open(provider.getUrl, "_blank");
                         });
                       }}
-                      style={{ fontSize: 9, color: "var(--text-muted)", textDecoration: "none", padding: "3px 8px" }}
+                      style={{
+                        fontSize: 9,
+                        color: "var(--text-muted)",
+                        textDecoration: "none",
+                        padding: "3px 8px",
+                      }}
                       title={`Get an API key from ${provider.label}`}
                     >
-                      Get key →
-                    </a>
+                      {" "}
+                      Get key →{" "}
+                    </a>{" "}
                     <button
-                      onClick={() => { setEditingProvider(provider.id); setEditKey(""); }}
+                      onClick={() => {
+                        setEditingProvider(provider.id);
+                        setEditKey("");
+                      }}
                       style={{
-                        background: "var(--accent-bg)", border: "1px solid rgba(59,130,246,0.2)",
-                        borderRadius: 6, padding: "3px 10px", fontSize: 10, fontWeight: 500,
-                        color: "var(--accent)", cursor: "pointer",
+                        background: "var(--accent-bg)",
+                        border: "1px solid rgba(59,130,246,0.2)",
+                        borderRadius: 6,
+                        padding: "3px 10px",
+                        fontSize: 10,
+                        fontWeight: 500,
+                        color: "var(--accent)",
+                        cursor: "pointer",
                       }}
                     >
-                      Add Key
-                    </button>
+                      {" "}
+                      Add Key{" "}
+                    </button>{" "}
                   </>
-                )}
-              </div>
-            </div>
-
-            {/* Show masked key */}
+                )}{" "}
+              </div>{" "}
+            </div>{" "}
+            {/* Show masked key */}{" "}
             {hasKey && !isEditing && (
-              <code style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: MONO, letterSpacing: 0.5 }}>
-                {isVisible ? profile.key : maskKey(profile.key)}
+              <code
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  fontFamily: MONO,
+                  letterSpacing: 0.5,
+                }}
+              >
+                {" "}
+                {isVisible ? profile.key : maskKey(profile.key)}{" "}
               </code>
-            )}
-
-            {/* Edit mode */}
+            )}{" "}
+            {/* Edit mode */}{" "}
             {isEditing && (
               <div style={{ display: "flex", gap: 6 }}>
+                {" "}
                 <input
                   type="text"
                   value={editKey}
-                  onChange={e => setEditKey(e.target.value)}
+                  onChange={(e) => setEditKey(e.target.value)}
                   placeholder={provider.placeholder}
                   autoFocus
                   style={{
-                    flex: 1, background: "var(--bg-surface)", border: "1px solid var(--border)",
-                    borderRadius: 6, padding: "6px 10px", color: "var(--text)", fontSize: 11,
-                    outline: "none", fontFamily: MONO,
+                    flex: 1,
+                    background: "var(--bg-surface)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                    padding: "6px 10px",
+                    color: "var(--text)",
+                    fontSize: 11,
+                    outline: "none",
+                    fontFamily: MONO,
                   }}
-                />
+                />{" "}
                 <button
                   onClick={() => saveKey(provider.id, editKey)}
                   disabled={!editKey.trim() || saving}
                   style={{
-                    background: editKey.trim() ? "var(--accent)" : "var(--bg-surface)",
-                    border: "none", borderRadius: 6, padding: "6px 12px",
-                    fontSize: 10, fontWeight: 600, color: editKey.trim() ? "#fff" : "var(--text-muted)",
+                    background: editKey.trim()
+                      ? "var(--accent)"
+                      : "var(--bg-surface)",
+                    border: "none",
+                    borderRadius: 6,
+                    padding: "6px 12px",
+                    fontSize: 10,
+                    fontWeight: 600,
+                    color: editKey.trim() ? "#fff" : "var(--text-muted)",
                     cursor: editKey.trim() ? "pointer" : "default",
                   }}
                 >
-                  {saving ? "Saving..." : "Save"}
-                </button>
+                  {" "}
+                  {saving ? "Saving..." : "Save"}{" "}
+                </button>{" "}
                 <button
-                  onClick={() => { setEditingProvider(null); setEditKey(""); }}
-                  style={{ background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", fontSize: 10, color: "var(--text-muted)", cursor: "pointer" }}
+                  onClick={() => {
+                    setEditingProvider(null);
+                    setEditKey("");
+                  }}
+                  style={{
+                    background: "none",
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                    padding: "6px 10px",
+                    fontSize: 10,
+                    color: "var(--text-muted)",
+                    cursor: "pointer",
+                  }}
                 >
-                  Cancel
-                </button>
+                  {" "}
+                  Cancel{" "}
+                </button>{" "}
               </div>
-            )}
+            )}{" "}
           </div>
         );
-      })}
+      })}{" "}
     </div>
   );
 }
-
-function AuditBadge({ label, count, color }: { label: string; count: number; color: string }) {
+function AuditBadge({
+  label,
+  count,
+  color,
+}: {
+  label: string;
+  count: number;
+  color: string;
+}) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <span style={{ width: 6, height: 6, borderRadius: "50%", background: color }} />
-      <span style={{ fontSize: 11, color, fontWeight: 600 }}>{count}</span>
-      <span style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span>
-    </div>
-  );
-}
-
-/* ── OpenShell Sandbox Panel ── */
-
-function SandboxPanel() {
-  const [installed, setInstalled] = useState<boolean | null>(null);
-  const [dockerOk, setDockerOk] = useState<boolean | null>(null);
-  const [sandboxes, setSandboxes] = useState<{ name: string; status: string; image?: string }[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [toggling, setToggling] = useState(false);
-  const [installing, setInstalling] = useState(false);
-  const [sandboxMode, setSandboxMode] = useState<"off" | "openshell">("off");
-  const [feedback, setFeedback] = useState<{ type: "success" | "error" | "warn"; text: string } | null>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [logs, setLogs] = useState<string | null>(null);
-  const [logsLoading, setLogsLoading] = useState(false);
-  const [openshellVersion, setOpenshellVersion] = useState("");
-
-  const showFeedback = (type: "success" | "error" | "warn", text: string) => {
-    setFeedback({ type, text }); setTimeout(() => setFeedback(null), 6000);
-  };
-
-  const checkDocker = async (): Promise<boolean> => {
-    try {
-      const r = await invoke<{ stdout: string; code: number }>("execute_command", { command: "docker info --format '{{.ServerVersion}}'", cwd: null });
-      const ok = r.code === 0 && !r.stdout.toLowerCase().includes("error");
-      setDockerOk(ok);
-      return ok;
-    } catch {
-      setDockerOk(false);
-      return false;
-    }
-  };
-
-  const checkInstalled = async (): Promise<boolean> => {
-    try {
-      const r = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", { command: "openshell --version", cwd: null });
-      const ok = r.code === 0 && r.stdout.trim().length > 0;
-      setInstalled(ok);
-      if (ok) setOpenshellVersion(r.stdout.trim());
-      return ok;
-    } catch {
-      setInstalled(false);
-      return false;
-    }
-  };
-
-  const loadSandboxes = async () => {
-    if (!installed) { setSandboxes([]); return; }
-    try {
-      const r = await invoke<{ stdout: string; code: number }>("execute_command", { command: "openshell sandbox list --json", cwd: null });
-      if (r.code === 0 && r.stdout.trim()) {
-        try {
-          const data = JSON.parse(r.stdout);
-          const list = Array.isArray(data) ? data : data.sandboxes ?? data.items ?? [];
-          setSandboxes(list);
-          return;
-        } catch { /* fall through to line parsing */ }
-        const lines = r.stdout.trim().split("\n").filter(l => l.trim() && !l.startsWith("NAME"));
-        setSandboxes(lines.map(l => {
-          const parts = l.trim().split(/\s{2,}/);
-          return { name: parts[0] || "unknown", status: parts[1] || "unknown", image: parts[2] };
-        }));
-      } else {
-        setSandboxes([]);
-      }
-    } catch {
-      setSandboxes([]);
-    }
-  };
-
-  const loadSandboxMode = async () => {
-    try {
-      const r = await cachedCommand("openclaw config get agents.defaults.sandbox --json", { ttl: 30_000 });
-      if (r.code === 0 && r.stdout.trim()) {
-        try {
-          const data = JSON.parse(r.stdout);
-          const mode = data.mode ?? data.value?.mode ?? data.value ?? data ?? "off";
-          setSandboxMode(typeof mode === "string" && mode !== "off" ? "openshell" : "off");
-        } catch { /* keep default */ }
-      }
-    } catch { /* keep default */ }
-  };
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const [isInstalled] = await Promise.all([checkInstalled(), checkDocker(), loadSandboxMode()]);
-      if (isInstalled) await loadSandboxes();
-      setLoading(false);
-    })();
-  }, []);
-
-  const handleInstall = async () => {
-    setInstalling(true);
-    showFeedback("warn", "Installing OpenShell... This may take a minute.");
-    try {
-      const uvR = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "uv tool install -U openshell", cwd: null,
-      });
-      if (uvR.code === 0) {
-        const vr = await invoke<{ stdout: string; code: number }>("execute_command", { command: "openshell --version", cwd: null });
-        if (vr.code === 0 && vr.stdout.trim()) {
-          setInstalled(true);
-          setOpenshellVersion(vr.stdout.trim());
-          showFeedback("success", `OpenShell installed: ${vr.stdout.trim()}`);
-          await loadSandboxes();
-          setInstalling(false);
-          return;
-        }
-      }
-      const pipR = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: "pip install -U openshell", cwd: null,
-      });
-      if (pipR.code === 0) {
-        const vr = await invoke<{ stdout: string; code: number }>("execute_command", { command: "openshell --version", cwd: null });
-        if (vr.code === 0 && vr.stdout.trim()) {
-          setInstalled(true);
-          setOpenshellVersion(vr.stdout.trim());
-          showFeedback("success", `OpenShell installed: ${vr.stdout.trim()}`);
-          await loadSandboxes();
-        } else {
-          showFeedback("error", "Package installed but CLI not found. Install manually: uv tool install -U openshell");
-        }
-      } else {
-        showFeedback("error", "Install failed. Run manually in a terminal: uv tool install -U openshell");
-      }
-    } catch (e) {
-      showFeedback("error", `Install error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-    setInstalling(false);
-  };
-
-  const setConfigMode = async (mode: "openshell" | "off"): Promise<boolean> => {
-    try {
-      const r = await invoke<{ code: number }>("execute_command", {
-        command: `openclaw config set agents.defaults.sandbox.mode ${mode}`, cwd: null,
-      });
-      return r.code === 0;
-    } catch { return false; }
-  };
-
-  const handleToggle = async () => {
-    setToggling(true);
-    const enabling = sandboxMode === "off";
-
-    try {
-      if (enabling) {
-        if (!dockerOk) {
-          const ok = await checkDocker();
-          if (!ok) {
-            showFeedback("error", "Docker is not running. Start Docker Desktop first, then try again.");
-            setToggling(false);
-            return;
-          }
-        }
-
-        const hasOcSandbox = sandboxes.some(s =>
-          s.name === "openclaw" || s.name === "openclaw-crystal" || s.image?.includes("openclaw"),
-        );
-
-        if (!hasOcSandbox && installed) {
-          showFeedback("warn", "Creating OpenShell sandbox for OpenClaw... This may take a minute on first run.");
-          const createR = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-            command: "openshell sandbox create --from openclaw --name openclaw-crystal", cwd: null,
-          });
-          if (createR.code !== 0) {
-            const errMsg = (createR.stderr || createR.stdout || "").trim();
-            if (errMsg.toLowerCase().includes("docker") || errMsg.toLowerCase().includes("daemon")) {
-              showFeedback("error", "Docker is not responding. Make sure Docker Desktop is running.");
-            } else {
-              showFeedback("error", `Sandbox creation failed: ${errMsg}`.slice(0, 150));
-            }
-            setToggling(false);
-            return;
-          }
-        }
-
-        const ok = await setConfigMode("openshell");
-        if (ok) {
-          setSandboxMode("openshell");
-          showFeedback("success", "Sandbox mode enabled — agents will run inside OpenShell");
-        } else {
-          showFeedback("error", "Failed to update OpenClaw config. Sandbox not enabled.");
-        }
-      } else {
-        const ok = await setConfigMode("off");
-        if (ok) {
-          setSandboxMode("off");
-          showFeedback("success", "Sandbox mode disabled — agents run on host");
-        } else {
-          showFeedback("error", "Failed to update OpenClaw config. Sandbox mode unchanged.");
-        }
-      }
-      await loadSandboxes();
-    } catch (e) {
-      if (enabling) {
-        await setConfigMode("off").catch(() => {});
-        setSandboxMode("off");
-        showFeedback("error", `Toggle failed and config reverted: ${e instanceof Error ? e.message : String(e)}`);
-      } else {
-        showFeedback("error", `Toggle failed: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
-    setToggling(false);
-  };
-
-  const handleViewLogs = async () => {
-    setLogsLoading(true);
-    try {
-      const name = sandboxes[0]?.name || "openclaw-crystal";
-      const r = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: `openshell logs ${name} --tail 40`, cwd: null,
-      });
-      setLogs(r.stdout || "(no output)");
-    } catch { setLogs("(failed to fetch logs)"); }
-    setLogsLoading(false);
-  };
-
-  const feedbackColors: Record<string, { bg: string; fg: string; border: string }> = {
-    success: { bg: "rgba(74,222,128,0.08)", fg: "#4ade80", border: "rgba(74,222,128,0.2)" },
-    error:   { bg: "rgba(248,113,113,0.08)", fg: "#f87171", border: "rgba(248,113,113,0.2)" },
-    warn:    { bg: "rgba(251,191,36,0.08)", fg: "#fbbf24", border: "rgba(251,191,36,0.2)" },
-  };
-
-  if (loading) {
-    return (
-      <div style={{ ...glowCard("var(--accent)"), padding: "20px 14px", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-        <IconRefresh spin />
-        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Checking OpenShell...</span>
-      </div>
-    );
-  }
-
-  const fb = feedback ? feedbackColors[feedback.type] : null;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {feedback && fb && (
-        <div style={{ padding: "8px 12px", borderRadius: 8, fontSize: 11,
-          background: fb.bg, color: fb.fg, border: `1px solid ${fb.border}` }}>
-          {feedback.text}
-        </div>
-      )}
-
-      {/* Docker warning */}
-      {dockerOk === false && (
-        <div style={{ padding: "8px 12px", borderRadius: 8, fontSize: 11,
-          background: "rgba(251,191,36,0.06)", color: "#fbbf24",
-          border: "1px solid rgba(251,191,36,0.15)", display: "flex", alignItems: "center", gap: 6 }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          Docker Desktop is not running. Sandbox mode requires Docker to create isolated containers.
-        </div>
-      )}
-
-      {/* Main toggle card */}
-      <div style={glowCard("var(--accent)")} data-glow="var(--accent)" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
-        <div style={{ ...rowStyle, borderBottom: "1px solid var(--border)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={iconTile(sandboxMode !== "off" ? "#4ade80" : "var(--text-muted)", 32)}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={sandboxMode !== "off" ? "#4ade80" : "var(--text-muted)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="7" width="20" height="14" rx="2" ry="2" /><path d="M16 7V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v3" /><line x1="12" y1="12" x2="12" y2="16" />
-              </svg>
-            </div>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>Sandbox Mode</div>
-              <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
-                {sandboxMode !== "off"
-                  ? "Agents execute inside isolated OpenShell containers"
-                  : "Agents execute directly on the host system"}
-              </div>
-            </div>
-          </div>
-
-          {installed ? (
-            <button onClick={handleToggle} disabled={toggling} style={{
-              width: 48, height: 26, borderRadius: 13, border: "none", cursor: toggling ? "wait" : "pointer",
-              background: sandboxMode !== "off" ? "#4ade80" : "rgba(255,255,255,0.12)",
-              position: "relative", transition: `background 0.2s ${EASE}`, flexShrink: 0,
-              opacity: toggling ? 0.6 : 1,
-            }}>
-              <div style={{
-                width: 20, height: 20, borderRadius: "50%", background: "#fff",
-                position: "absolute", top: 3,
-                left: sandboxMode !== "off" ? 25 : 3,
-                transition: `left 0.2s ${EASE}`,
-                boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-              }} />
-            </button>
-          ) : (
-            <button onClick={handleInstall} disabled={installing} style={{
-              padding: "6px 14px", borderRadius: 6, fontSize: 11, fontWeight: 500, cursor: "pointer",
-              background: "var(--accent-bg)", color: "var(--accent)", border: "none",
-              opacity: installing ? 0.6 : 1, display: "flex", alignItems: "center", gap: 4,
-            }}>
-              {installing ? <IconRefresh spin /> : null}
-              {installing ? "Installing..." : "Install OpenShell"}
-            </button>
-          )}
-        </div>
-
-        {/* Status row */}
-        <div style={{ ...rowStyle, borderBottom: expanded ? "1px solid var(--border)" : "none" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{
-              width: 7, height: 7, borderRadius: "50%",
-              background: installed ? "#4ade80" : "#f87171",
-            }} />
-            <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-              {installed === null ? "Checking..." : installed ? `OpenShell ${openshellVersion}` : "OpenShell not installed"}
-            </span>
-            {installed && (
-              <>
-                <span style={{ color: "var(--border)", margin: "0 2px" }}>·</span>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: dockerOk ? "#4ade80" : "#f87171" }} />
-                <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{dockerOk ? "Docker running" : "Docker stopped"}</span>
-              </>
-            )}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            {installed && sandboxes.length > 0 && (
-              <span style={{ fontSize: 10, color: "var(--text-muted)", padding: "2px 8px", borderRadius: 4, background: "rgba(59,130,246,0.08)" }}>
-                {sandboxes.length} sandbox{sandboxes.length !== 1 ? "es" : ""}
-              </span>
-            )}
-            <button onClick={() => setExpanded(!expanded)} style={{
-              background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: 10,
-              display: "flex", alignItems: "center", gap: 2, padding: "2px 6px",
-            }}>
-              {expanded ? "▲ Less" : "▼ Details"}
-            </button>
-          </div>
-        </div>
-
-        {/* Expanded details */}
-        {expanded && (
-          <div style={{ padding: "8px 14px 12px" }}>
-            {/* Sandbox list */}
-            {installed && sandboxes.length > 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
-                <div style={{ fontSize: 9, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 }}>Active Sandboxes</div>
-                {sandboxes.map((sb, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 8px", background: "var(--bg)", borderRadius: 6, border: "1px solid var(--border)" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: sb.status === "running" ? "#4ade80" : sb.status === "stopped" ? "#fbbf24" : "var(--text-muted)" }} />
-                      <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text)", fontFamily: "monospace" }}>{sb.name}</span>
-                    </div>
-                    <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{sb.status} {sb.image ? `· ${sb.image}` : ""}</span>
-                  </div>
-                ))}
-              </div>
-            ) : installed ? (
-              <div style={{ fontSize: 11, color: "var(--text-muted)", padding: "8px 0" }}>
-                No sandboxes created yet. Toggle sandbox mode to create one.
-              </div>
-            ) : null}
-
-            {/* Actions */}
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button onClick={async () => { await Promise.all([checkInstalled(), checkDocker()]); await loadSandboxes(); await loadSandboxMode(); }} style={{
-                padding: "5px 12px", borderRadius: 6, fontSize: 10, background: "var(--bg)", border: "1px solid var(--border)",
-                color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
-              }}><IconRefresh /> Refresh</button>
-              {installed && sandboxes.length > 0 && (
-                <button onClick={handleViewLogs} disabled={logsLoading} style={{
-                  padding: "5px 12px", borderRadius: 6, fontSize: 10, background: "var(--bg)", border: "1px solid var(--border)",
-                  color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
-                  opacity: logsLoading ? 0.5 : 1,
-                }}>
-                  {logsLoading ? <IconRefresh spin /> : null} View Logs
-                </button>
-              )}
-            </div>
-
-            {/* Logs output */}
-            {logs !== null && (
-              <pre style={{
-                marginTop: 8, padding: 10, borderRadius: 6, background: "var(--bg)", border: "1px solid var(--border)",
-                fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace", maxHeight: 200, overflowY: "auto",
-                whiteSpace: "pre-wrap", wordBreak: "break-word",
-              }}>{logs}</pre>
-            )}
-
-            {/* Info */}
-            <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 6, background: "rgba(59,130,246,0.05)", border: "1px solid rgba(59,130,246,0.1)" }}>
-              <div style={{ fontSize: 10, fontWeight: 600, color: "var(--accent)", marginBottom: 4 }}>About OpenShell</div>
-              <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.5 }}>
-                <a href="https://github.com/NVIDIA/OpenShell" target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>NVIDIA OpenShell</a> provides
-                sandboxed execution environments with policy-enforced egress routing, filesystem isolation, and process constraints.
-                Each sandbox runs inside a container with kernel-level security (Landlock, seccomp, OPA policy proxy).
-              </div>
-            </div>
-
-            {/* Install instructions when not installed */}
-            {!installed && (
-              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)" }}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>Install Manually</div>
-                <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.6, fontFamily: "monospace" }}>
-                  # Recommended (requires uv)<br />
-                  uv tool install -U openshell<br /><br />
-                  # Or via pip<br />
-                  pip install -U openshell
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {" "}
+      <span
+        style={{ width: 6, height: 6, borderRadius: "50%", background: color }}
+      />{" "}
+      <span style={{ fontSize: 11, color, fontWeight: 600 }}>{count}</span>{" "}
+      <span
+        style={{
+          fontSize: 9,
+          color: "var(--text-muted)",
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+        }}
+      >
+        {label}
+      </span>{" "}
     </div>
   );
 }
