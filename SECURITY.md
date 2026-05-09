@@ -28,7 +28,7 @@ Crystal ships with several safeguards by default:
 
 - **Secrets**: API keys are stored in `~/.openclaw/agents/main/agent/auth-profiles.json` and can be referenced via 1Password (`op://...`) via the 1Password CLI. Plaintext keys are supported but discouraged.
 - **Gateway**: The OpenClaw gateway binds to `127.0.0.1` by default and requires a bearer token for HTTP access.
-- **Sandbox**: Agent command execution can be routed through NVIDIA OpenShell sandboxes when enabled in `openclaw.json`.
+- **Sandbox**: Agent command execution is constrained by OpenClaw's tool policy (allow/deny lists, gateway-routed exec). On Linux/macOS, an additional NVIDIA OpenShell sandbox layer is available; Windows currently has no native OpenShell support and relies on the OpenClaw policy layer plus optional Docker-isolated workloads.
 - **Path safety**: Tauri file operations are restricted to the user's home directory.
 - **CSP**: The app uses a strict Content-Security-Policy in Tauri configuration.
 

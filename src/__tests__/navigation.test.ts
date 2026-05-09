@@ -17,7 +17,6 @@ const NAV_ITEMS: { id: AppView; label: string; group: string }[] = [
   { id: "messaging", label: "Messaging", group: "openclaw" },
   { id: "directory", label: "Directory", group: "openclaw" },
   { id: "subagents", label: "Sub-Agents", group: "openclaw" },
-  { id: "tools", label: "Tools", group: "system" },
   { id: "security", label: "Security", group: "system" },
   { id: "doctor", label: "Doctor", group: "system" },
   { id: "activity", label: "Activity", group: "system" },

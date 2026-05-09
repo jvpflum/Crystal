@@ -1331,7 +1331,7 @@ function CronJobTab({
 
   const totalsLast24h = entries
     .filter((e) => e.at && Date.parse(e.at) > Date.now() - 24 * 3600_000)
-    .reduce(
+    .reduce<{ runs: number; errors: number; triples: number; drawers: number }>(
       (acc, e) => {
         acc.runs += 1;
         if ((e.status || "").toLowerCase() !== "ok") acc.errors += 1;
