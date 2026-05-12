@@ -12,7 +12,7 @@ import {
   Loader2,
   MemoryStick, Bolt, Trash2, Wifi, BatteryFull,
   RefreshCw, Power, RotateCcw, FolderCog, ShieldCheck,
-  MonitorDown, Layers, XCircle, ChevronRight, Database, Search,
+  MonitorDown, Layers, XCircle, ChevronRight,
   Castle, DoorOpen, Network, GitBranch, Pickaxe, Sparkles,
 } from "lucide-react";
 import { useDataStore } from "@/stores/dataStore";
@@ -375,6 +375,7 @@ function GlowProgress({ value, max = 100, color, height = 4 }: {
    no longer rendered now that the unified Memory Health card replaced it)
    ═══════════════════════════════════════════════════════════════ */
 
+// @ts-expect-error retained for any legacy callers; intentionally unreferenced internally
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function VectorRingViz({ chunks, files, vectorReady, ftsReady, loading }: {
   chunks: number; files: number; vectorReady: boolean; ftsReady: boolean; loading: boolean;

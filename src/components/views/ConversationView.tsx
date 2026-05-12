@@ -304,9 +304,8 @@ export function ConversationView() {
     { cmd: "/hooks", label: "Hooks", description: "Agent lifecycle hooks", action: () => setView("hooks") },
     // Navigation — system
     { cmd: "/usage", label: "Usage", description: "Token usage, costs & analytics", action: () => setView("usage") },
-    { cmd: "/tools", label: "Tools", description: "Skills, ClawHub, sandbox & permissions", action: () => setView("tools") },
+    { cmd: "/tools", label: "Tools", description: "Skills, ClawHub, keys & tool permissions", action: () => setView("tools") },
     { cmd: "/hub", label: "ClawHub", description: "Install 3rd-party skills from Hub", action: () => setView("tools") },
-    { cmd: "/sandbox", label: "Sandbox", description: "OpenShell sandbox management", action: () => setView("tools") },
     { cmd: "/doctor", label: "Doctor", description: "System diagnostics & health", action: () => setView("doctor") },
     { cmd: "/settings", label: "Settings", description: "App preferences & API keys", action: () => setView("settings") },
     // Navigation — extended

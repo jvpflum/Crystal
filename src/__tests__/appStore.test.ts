@@ -24,17 +24,25 @@ describe("appStore", () => {
   });
 
   it("accepts all valid AppView values", () => {
+    // NOTE: "office" and "marketplace" are intentionally remapped by setView
+    // (legacy redirects → "agents" and "tools" respectively); excluded here.
     const views: AppView[] = [
-      "home", "conversation", "command-center", "agents", "office",
+      "home", "conversation", "command-center", "agents",
       "factory", "models", "sessions", "templates",
       "channels", "memory", "tools", "activity", "settings",
       "security", "hooks", "doctor", "nodes", "browser", "workspace",
       "messaging", "directory", "devices", "subagents", "webhooks", "voicecall",
+      "tasks", "approvals", "city", "usage",
     ];
     for (const view of views) {
       useAppStore.getState().setView(view);
       expect(useAppStore.getState().currentView).toBe(view);
     }
+  });
+
+  it("remaps legacy 'office' view to 'agents'", () => {
+    useAppStore.getState().setView("office" as AppView);
+    expect(useAppStore.getState().currentView).toBe("agents");
   });
 
   it("opens Command Center with a specific tab", () => {

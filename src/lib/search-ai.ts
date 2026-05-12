@@ -21,9 +21,9 @@ OPENCLAW SECTION:
 
 SYSTEM SECTION:
 - Usage: Token usage analytics — per-provider breakdown (Anthropic, OpenAI, vLLM, Eleven Labs, NVIDIA STT/TTS), estimated costs (cloud API rates + local GPU electricity), local compute savings comparison, input/output token split table with $/M Tok column.
-- Tools: Four tabs — Skills (enable/disable toggles for loaded skills), Hub (ClawHub marketplace — search, install, update verified 3rd-party skills), Sandbox (OpenShell sandbox management — install, enable/disable, Docker status, logs), and Permissions (tool permissions).
+- Tools: Four tabs — Skills (enable/disable toggles for loaded skills), Hub (ClawHub marketplace — search, install, update verified 3rd-party skills), Keys (cloud LLM API key management), and Sandbox & Tools (OpenClaw sandbox containers, browser instances, and tool permissions).
 - Doctor: System diagnostics and health checks.
-- Settings: App preferences, API keys, gateway config, security settings, sandbox management.
+- Settings: App preferences, API keys, gateway config, and security settings.
 
 ADDITIONAL VIEWS (accessible via Ctrl+K command palette):
 - Sessions: Agent session history and management. Clean up old sessions.
@@ -51,7 +51,7 @@ TIPS FOR GUIDING USERS:
 - To see token costs and API spending: Navigate to Usage
 - To enable/disable skills without CLI: Navigate to Tools → Skills tab
 - To install 3rd-party skills from ClawHub: Navigate to Tools → Hub tab
-- To manage sandboxes: Navigate to Tools → Sandbox tab (or Settings)
+- To inspect OpenClaw sandbox containers and tool permissions: Navigate to Tools → Sandbox & Tools tab
 - To see vector store / embedding status: Navigate to Memory → Vector DB tab
 - To dispatch tasks to agents: Navigate to Agents (monitor dashboard)
 - To build software projects: Navigate to Forge
@@ -195,7 +195,6 @@ const VIEW_MAP: Record<string, string> = {
   "api costs": "usage",
   tools: "tools",
   sandbox: "tools",
-  openshell: "tools",
   "claw hub": "tools",
   clawhub: "tools",
   hub: "tools",
