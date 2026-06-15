@@ -13,7 +13,17 @@ export default defineConfig({
     setupFiles: ["./src/__tests__/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
     coverage: {
-      include: ["src/lib/**", "src/stores/**"],
+      include: [
+        "src/lib/**",
+        "src/stores/**",
+        "src/hooks/**",
+        "src/components/shell/**",
+      ],
+      exclude: [
+        "**/*.d.ts",
+        "**/__tests__/**",
+        "src/**/index.ts",
+      ],
     },
   },
 });

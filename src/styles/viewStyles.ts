@@ -242,3 +242,16 @@ export const grid = (cols: number, gap = 12): CSSProperties => ({
 
 export const dropShadow = (color: string, blur = 6) =>
   `drop-shadow(0 0 ${blur}px ${color})`;
+
+/**
+ * Per-row style that lets the browser skip layout + paint for off-screen list
+ * items (`content-visibility: auto`). `estimatedHeightPx` feeds
+ * `contain-intrinsic-size` so the scrollbar stays stable before a row is
+ * rendered. Lightweight virtualization that works with variable row heights and
+ * preserves the DOM, scroll position, selection, and find-in-page — no deps.
+ */
+export const lazyRow = (estimatedHeightPx: number): CSSProperties =>
+  ({
+    contentVisibility: "auto",
+    containIntrinsicSize: `auto ${estimatedHeightPx}px`,
+  } as CSSProperties);

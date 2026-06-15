@@ -53,7 +53,3 @@ export function useToggleWindowShortcut() {
 
   useGlobalShortcut("CommandOrControl+Space", toggle);
 }
-
-export function useActivateVoiceShortcut(onActivate: () => void) {
-  useGlobalShortcut("CommandOrControl+Shift+M", onActivate);
-}

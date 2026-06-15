@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cachedCommand } from "@/lib/cache";
+import { loadPersisted, savePersisted } from "@/lib/persistentCache";
 import {
   Radio,
   Loader2,
@@ -212,6 +213,7 @@ interface Channel {
 }
 
 const CLI_TIMEOUT = 25_000;
+const CHANNELS_CACHE_KEY = "channels";
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -330,9 +332,10 @@ async function fetchCapabilities(name: string): Promise<string[]> {
 }
 
 export function ChannelsView() {
-  const [channels, setChannels] = useState<Channel[]>([]);
+  const [channels, setChannels] = useState<Channel[]>(() => loadPersisted<Channel[]>(CHANNELS_CACHE_KEY) ?? []);
   const [selectedName, setSelectedName] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Paint cached channels instantly; only block on a true cold start (the status CLI can take 15s+).
+  const [loading, setLoading] = useState(() => (loadPersisted<Channel[]>(CHANNELS_CACHE_KEY)?.length ?? 0) === 0);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [capabilities, setCapabilities] = useState<string[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -351,7 +354,6 @@ export function ChannelsView() {
   const channelDef = CHANNEL_TYPES[addType];
 
   const loadAll = useCallback(async () => {
-    setLoading(true);
     try {
       const [{ channels: list, error: listErr }, statusMap] = await Promise.all([fetchChannels(), fetchStatus()]);
       const merged = list.map((ch) => ({
@@ -359,9 +361,10 @@ export function ChannelsView() {
         status: (statusMap[ch.name] as Channel["status"]) ?? ch.status,
       }));
       setChannels(merged);
+      savePersisted(CHANNELS_CACHE_KEY, merged);
       setLoadError(list.length === 0 && listErr ? listErr : null);
     } catch (e) {
-      setChannels([]);
+      // Keep any cached list on screen; just surface the error.
       setLoadError(e instanceof Error ? e.message : "Failed to load channels");
     }
     setLoading(false);
@@ -611,11 +614,11 @@ export function ChannelsView() {
 
         {/* ── Channel list ── */}
         <div style={{ ...scrollArea, padding: "0 8px 8px" }}>
-          {loading ? (
+          {loading && channels.length === 0 ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
               <Loader2 style={{ width: 18, height: 18, color: "var(--text-muted)", animation: "spin 1s linear infinite" }} />
             </div>
-          ) : loadError ? (
+          ) : loadError && channels.length === 0 ? (
             <div style={{ padding: "20px 12px", textAlign: "center" }}>
               <p style={{ fontSize: 12, color: "var(--error)", margin: 0, fontWeight: 500 }}>Failed to load channels</p>
               <p style={{ ...mutedCaption, marginTop: 4 }}>{loadError}</p>

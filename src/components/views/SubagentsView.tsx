@@ -9,7 +9,10 @@ import {
   extractJsonFromAgentOutput,
   pickSubagentListJson,
   pickAcpSessionsJson,
+  parseSubagentListText,
+  parseAcpStatusText,
 } from "@/lib/openclaw";
+import { loadPersisted, savePersisted } from "@/lib/persistentCache";
 import { EASE, MONO, innerPanel, inputStyle, btnPrimary, btnSecondary, sectionLabel, emptyState, row as rowStyle, hoverLift, hoverReset, pressDown, pressUp, scrollArea } from "@/styles/viewStyles";
 
 interface SubAgent {
@@ -35,6 +38,12 @@ const RUNTIMES = ["codex", "claude-code", "gemini-cli"] as const;
 type Runtime = typeof RUNTIMES[number];
 
 type SpawnMode = "subagent" | "acp";
+
+const SUBAGENTS_CACHE_KEY = "subagents";
+// `/subagents list` + `/acp status` each run a full agent turn (~30s), so guard
+// re-mounts: reuse the cached list within this window and revalidate in the bg.
+const SUBAGENTS_TTL = 20_000;
+let subagentsLoadedAt = 0;
 
 const CARD: React.CSSProperties = {
   ...innerPanel, overflow: "hidden",
@@ -66,9 +75,10 @@ const INPUT: React.CSSProperties = {
 };
 
 export function SubagentsView() {
-  const [subagents, setSubagents] = useState<SubAgent[]>([]);
+  const [subagents, setSubagents] = useState<SubAgent[]>(() => loadPersisted<SubAgent[]>(SUBAGENTS_CACHE_KEY) ?? []);
   const [loading, setLoading] = useState(false);
-  const [initialLoad, setInitialLoad] = useState(true);
+  // Skip the blocking spinner when we already have a cached list to paint.
+  const [initialLoad, setInitialLoad] = useState(() => (loadPersisted<SubAgent[]>(SUBAGENTS_CACHE_KEY)?.length ?? 0) === 0);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -101,7 +111,14 @@ export function SubagentsView() {
     return { stdout: result.stdout || result.stderr, code: result.code };
   }, []);
 
-  const loadSubagents = useCallback(async () => {
+  const loadSubagents = useCallback(async (opts?: { force?: boolean } | React.MouseEvent) => {
+    const force = typeof opts === "object" && opts !== null && "force" in opts ? opts.force === true : false;
+    // Stale-while-revalidate: within the TTL, keep the cached list on screen
+    // instead of re-running the ~30s agent turns on every re-mount.
+    if (!force && subagentsLoadedAt && Date.now() - subagentsLoadedAt < SUBAGENTS_TTL) {
+      setInitialLoad(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     const items: SubAgent[] = [];
@@ -112,19 +129,28 @@ export function SubagentsView() {
     ]);
 
     if (subResult.status === "fulfilled" && subResult.value.code === 0 && subResult.value.stdout.trim()) {
-      const data = extractJsonFromAgentOutput(subResult.value.stdout.trim());
+      const text = subResult.value.stdout.trim();
+      const data = extractJsonFromAgentOutput(text);
       if (data !== null) {
         const list = pickSubagentListJson(data);
         items.push(
           ...list.map((s: unknown) => ({ ...(s as SubAgent), source: "subagent" as const }))
         );
-      } else if (subResult.value.stdout.trim()) {
-        setOutput({ title: "Sub-Agents (raw)", content: subResult.value.stdout });
+      } else {
+        // No JSON: the gateway returns formatted text (`active subagents:` / `(none)`). Parse it.
+        const parsed = parseSubagentListText(text);
+        if (parsed.length > 0) {
+          items.push(...parsed.map(p => ({ ...p, source: "subagent" as const })));
+        } else if (!/\(none\)/i.test(text)) {
+          // Unrecognized, non-empty output — surface it as raw details only.
+          setOutput({ title: "Sub-Agents (raw)", content: subResult.value.stdout });
+        }
       }
     }
 
     if (acpResult.status === "fulfilled" && acpResult.value.code === 0 && acpResult.value.stdout.trim()) {
-      const data = extractJsonFromAgentOutput(acpResult.value.stdout.trim());
+      const text = acpResult.value.stdout.trim();
+      const data = extractJsonFromAgentOutput(text);
       if (data !== null) {
         const raw = pickAcpSessionsJson(data);
         const acpList: SubAgent[] = raw.map((s: unknown) => {
@@ -140,14 +166,21 @@ export function SubagentsView() {
           };
         });
         items.push(...acpList);
+      } else {
+        // `/acp status` returns key/value text for a single session. Parse it.
+        const parsed = parseAcpStatusText(text);
+        items.push(...parsed.map(p => ({ ...p, source: "acp" as const })));
       }
     }
 
     if (subResult.status === "rejected" && acpResult.status === "rejected") {
+      // Both round-trips failed — keep any cached/previous list on screen (SWR).
       setError("Failed to load sub-agents");
+    } else {
+      setSubagents(items);
+      savePersisted(SUBAGENTS_CACHE_KEY, items);
+      subagentsLoadedAt = Date.now();
     }
-
-    setSubagents(items);
     setLoading(false);
     setInitialLoad(false);
   }, [sendAgentMessage]);
@@ -226,7 +259,7 @@ export function SubagentsView() {
       setSpawnSandbox("inherit");
       setSpawnCleanup("keep");
       setSpawnCwd("");
-      await loadSubagents();
+      await loadSubagents({ force: true });
     } catch (e) {
       setFeedback({ type: "error", msg: e instanceof Error ? e.message : "Spawn failed" });
     }
@@ -240,7 +273,7 @@ export function SubagentsView() {
       if (result.code === 0) {
         setFeedback({ type: "success", msg: `${label}: Done` });
         if (result.stdout.trim()) setOutput({ title: label, content: result.stdout });
-        if (label.startsWith("Kill") || label.startsWith("Cancel") || label.startsWith("Close")) await loadSubagents();
+        if (label.startsWith("Kill") || label.startsWith("Cancel") || label.startsWith("Close")) await loadSubagents({ force: true });
       } else {
         setFeedback({ type: "error", msg: result.stdout || `${label} failed` });
       }
@@ -300,7 +333,7 @@ export function SubagentsView() {
               {isLoading("Kill All") ? <Loader2 style={{ width: 10, height: 10, animation: "spin 1s linear infinite" }} /> : <Square style={{ width: 10, height: 10 }} />}
               Kill All
             </button>
-            <button onClick={loadSubagents} disabled={loading} onMouseDown={pressDown} onMouseUp={pressUp} style={BTN_P}>
+            <button onClick={() => loadSubagents({ force: true })} disabled={loading} onMouseDown={pressDown} onMouseUp={pressUp} style={BTN_P}>
               <RefreshCw style={{ width: 12, height: 12, ...(loading ? { animation: "spin 1s linear infinite" } : {}) }} /> Refresh
             </button>
           </div>
@@ -515,10 +548,21 @@ export function SubagentsView() {
 
         {/* Active Agents List */}
         <div style={{ marginBottom: 20 }}>
-          <span style={SECT}>Active Agents ({subagents.length})</span>
+          <span style={SECT}>
+            Active Agents ({subagents.length})
+            {loading && !initialLoad && (
+              <span style={{ marginLeft: 8, fontSize: 9, fontWeight: 400, color: "var(--text-muted)", textTransform: "none" }}>
+                <Loader2 style={{ width: 9, height: 9, animation: "spin 1s linear infinite", verticalAlign: "middle", marginRight: 3 }} />
+                Querying live agent…
+              </span>
+            )}
+          </span>
           {initialLoad && loading ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 40 }}>
               <Loader2 style={{ width: 24, height: 24, color: "var(--accent)", animation: "spin 1s linear infinite" }} />
+              <p style={{ fontSize: 10, color: "var(--text-muted)", margin: 0, textAlign: "center" }}>
+                Querying live agent… this runs a full agent turn and can take ~30s.
+              </p>
             </div>
           ) : subagents.length === 0 ? (
             <div style={{ ...CARD, ...emptyState }}>

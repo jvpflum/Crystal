@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Mic, MicOff, Loader2, Trash2, Terminal, ChevronDown, ChevronRight, Copy, Check, Bot, User, Plus, X, PanelLeftClose, PanelLeft, MessageSquare, Zap, Settings2, Shield, Puzzle, Stethoscope, Play, Search, RefreshCw, Download, Globe, Cpu, Brain, ArrowDown, Volume2, Paperclip, FileText, ImageIcon, Music, Video, FileArchive, Upload, Square, ThumbsUp, ThumbsDown, Pencil } from "lucide-react";
+import { Send, Loader2, Trash2, Terminal, ChevronDown, ChevronRight, Copy, Check, Bot, User, Plus, X, PanelLeftClose, PanelLeft, MessageSquare, Zap, Settings2, Shield, Puzzle, Stethoscope, Play, Search, RefreshCw, Download, Globe, Cpu, Brain, ArrowDown, Paperclip, FileText, ImageIcon, Music, Video, FileArchive, Upload, Square, ThumbsUp, ThumbsDown, Pencil } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -8,13 +8,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { Message, ChatAttachment, Surface, openclawClient } from "@/lib/openclaw";
 import { escapeShellArg } from "@/lib/tools";
 import { useAppStore, type AppView } from "@/stores/appStore";
-import { voiceService } from "@/lib/voice";
-import { useVoice } from "@/hooks/useVoice";
-import { NvidiaLogo } from "@/components/widgets/GpuMonitor";
 import { useTokenUsageStore, roughTokenPairEstimate } from "@/stores/tokenUsageStore";
 import { useChatSettingsStore } from "@/stores/chatSettingsStore";
 import { ChatSettingsDrawer } from "@/components/chat/ChatSettingsDrawer";
-import { EASE, innerPanel, MONO } from "@/styles/viewStyles";
+import { EASE, innerPanel, MONO, lazyRow } from "@/styles/viewStyles";
 
 /* ── Conversation types ── */
 
@@ -186,30 +183,18 @@ export function ConversationView() {
   const [toolSteps, setToolSteps] = useState<AgentStep[]>([]);
   const abortRef = useRef(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [micFlashRed, setMicFlashRed] = useState(false);
   const [responseMeta, setResponseMeta] = useState<Record<string, { tokens: number; durationMs: number }>>({});
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const [actionButtons, setActionButtons] = useState<ActionButton[]>([]);
-  const [isListening, setIsListening] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
 
-  // Local STT/TTS pipeline via useVoice (NVIDIA Parakeet → browser fallback)
-  const {
-    voiceState, transcript: voiceTranscript,
-    isSttConnected,
-    hasSpeechRecognition: hasLocalStt,
-    startListening: localStartListening, stopListening: localStopListening,
-    speak: localSpeak,
-  } = useVoice();
-  const localSttAvailable = hasLocalStt || isSttConnected;
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
   const [slashIndex, setSlashIndex] = useState(0);
-  const voiceTriggeredRef = useRef(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
@@ -320,7 +305,6 @@ export function ConversationView() {
     { cmd: "/approvals", label: "Approvals", description: "Exec approval queue", action: () => setView("approvals") },
     { cmd: "/subagents", label: "Sub-Agents", description: "Sub-agents & ACP sessions", action: () => setView("subagents") },
     { cmd: "/webhooks", label: "Webhooks", description: "Webhook endpoints", action: () => setView("webhooks") },
-    { cmd: "/voice", label: "Voice", description: "Voice call interface", action: () => setView("voicecall") },
     { cmd: "/devices", label: "Devices", description: "Connected devices", action: () => setView("devices") },
     // Chat actions
     { cmd: "/new", label: "New Chat", description: "Start a fresh conversation", action: () => handleNewChat() },
@@ -369,8 +353,6 @@ export function ConversationView() {
       { cmd: "/usage tokens", label: "Usage Tokens", description: "Show per-response token counts" },
       { cmd: "/usage cost", label: "Usage Cost", description: "Show local cost summary" },
       { cmd: "/usage off", label: "Usage Off", description: "Hide usage info" },
-      { cmd: "/tts on", label: "TTS On", description: "Enable text-to-speech for responses" },
-      { cmd: "/tts off", label: "TTS Off", description: "Disable text-to-speech" },
       { cmd: "/verbose on", label: "Verbose On", description: "Enable verbose output (debugging)" },
       { cmd: "/verbose off", label: "Verbose Off", description: "Disable verbose output" },
       { cmd: "/config show", label: "Config Show", description: "Show current config" },
@@ -447,23 +429,6 @@ export function ConversationView() {
 
   useEffect(() => {
     const handler = (e: Event) => {
-      const text = (e as CustomEvent).detail;
-      if (text && !isLoading) {
-        voiceTriggeredRef.current = true;
-        pendingSendRef.current = { surface: "voice" };
-        setInput(text);
-        setTimeout(() => {
-          const btn = document.querySelector("[data-send-btn]") as HTMLButtonElement;
-          btn?.click();
-        }, 100);
-      }
-    };
-    window.addEventListener("crystal:voice-message", handler);
-    return () => window.removeEventListener("crystal:voice-message", handler);
-  }, [isLoading]);
-
-  useEffect(() => {
-    const handler = (e: Event) => {
       const { context, followUp, surface, sessionId } = (e as CustomEvent).detail ?? {};
       if (!context) return;
       const text = followUp
@@ -511,49 +476,6 @@ export function ConversationView() {
       editInputRef.current.select();
     }
   }, [editingId]);
-
-  // Sync isListening with local STT voiceState
-  useEffect(() => {
-    if (voiceState !== "listening" && voiceState !== "idle") return;
-    if (voiceState !== "listening" && isListening && localSttAvailable) {
-      setIsListening(false);
-    }
-  }, [voiceState, isListening, localSttAvailable]);
-
-  // When local STT produces a transcript, inject it into the input and auto-send
-  const lastTranscriptRef = useRef("");
-  useEffect(() => {
-    if (voiceTranscript && voiceTranscript !== lastTranscriptRef.current && !isLoading) {
-      lastTranscriptRef.current = voiceTranscript;
-      voiceTriggeredRef.current = true;
-      pendingSendRef.current = { surface: "voice" };
-      setInput(voiceTranscript);
-      // Wait for React to re-render with new input, then click the send button
-      setTimeout(() => {
-        const sendBtn = document.querySelector<HTMLButtonElement>("[data-send-btn]");
-        if (sendBtn && !sendBtn.disabled) {
-          sendBtn.click();
-        }
-      }, 150);
-    }
-  }, [voiceTranscript, isLoading]);
-
-  const handleMicClick = useCallback(async () => {
-    if (!localSttAvailable) {
-      // NVIDIA STT worker not ready — flash red to indicate
-      setMicFlashRed(true);
-      setTimeout(() => setMicFlashRed(false), 1200);
-      return;
-    }
-
-    if (isListening || voiceState === "listening") {
-      await localStopListening();
-      setIsListening(false);
-    } else {
-      setIsListening(true);
-      await localStartListening();
-    }
-  }, [isListening, localSttAvailable, voiceState, localStartListening, localStopListening]);
 
   const handleAttachFiles = useCallback(async (files: FileList | File[]) => {
     const TEXT_EXTENSIONS = new Set([
@@ -760,24 +682,7 @@ export function ConversationView() {
         input: Math.ceil(messageToSend.length / 4),
         output: Math.ceil(finalContent.length / 4),
       });
-
-      if (voiceTriggeredRef.current && finalContent) {
-        voiceTriggeredRef.current = false;
-        const plainText = finalContent
-          .replace(/```[\s\S]*?```/g, "")
-          .replace(/\*\*([^*]+)\*\*/g, "$1")
-          .replace(/\*([^*]+)\*/g, "$1")
-          .replace(/_([^_]+)_/g, "$1")
-          .replace(/#+\s/g, "")
-          .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-          .replace(/<[^>]+>/g, "")
-          .trim();
-        if (plainText.length > 0 && plainText.length < 2000) {
-          localSpeak(plainText).catch(() => {});
-        }
-      }
     } catch (err) {
-      voiceTriggeredRef.current = false;
       updateConversation(activeId, c => ({
         ...c,
         messages: c.messages.map(m =>
@@ -1751,59 +1656,6 @@ export function ConversationView() {
               }} />
             </button>
             <button
-              onClick={handleMicClick}
-              aria-label={isListening ? "Stop listening" : localSttAvailable ? "Voice input (NVIDIA Parakeet)" : "Voice input (NVIDIA offline)"}
-              title={isListening ? "Click to stop" : localSttAvailable ? "NVIDIA Parakeet STT — click to speak" : "NVIDIA STT offline — waiting for GPU worker"}
-              style={{
-                padding: "4px 8px", borderRadius: 8, border: "none", cursor: "pointer", flexShrink: 0,
-                display: "flex", alignItems: "center", gap: 4,
-                background: isListening
-                  ? "rgba(118,185,0,0.15)"
-                  : micFlashRed
-                    ? "rgba(239,68,68,0.1)"
-                    : "transparent",
-                boxShadow: isListening
-                  ? "0 0 16px rgba(118,185,0,0.35)"
-                  : "none",
-                animation: isListening
-                  ? "mic-pulse 1.5s ease-in-out infinite"
-                  : "none",
-                transition: `all 0.2s ${EASE}`,
-              }}
-            >
-              <NvidiaLogo size={13} color={
-                isListening ? "#76b900"
-                  : localSttAvailable ? "#76b900"
-                    : micFlashRed ? "var(--error)"
-                      : "var(--text-muted)"
-              } />
-              {isListening ? (
-                <MicOff style={{
-                  width: 14, height: 14,
-                  color: "#76b900",
-                  transition: `color 0.2s ${EASE}`,
-                }} />
-              ) : (
-                <Mic style={{
-                  width: 14, height: 14,
-                  color: micFlashRed
-                    ? "var(--error)"
-                    : localSttAvailable
-                      ? "#76b900"
-                      : "var(--text-muted)",
-                  transition: `color 0.2s ${EASE}`,
-                }} />
-              )}
-              {localSttAvailable && !isListening && (
-                <span style={{
-                  width: 4, height: 4, borderRadius: "50%",
-                  background: "#76b900",
-                  flexShrink: 0,
-                  boxShadow: "0 0 4px rgba(118,185,0,0.6)",
-                }} />
-              )}
-            </button>
-            <button
               onClick={toggleModel}
               title={isLocalModel
                 ? "Using LOCAL model — click to switch to cloud"
@@ -1963,7 +1815,6 @@ function MessageBubble({ message, isLatest, meta, onImageClick, onRegenerate, on
 }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
   const isEditing = editingMsgId === message.id;
   const hasSearchMatch = !!(searchQuery && message.content.toLowerCase().includes(searchQuery.toLowerCase()));
 
@@ -1973,29 +1824,14 @@ function MessageBubble({ message, isLatest, meta, onImageClick, onRegenerate, on
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const handleSpeak = async () => {
-    if (speaking) return;
-    setSpeaking(true);
-    const plainText = message.content
-      .replace(/```[\s\S]*?```/g, "")
-      .replace(/\*\*([^*]+)\*\*/g, "$1")
-      .replace(/\*([^*]+)\*/g, "$1")
-      .replace(/_([^_]+)_/g, "$1")
-      .replace(/#+\s/g, "")
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-      .replace(/<[^>]+>/g, "")
-      .trim();
-    try {
-      await voiceService.speak(plainText);
-    } catch {}
-    setSpeaking(false);
-  };
-
   return (
     <div className="animate-msg-in" style={{
       display: "flex", gap: 10,
       flexDirection: isUser ? "row-reverse" : "row",
       alignItems: "flex-start",
+      // Skip layout/paint of off-screen messages (incl. their markdown subtree) while scrolling.
+      // The latest/streaming bubble is excluded so its growing height never nudges scroll.
+      ...(isLatest ? {} : lazyRow(120)),
     }}>
       {/* Avatar */}
       <div style={{
@@ -2046,18 +1882,6 @@ function MessageBubble({ message, isLatest, meta, onImageClick, onRegenerate, on
               opacity: 0, transition: `opacity 0.15s ${EASE}`, zIndex: 2,
             }}
           >
-            <button
-              onClick={handleSpeak}
-              aria-label="Read aloud"
-              title="Read aloud"
-              style={{
-                padding: 4, borderRadius: 5,
-                background: speaking ? "var(--accent-bg)" : "rgba(255,255,255,0.08)",
-                border: "none", cursor: "pointer", display: "flex", alignItems: "center",
-              }}
-            >
-              <Volume2 style={{ width: 11, height: 11, color: speaking ? "var(--accent)" : "var(--text-secondary)" }} />
-            </button>
             {isLatest && !parentLoading && onRegenerate && (
               <button
                 onClick={() => onRegenerate(message.id)}
@@ -2650,7 +2474,6 @@ function ActionIcon({ name }: { name: string }) {
     case "globe": return <Globe style={size} />;
     case "cpu": return <Cpu style={size} />;
     case "brain": return <Brain style={size} />;
-    case "mic": return <Mic style={size} />;
     default: return <Zap style={size} />;
   }
 }

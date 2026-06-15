@@ -20,7 +20,7 @@ OPENCLAW SECTION:
 - Hooks: Agent lifecycle hooks and event triggers.
 
 SYSTEM SECTION:
-- Usage: Token usage analytics — per-provider breakdown (Anthropic, OpenAI, vLLM, Eleven Labs, NVIDIA STT/TTS), estimated costs (cloud API rates + local GPU electricity), local compute savings comparison, input/output token split table with $/M Tok column.
+- Usage: Token usage analytics — per-provider breakdown (Anthropic, OpenAI, vLLM, Eleven Labs), estimated costs (cloud API rates + local GPU electricity), local compute savings comparison, input/output token split table with $/M Tok column.
 - Tools: Four tabs — Skills (enable/disable toggles for loaded skills), Hub (ClawHub marketplace — search, install, update verified 3rd-party skills), Keys (cloud LLM API key management), and Sandbox & Tools (OpenClaw sandbox containers, browser instances, and tool permissions).
 - Doctor: System diagnostics and health checks.
 - Settings: App preferences, API keys, gateway config, and security settings.
@@ -40,10 +40,9 @@ ADDITIONAL VIEWS (accessible via Ctrl+K command palette):
 - Directory: Contact directory.
 - Messaging: Notifications and messages.
 - Webhooks: Webhook endpoint management.
-- Voice Calls: Voice call interface (NVIDIA Riva STT/TTS).
 
 Agents: main (JC/Juiceclaw — default), research, home, finance
-Key Skills: bill-pay, bill-sweep, bounty-hunter, car-broker, charts, desktop-control-win, fundamental-stock-analysis, goplaces, home-broker, home-project, humanize-ai-text, market-research-agent, notion, openclaw-auto-updater, sag, self-improve, session-logs, session-wrap, skill-vetter, summarize, venture-capital, voice-chat
+Key Skills: bill-pay, bill-sweep, bounty-hunter, car-broker, charts, desktop-control-win, fundamental-stock-analysis, goplaces, home-broker, home-project, humanize-ai-text, market-research-agent, notion, openclaw-auto-updater, sag, self-improve, session-logs, session-wrap, skill-vetter, summarize, venture-capital
 Memory: MemPalace (spatial hierarchy wings/rooms/closets/drawers, Knowledge Graph, AAAK compression, Agent Diary, tunnels) + memory-lancedb (vector auto-capture)
 
 TIPS FOR GUIDING USERS:
@@ -237,8 +236,6 @@ const VIEW_MAP: Record<string, string> = {
   "sub-agents": "subagents",
   acp: "subagents",
   webhooks: "webhooks",
-  "voice call": "voicecall",
-  voice: "voicecall",
 
   // Dashboard sections
   gpu: "home",

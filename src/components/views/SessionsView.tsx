@@ -1,15 +1,36 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, memo } from "react";
 import {
   Loader2, RefreshCw, Trash2, AlertTriangle, Clock,
   Cpu, MessageSquare, Zap, Filter, Settings2,
   CheckSquare, Square, XCircle, Calendar, ArrowUpDown,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { loadPersisted, savePersisted, withTimeout } from "@/lib/persistentCache";
 import {
   EASE, MONO, glowCard, innerPanel, emptyState, sectionLabel,
   hoverLift, hoverReset, pressDown, pressUp, scrollArea,
-  btnPrimary, btnSecondary, viewContainer, headerRow, badge, iconTile,
+  btnPrimary, btnSecondary, viewContainer, headerRow, badge, iconTile, lazyRow,
 } from "@/styles/viewStyles";
+
+const SESSIONS_CACHE_KEY = "sessions";
+
+const formatAge = (ts: number) => {
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return `${Math.floor(days / 7)}w ago`;
+};
+
+const formatTokens = (n: number) => {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return `${n}`;
+};
 
 interface MaintenanceConfig {
   mode: string;
@@ -40,8 +61,9 @@ const AGE_PRESETS = [
 ] as const;
 
 export function SessionsView() {
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [sessions, setSessions] = useState<Session[]>(() => loadPersisted<Session[]>(SESSIONS_CACHE_KEY) ?? []);
+  // Paint cached sessions instantly; only block on a true cold start.
+  const [loading, setLoading] = useState(() => (loadPersisted<Session[]>(SESSIONS_CACHE_KEY)?.length ?? 0) === 0);
   const [error, setError] = useState<string | null>(null);
   const [cleaning, setCleaning] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -63,24 +85,28 @@ export function SessionsView() {
   }, [feedback]);
 
   const loadSessions = useCallback(async (useActive?: boolean | React.MouseEvent) => {
-    setLoading(true);
     setError(null);
     const active = (typeof useActive === "boolean" ? useActive : undefined) ?? activeFilter;
     try {
       const cmd = active ? "openclaw sessions --json --active 24h" : "openclaw sessions --json";
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: cmd, cwd: null,
-      });
+      // Bound the spawn so a stalled gateway can't hang the view (CLI itself has no client-side timeout).
+      const result = await withTimeout(
+        invoke<{ stdout: string; stderr: string; code: number }>("execute_command", { command: cmd, cwd: null }),
+        20_000,
+        "openclaw sessions",
+      );
       if (result.code !== 0) {
         setError(result.stderr || "Failed to list sessions");
-        setSessions([]);
       } else {
         const data = JSON.parse(result.stdout);
-        setSessions((data.sessions || []).sort((a: Session, b: Session) => b.updatedAt - a.updatedAt));
+        const sorted: Session[] = (data.sessions || []).sort((a: Session, b: Session) => b.updatedAt - a.updatedAt);
+        setSessions(sorted);
+        // Persist the canonical (unfiltered) list for instant hydration next time.
+        if (!active) savePersisted(SESSIONS_CACHE_KEY, sorted);
       }
     } catch (e) {
+      // Keep any cached/previous list on screen (stale-while-revalidate); just surface the error.
       setError(e instanceof Error ? e.message : "Failed to load sessions");
-      setSessions([]);
     }
     setLoading(false);
     setSelected(new Set());
@@ -129,17 +155,21 @@ export function SessionsView() {
     setMaintenanceLoading(false);
   };
 
-  const deleteSession = async (sessionId: string) => {
+  const deleteSession = useCallback(async (sessionId: string) => {
     setDeleting(sessionId);
     try {
       await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
         command: `openclaw sessions rm ${sessionId}`, cwd: null,
       });
-      setSessions(prev => prev.filter(s => s.sessionId !== sessionId));
+      setSessions(prev => {
+        const next = prev.filter(s => s.sessionId !== sessionId);
+        savePersisted(SESSIONS_CACHE_KEY, next);
+        return next;
+      });
       setSelected(prev => { const next = new Set(prev); next.delete(sessionId); return next; });
     } catch { /* ignore */ }
     setDeleting(null);
-  };
+  }, []);
 
   const bulkDelete = async (ids: string[]) => {
     setBulkDeleting(true);
@@ -179,13 +209,13 @@ export function SessionsView() {
     setShowPurgeConfirm(false);
   };
 
-  const toggleSelect = (id: string) => {
+  const toggleSelect = useCallback((id: string) => {
     setSelected(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
-  };
+  }, []);
 
   const toggleSelectAll = () => {
     if (selected.size === sortedSessions.length) {
@@ -210,24 +240,6 @@ export function SessionsView() {
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortKey(key); setSortDir("desc"); }
-  };
-
-  const formatAge = (ts: number) => {
-    const diff = Date.now() - ts;
-    const mins = Math.floor(diff / 60_000);
-    if (mins < 1) return "just now";
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    if (days < 7) return `${days}d ago`;
-    return `${Math.floor(days / 7)}w ago`;
-  };
-
-  const formatTokens = (n: number) => {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-    return `${n}`;
   };
 
   const totalTokensUsed = sessions.reduce((a, s) => a + s.totalTokens, 0);
@@ -301,7 +313,7 @@ export function SessionsView() {
       )}
 
       {/* Stats row */}
-      {!loading && sessions.length > 0 && (
+      {sessions.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
           <StatCard label="Total" value={sessions.length} color="#3b82f6" icon={MessageSquare} />
           <StatCard label="Active (<1h)" value={recentCount} color="#34d399" icon={Zap} />
@@ -311,7 +323,7 @@ export function SessionsView() {
       )}
 
       {/* Quick purge actions */}
-      {!loading && sessions.length > 5 && (
+      {sessions.length > 5 && (
         <div style={{ ...innerPanel, padding: "10px 14px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
             <Calendar style={{ width: 11, height: 11, color: "var(--text-muted)" }} />
@@ -397,7 +409,7 @@ export function SessionsView() {
       )}
 
       {/* Sort bar + select-all */}
-      {!loading && sessions.length > 0 && (
+      {sessions.length > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <button onClick={toggleSelectAll} title={selected.size === sortedSessions.length ? "Deselect all" : "Select all"}
             style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "var(--text-muted)", display: "flex" }}>
@@ -423,11 +435,11 @@ export function SessionsView() {
 
       {/* Session list */}
       <div style={scrollArea}>
-        {loading ? (
+        {loading && sessions.length === 0 ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
             <Loader2 style={{ width: 24, height: 24, color: "var(--accent)" }} className="animate-spin" />
           </div>
-        ) : error ? (
+        ) : error && sessions.length === 0 ? (
           <div style={emptyState}>
             <AlertTriangle style={{ width: 24, height: 24, color: "var(--error)" }} />
             <p style={{ fontSize: 12, color: "var(--error)", textAlign: "center" }}>{error}</p>
@@ -444,19 +456,17 @@ export function SessionsView() {
               <SessionCard
                 key={session.sessionId}
                 session={session}
-                formatAge={formatAge}
-                formatTokens={formatTokens}
-                onDelete={() => deleteSession(session.sessionId)}
+                onDelete={deleteSession}
                 isDeleting={deleting === session.sessionId}
                 isSelected={selected.has(session.sessionId)}
-                onToggleSelect={() => toggleSelect(session.sessionId)}
+                onToggleSelect={toggleSelect}
               />
             ))}
           </div>
         )}
 
         {/* Maintenance Config */}
-        {!loading && (
+        {(
           <div style={{ ...innerPanel, marginTop: 16, padding: "10px 14px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
               <Settings2 style={{ width: 12, height: 12, color: "var(--text-muted)" }} />
@@ -519,14 +529,12 @@ function StatCard({ label, value, color, icon: Icon }: { label: string; value: n
   );
 }
 
-function SessionCard({ session, formatAge, formatTokens, onDelete, isDeleting, isSelected, onToggleSelect }: {
+const SessionCard = memo(function SessionCard({ session, onDelete, isDeleting, isSelected, onToggleSelect }: {
   session: Session;
-  formatAge: (ts: number) => string;
-  formatTokens: (n: number) => string;
-  onDelete: () => void;
+  onDelete: (id: string) => void;
   isDeleting: boolean;
   isSelected: boolean;
-  onToggleSelect: () => void;
+  onToggleSelect: (id: string) => void;
 }) {
   const usageRatio = session.contextTokens > 0
     ? Math.min(session.totalTokens / session.contextTokens, 1)
@@ -545,6 +553,7 @@ function SessionCard({ session, formatAge, formatTokens, onDelete, isDeleting, i
     <div
       style={{
         ...innerPanel, padding: "10px 12px",
+        ...lazyRow(150),
         borderColor: isSelected ? "rgba(59,130,246,0.25)" : undefined,
         background: isSelected ? "rgba(59,130,246,0.04)" : undefined,
       }}
@@ -554,7 +563,7 @@ function SessionCard({ session, formatAge, formatTokens, onDelete, isDeleting, i
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
         {/* Checkbox */}
-        <button onClick={onToggleSelect} style={{
+        <button onClick={() => onToggleSelect(session.sessionId)} style={{
           background: "none", border: "none", cursor: "pointer", padding: 2, marginTop: 2,
           color: isSelected ? "var(--accent)" : "rgba(255,255,255,0.2)",
           display: "flex", flexShrink: 0, transition: `color 0.15s ${EASE}`,
@@ -590,7 +599,7 @@ function SessionCard({ session, formatAge, formatTokens, onDelete, isDeleting, i
               {formatAge(session.updatedAt)}
             </span>
           </div>
-          <button onClick={onDelete} disabled={isDeleting} title="Delete this session"
+          <button onClick={() => onDelete(session.sessionId)} disabled={isDeleting} title="Delete this session"
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
               width: 24, height: 24, borderRadius: 7, border: "none",
@@ -630,7 +639,7 @@ function SessionCard({ session, formatAge, formatTokens, onDelete, isDeleting, i
       </div>
     </div>
   );
-}
+});
 
 function TokenStat({ icon: Icon, label, value, color }: {
   icon: React.ElementType; label: string; value: string; color: string;

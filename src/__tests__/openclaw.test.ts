@@ -5,7 +5,12 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { invoke } from "@tauri-apps/api/core";
-import { openclawClient, SUPPORTED_CHANNELS } from "@/lib/openclaw";
+import {
+  openclawClient,
+  SUPPORTED_CHANNELS,
+  parseSubagentListText,
+  parseAcpStatusText,
+} from "@/lib/openclaw";
 
 const mockInvoke = vi.mocked(invoke);
 
@@ -154,6 +159,100 @@ describe("openclawClient", () => {
       expect(dailyWrite).toBeDefined();
       expect(dailyWrite).not.toContain("daily-");
       expect(dailyWrite).toMatch(/memory\\\d{4}-\d{2}-\d{2}\.md$/);
+    });
+  });
+
+  describe("parseSubagentListText", () => {
+    it("returns no rows for an empty (none) list", () => {
+      const text = [
+        "active subagents:",
+        "-----",
+        "(none)",
+        "",
+        "recent subagents (last 30m):",
+        "-----",
+        "(none)",
+      ].join("\n");
+      expect(parseSubagentListText(text)).toEqual([]);
+    });
+
+    it("parses an active subagent row into id/label/model/status/task", () => {
+      const text = [
+        "active subagents:",
+        "-----",
+        "1. research (anthropic/claude-sonnet-4, 2m 30s, 1.2k tok) running - Investigate the parser bug",
+        "",
+        "recent subagents (last 30m):",
+        "-----",
+        "(none)",
+      ].join("\n");
+      const rows = parseSubagentListText(text);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        id: "1",
+        label: "research",
+        model: "anthropic/claude-sonnet-4",
+        runtime: "2m 30s",
+        status: "running",
+        task: "Investigate the parser bug",
+        recent: false,
+      });
+    });
+
+    it("handles multi-word status with parentheses and marks recent rows", () => {
+      const text = [
+        "active subagents:",
+        "-----",
+        "1. build (codex, 10s) active (waiting on 2 children) - Build the thing",
+        "",
+        "recent subagents (last 30m):",
+        "-----",
+        "2. cleanup (gemini, 5s) done",
+      ].join("\n");
+      const rows = parseSubagentListText(text);
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject({
+        id: "1",
+        status: "active (waiting on 2 children)",
+        task: "Build the thing",
+        recent: false,
+      });
+      expect(rows[1]).toMatchObject({ id: "2", label: "cleanup", status: "done", recent: true });
+      expect(rows[1].task).toBeUndefined();
+    });
+
+    it("returns no rows for blank input", () => {
+      expect(parseSubagentListText("")).toEqual([]);
+      expect(parseSubagentListText("   \n  ")).toEqual([]);
+    });
+  });
+
+  describe("parseAcpStatusText", () => {
+    it("parses a single ACP session status block", () => {
+      const text = [
+        "ACP status:",
+        "-----",
+        "session: main:acp:codex:abc123",
+        "backend: codex",
+        "agent: main",
+        "sessionMode: default",
+        "state: running",
+        "taskProgress: Refactoring the module",
+      ].join("\n");
+      const rows = parseAcpStatusText(text);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        id: "main:acp:codex:abc123",
+        label: "main",
+        runtime: "codex",
+        status: "running",
+        task: "Refactoring the module",
+      });
+    });
+
+    it("returns no rows when there is no session line (e.g. a warning)", () => {
+      expect(parseAcpStatusText("⚠️ No active ACP session.")).toEqual([]);
+      expect(parseAcpStatusText("")).toEqual([]);
     });
   });
 

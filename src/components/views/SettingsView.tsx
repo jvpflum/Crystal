@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
 import { cachedCommand } from "@/lib/cache";
 import { useOpenClaw } from "@/hooks/useOpenClaw";
-import { useVoice } from "@/hooks/useVoice";
 import {
   openclawClient,
   getSystemPromptFromOpenClawConfig,
@@ -53,12 +52,6 @@ const dot = (color: string): CSSProperties => ({
   background: color,
   flexShrink: 0,
 });
-const VOICE_PROVIDER_META: Record<string, { label: string; port?: string }> = {
-  "nvidia-nemotron": { label: "NVIDIA Parakeet (NeMo)", port: "8090" },
-  "browser-stt": { label: "Browser Speech API" },
-  "nvidia-magpie": { label: "NVIDIA Magpie TTS", port: "8091" },
-  "browser-tts": { label: "Browser TTS" },
-};
 /* ── SVG helpers ── */ function IconRefresh({ spin }: { spin?: boolean }) {
   return (
     <svg
@@ -166,18 +159,12 @@ function IconCopy() {
 /* ── Main component ── */ export function SettingsView() {
   const { isConnected, checkConnection } = useOpenClaw();
   const setView = useAppStore((s) => s.setView);
-  const {
-    checkConnections,
-    providerStatuses,
-    preferredStt,
-    preferredTts,
-    setSttProvider,
-    setTtsProvider,
-  } = useVoice();
   const gatewayConnected = useAppStore((s) => s.gatewayConnected);
+  // Live gateway state, shared with the title-bar dots: "off" | "starting" | "ready".
+  // Lets us show a distinct "Checking…" state instead of flashing "Offline" mid-probe.
+  const gatewayService = useAppStore((s) => s.serviceStatus.gateway);
   const { themeId, setTheme } = useThemeStore();
   const [checking, setChecking] = useState(false);
-  const [checkingVoice, setCheckingVoice] = useState(false);
   const [showAuthToken, setShowAuthToken] = useState(false);
   const [authToken, setAuthToken] = useState("");
   const [tokenCopied, setTokenCopied] = useState(false);
@@ -222,7 +209,9 @@ function IconCopy() {
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [configSaved, setConfigSaved] = useState(false);
   const [configPath] = useState("~/.openclaw/openclaw.json");
-  const [daemonInstalled, setDaemonInstalled] = useState(false);
+  // Tri-state so the row shows "Checking…" before the first probe resolves,
+  // instead of defaulting to a misleading "Not Installed".
+  const [daemonStatus, setDaemonStatus] = useState<"unknown" | "installed" | "not-installed">("unknown");
   const [daemonBusy, setDaemonBusy] = useState(false);
   const [daemonOutput, setDaemonOutput] = useState("");
   const [configKey, setConfigKey] = useState("");
@@ -269,7 +258,6 @@ function IconCopy() {
     setOcExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
   /* ── effects ── */ useEffect(() => {
     checkConnection();
-    checkConnections();
     loadConfig();
     loadOpenClawVersion();
     measureLatency();
@@ -292,6 +280,20 @@ function IconCopy() {
       })
       .catch(() => {});
   }, []);
+  /* Keep the daemon + latency rows live: re-probe whenever the shared gateway
+   * connection flips (e.g. it finished booting after this view mounted) and on a
+   * slow interval, so a one-time mount check taken before the gateway was ready
+   * can't leave them stuck on a stale "Not Installed" / "—". */
+  useEffect(() => {
+    checkDaemonStatus();
+    measureLatency();
+    const id = setInterval(() => {
+      checkDaemonStatus();
+      measureLatency();
+    }, 20_000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gatewayConnected]);
   /* ── helpers ── */ const measureLatency = async () => {
     try {
       const start = performance.now();
@@ -351,11 +353,6 @@ function IconCopy() {
     setChecking(true);
     await checkConnection();
     setChecking(false);
-  };
-  const handleRefreshVoice = async () => {
-    setCheckingVoice(true);
-    await checkConnections();
-    setCheckingVoice(false);
   };
   const handleStartGateway = async () => {
     await openclawClient.startDaemon();
@@ -515,11 +512,13 @@ function IconCopy() {
         "execute_command",
         { command: "openclaw gateway status", cwd: null },
       );
-      setDaemonInstalled(
-        result.code === 0 && !result.stdout.includes("not installed"),
+      setDaemonStatus(
+        result.code === 0 && !result.stdout.includes("not installed")
+          ? "installed"
+          : "not-installed",
       );
     } catch {
-      setDaemonInstalled(false);
+      setDaemonStatus("not-installed");
     }
   };
   const runDaemonCmd = async (cmd: string) => {
@@ -891,7 +890,11 @@ function IconCopy() {
                 {" "}
                 <span
                   style={dot(
-                    gatewayConnected ? "var(--success)" : "var(--error)",
+                    gatewayConnected
+                      ? "var(--success)"
+                      : gatewayService === "starting"
+                        ? "var(--warning)"
+                        : "var(--error)",
                   )}
                 />{" "}
                 <span style={LABEL}>Connection</span>{" "}
@@ -899,11 +902,19 @@ function IconCopy() {
               <span
                 style={{
                   ...VALUE,
-                  color: gatewayConnected ? "var(--success)" : "var(--error)",
+                  color: gatewayConnected
+                    ? "var(--success)"
+                    : gatewayService === "starting"
+                      ? "var(--warning)"
+                      : "var(--error)",
                 }}
               >
                 {" "}
-                {gatewayConnected ? "Connected" : "Offline"}{" "}
+                {gatewayConnected
+                  ? "Connected"
+                  : gatewayService === "starting"
+                    ? "Connecting…"
+                    : "Offline"}{" "}
               </span>{" "}
             </div>{" "}
             <div style={rowStyle}>
@@ -941,9 +952,12 @@ function IconCopy() {
                     width: 6,
                     height: 6,
                     borderRadius: "50%",
-                    background: daemonInstalled
-                      ? "var(--success)"
-                      : "var(--error)",
+                    background:
+                      daemonStatus === "installed"
+                        ? "var(--success)"
+                        : daemonStatus === "unknown"
+                          ? "var(--warning)"
+                          : "var(--error)",
                     flexShrink: 0,
                   }}
                 />{" "}
@@ -951,10 +965,19 @@ function IconCopy() {
                   style={{
                     ...VALUE,
                     fontSize: 11,
-                    color: daemonInstalled ? "var(--success)" : "var(--error)",
+                    color:
+                      daemonStatus === "installed"
+                        ? "var(--success)"
+                        : daemonStatus === "unknown"
+                          ? "var(--warning)"
+                          : "var(--error)",
                   }}
                 >
-                  {daemonInstalled ? "Installed" : "Not Installed"}
+                  {daemonStatus === "installed"
+                    ? "Installed"
+                    : daemonStatus === "unknown"
+                      ? "Checking…"
+                      : "Not Installed"}
                 </span>{" "}
               </div>{" "}
             </div>{" "}
@@ -1344,13 +1367,23 @@ function IconCopy() {
                   </span>
                 ) : (
                   <span
-                    style={dot(isConnected ? "var(--success)" : "var(--error)")}
+                    style={dot(
+                      isConnected
+                        ? "var(--success)"
+                        : gatewayService === "starting"
+                          ? "var(--warning)"
+                          : "var(--error)",
+                    )}
                   />
                 )}{" "}
                 <span
                   style={{
                     fontSize: 11,
-                    color: isConnected ? "var(--success)" : "var(--error)",
+                    color: isConnected
+                      ? "var(--success)"
+                      : gatewayService === "starting"
+                        ? "var(--warning)"
+                        : "var(--error)",
                   }}
                 >
                   {" "}
@@ -1358,7 +1391,9 @@ function IconCopy() {
                     ? "Checking..."
                     : isConnected
                       ? "OpenClaw gateway connected"
-                      : "Gateway offline"}{" "}
+                      : gatewayService === "starting"
+                        ? "Connecting…"
+                        : "Gateway offline"}{" "}
                 </span>{" "}
               </div>{" "}
               <button
@@ -1386,48 +1421,6 @@ function IconCopy() {
         <Section title="API KEYS">
           {" "}
           <ApiKeysSection />{" "}
-        </Section>{" "}
-        {/* ───────── VOICE ───────── */}{" "}
-        <Section title="VOICE">
-          {" "}
-          <div
-            style={glowCard("var(--accent)")}
-            data-glow="var(--accent)"
-            onMouseEnter={hoverLift}
-            onMouseLeave={hoverReset}
-          >
-            {" "}
-            <VoiceProviderRow
-              label="Speech to Text"
-              providers={providerStatuses?.stt ?? []}
-              preferredId={preferredStt}
-              onSelect={setSttProvider}
-            />{" "}
-            <VoiceProviderRow
-              label="Text to Speech"
-              providers={providerStatuses?.tts ?? []}
-              preferredId={preferredTts}
-              onSelect={setTtsProvider}
-            />{" "}
-            <div
-              style={{
-                padding: "8px 14px 10px",
-                display: "flex",
-                gap: 8,
-                borderTop: "1px solid var(--border)",
-              }}
-            >
-              {" "}
-              <button
-                onClick={handleRefreshVoice}
-                style={btnPrimary}
-                onMouseDown={pressDown}
-                onMouseUp={pressUp}
-              >
-                <IconRefresh spin={checkingVoice} /> Test Connections
-              </button>{" "}
-            </div>{" "}
-          </div>{" "}
         </Section>{" "}
         {/* ───────── AI CONFIGURATION ───────── */}{" "}
         <Section title="AI CONFIGURATION">
@@ -2908,153 +2901,6 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
     <div style={{ marginBottom: 18 }}>
       <div style={sectionLabel}>{title}</div>
       {children}
-    </div>
-  );
-}
-/* ── Voice Provider Selector ── */ function VoiceProviderRow({
-  label,
-  providers,
-  preferredId,
-  onSelect,
-}: {
-  label: string;
-  providers: Array<{
-    id: string;
-    name: string;
-    available: boolean;
-    active: boolean;
-  }>;
-  preferredId: string;
-  onSelect: (id: string) => void;
-}) {
-  const preferred = providers.find((p) => p.id === preferredId);
-  const active = providers.find((p) => p.active);
-  const meta = preferred ? VOICE_PROVIDER_META[preferred.id] : null;
-  const activeMeta = active ? VOICE_PROVIDER_META[active.id] : null;
-  const isFallback = preferred && active && preferred.id !== active.id;
-  return (
-    <div
-      style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)" }}
-    >
-      {" "}
-      <span style={{ ...LABEL, display: "block", marginBottom: 8 }}>
-        {label}
-      </span>{" "}
-      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-        {" "}
-        {providers.map((p) => {
-          const isSelected = p.id === preferredId;
-          const pmeta = VOICE_PROVIDER_META[p.id];
-          return (
-            <button
-              key={p.id}
-              onClick={() => onSelect(p.id)}
-              style={{
-                padding: "5px 12px",
-                borderRadius: 6,
-                fontSize: 10,
-                fontWeight: 500,
-                cursor: "pointer",
-                transition: `all 0.15s ${EASE}`,
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                border: isSelected
-                  ? "1px solid var(--accent)"
-                  : "1px solid var(--border)",
-                background: isSelected
-                  ? "var(--accent-bg)"
-                  : "var(--bg-elevated)",
-                color: isSelected ? "var(--accent)" : "var(--text-muted)",
-              }}
-            >
-              {" "}
-              <span
-                style={{
-                  width: 5,
-                  height: 5,
-                  borderRadius: "50%",
-                  flexShrink: 0,
-                  background: p.available
-                    ? "var(--success)"
-                    : "var(--text-muted)",
-                }}
-              />{" "}
-              {pmeta?.label ?? p.name}{" "}
-            </button>
-          );
-        })}{" "}
-      </div>{" "}
-      {providers.length > 0 && (
-        <div
-          style={{
-            marginTop: 8,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          {" "}
-          {preferred?.available ? (
-            <>
-              {" "}
-              <span
-                style={{
-                  width: 5,
-                  height: 5,
-                  borderRadius: "50%",
-                  background: "var(--success)",
-                  flexShrink: 0,
-                }}
-              />{" "}
-              <span style={{ fontSize: 11, color: "var(--success)" }}>
-                Connected
-              </span>{" "}
-              {meta?.port && (
-                <span
-                  style={{
-                    fontSize: 10,
-                    color: "var(--text-muted)",
-                    fontFamily: MONO,
-                  }}
-                >
-                  :{meta.port}
-                </span>
-              )}{" "}
-            </>
-          ) : (
-            <>
-              {" "}
-              <span
-                style={{
-                  width: 5,
-                  height: 5,
-                  borderRadius: "50%",
-                  background: "var(--warning, #f59e0b)",
-                  flexShrink: 0,
-                }}
-              />{" "}
-              <span style={{ fontSize: 11, color: "var(--warning, #f59e0b)" }}>
-                {" "}
-                {isFallback
-                  ? `Offline — using ${activeMeta?.label ?? active?.name ?? "fallback"}`
-                  : "Offline"}{" "}
-              </span>{" "}
-            </>
-          )}{" "}
-        </div>
-      )}{" "}
-      {providers.length === 0 && (
-        <span
-          style={{
-            fontSize: 10,
-            color: "var(--text-muted)",
-            fontStyle: "italic",
-          }}
-        >
-          Loading providers...
-        </span>
-      )}{" "}
     </div>
   );
 }

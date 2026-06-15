@@ -4,7 +4,11 @@ import {
   ListChecks, RefreshCw, Loader2, AlertTriangle, XCircle,
   CheckCircle2, Clock, Play, Ban, Wrench, Filter,
 } from "lucide-react";
-import { EASE, glowCard, hoverLift, hoverReset, pressDown, pressUp, innerPanel, badge, emptyState, MONO } from "@/styles/viewStyles";
+import { loadPersisted, savePersisted, withTimeout } from "@/lib/persistentCache";
+import { EASE, glowCard, hoverLift, hoverReset, pressDown, pressUp, innerPanel, badge, emptyState, MONO, lazyRow } from "@/styles/viewStyles";
+
+// The unfiltered list is the one we hydrate from on cold start (filters reset to "all" on mount).
+const TASKS_CACHE_KEY = "tasks:all:all";
 
 interface BackgroundTask {
   id: string;
@@ -42,8 +46,9 @@ const STATUS_ICONS: Record<string, React.ElementType> = {
 };
 
 export function TasksView() {
-  const [tasks, setTasks] = useState<BackgroundTask[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [tasks, setTasks] = useState<BackgroundTask[]>(() => loadPersisted<BackgroundTask[]>(TASKS_CACHE_KEY) ?? []);
+  // Paint cached tasks instantly; only block on a true cold start.
+  const [loading, setLoading] = useState(() => (loadPersisted<BackgroundTask[]>(TASKS_CACHE_KEY)?.length ?? 0) === 0);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("all");
   const [kindFilter, setKindFilter] = useState<string>("all");
@@ -53,17 +58,21 @@ export function TasksView() {
   const [busy, setBusy] = useState<string | null>(null);
 
   const loadTasks = useCallback(async () => {
+    const cacheKey = `tasks:${filter}:${kindFilter}`;
     try {
       let cmd = "openclaw tasks list --json";
       if (filter !== "all") cmd += ` --status ${filter}`;
       if (kindFilter !== "all") cmd += ` --runtime ${kindFilter}`;
-      const result = await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
-        command: cmd, cwd: null,
-      });
-      if (result.code === 0 && result.stdout.trim()) {
-        const parsed = JSON.parse(result.stdout);
+      // Bound the spawn so a stalled gateway can't hang the polling loop.
+      const result = await withTimeout(
+        invoke<{ stdout: string; stderr: string; code: number }>("execute_command", { command: cmd, cwd: null }),
+        15_000,
+        "openclaw tasks",
+      );
+      if (result.code === 0) {
+        const parsed = result.stdout.trim() ? JSON.parse(result.stdout) : [];
         const items = Array.isArray(parsed) ? parsed : parsed.tasks ?? parsed.runs ?? [];
-        setTasks(items.map((t: Record<string, unknown>) => ({
+        const mapped: BackgroundTask[] = items.map((t: Record<string, unknown>) => ({
           id: String(t.taskId ?? t.id ?? ""),
           runId: t.runId ? String(t.runId) : undefined,
           kind: String(t.kind ?? t.runtime ?? "unknown"),
@@ -76,11 +85,13 @@ export function TasksView() {
           completedAt: t.completedAt ? String(t.completedAt) : t.finishedAt ? String(t.finishedAt) : undefined,
           durationMs: t.durationMs ? Number(t.durationMs) : undefined,
           error: t.error ? String(t.error) : undefined,
-        })));
+        }));
+        setTasks(mapped);
+        savePersisted(cacheKey, mapped);
         setError(null);
       } else {
-        setTasks([]);
-        setError(result.code !== 0 ? (result.stderr || "Command failed") : null);
+        // Keep the last good list on screen; just surface the error.
+        setError(result.stderr || "Command failed");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load tasks");
@@ -89,7 +100,6 @@ export function TasksView() {
   }, [filter, kindFilter]);
 
   useEffect(() => {
-    setLoading(true);
     loadTasks();
     const interval = setInterval(loadTasks, 15_000);
     return () => clearInterval(interval);
@@ -231,7 +241,7 @@ export function TasksView() {
           </div>
         )}
 
-        {loading ? (
+        {loading && tasks.length === 0 ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
             <Loader2 style={{ width: 20, height: 20, color: "var(--text-muted)", animation: "spin 1s linear infinite" }} />
           </div>
@@ -256,6 +266,7 @@ export function TasksView() {
                   onMouseLeave={hoverReset}
                   style={glowCard(color, {
                   padding: "10px 14px",
+                  ...lazyRow(72),
                   ...(isActive ? { background: `color-mix(in srgb, ${color} 4%, var(--bg-elevated))`, border: `1px solid color-mix(in srgb, ${color} 20%, var(--border))` } : {}),
                 })}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

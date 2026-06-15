@@ -1209,6 +1209,45 @@ function ScheduledTab() {
   const [eventResult, setEventResult] = useState<{ ok: boolean; text: string } | null>(null);
   const getCronJobs = useDataStore(s => s.getCronJobs);
 
+  const [schedulerEnabled, setSchedulerEnabled] = useState<boolean | null>(null);
+  const [schedulerBusy, setSchedulerBusy] = useState(false);
+  const [schedulerInfo, setSchedulerInfo] = useState<{ jobs: number; nextWakeAtMs: number | null } | null>(null);
+  const [schedulerNote, setSchedulerNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    openclawClient.getCronSchedulerStatus().then(s => {
+      if (alive && s) {
+        setSchedulerEnabled(s.enabled);
+        setSchedulerInfo({ jobs: s.jobs, nextWakeAtMs: s.nextWakeAtMs });
+      }
+    });
+    return () => { alive = false; };
+  }, []);
+
+  const toggleScheduler = async () => {
+    if (schedulerEnabled === null || schedulerBusy) return;
+    const next = !schedulerEnabled;
+    setSchedulerBusy(true);
+    setSchedulerEnabled(next); // optimistic
+    setSchedulerNote(null);
+    const res = await openclawClient.setCronSchedulerEnabled(next);
+    if (!res) {
+      setSchedulerEnabled(!next); // revert on failure
+      setSchedulerNote("Failed to update scheduler");
+    } else {
+      setSchedulerEnabled(res.enabled);
+      setSchedulerInfo({ jobs: res.jobs, nextWakeAtMs: res.nextWakeAtMs });
+      setSchedulerNote(
+        res.changed
+          ? res.enabled ? "Scheduler enabled" : "Scheduler disabled"
+          : "No change",
+      );
+      setTimeout(() => setSchedulerNote(null), 2500);
+    }
+    setSchedulerBusy(false);
+  };
+
   const loadJobs = useCallback(async (force = false) => {
     try {
       const raw = await getCronJobs(force);
@@ -1333,8 +1372,38 @@ function ScheduledTab() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       <div style={{ padding: "12px 20px 8px", flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>Scheduled Jobs ({jobs.length})</span>
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>Scheduled Jobs ({jobs.length})</span>
+          {(schedulerNote || schedulerInfo) && (
+            <span style={{ fontSize: 10, color: schedulerNote ? "var(--accent)" : "var(--text-muted)" }}>
+              {schedulerNote
+                ? schedulerNote
+                : schedulerInfo && schedulerEnabled
+                  ? `${schedulerInfo.jobs} job${schedulerInfo.jobs === 1 ? "" : "s"}${schedulerInfo.nextWakeAtMs ? ` · next wake ${new Date(schedulerInfo.nextWakeAtMs).toLocaleTimeString()}` : ""}`
+                  : null}
+            </span>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <button
+            onClick={toggleScheduler}
+            disabled={schedulerEnabled === null || schedulerBusy}
+            title="Master scheduler switch — when off, no cron jobs run regardless of per-job state."
+            style={{
+              ...btnPrimary,
+              padding: "6px 14px",
+              fontSize: 11,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              background: schedulerEnabled ? "rgba(248,113,113,0.15)" : "var(--accent)",
+              color: schedulerEnabled ? "#f87171" : "#fff",
+              opacity: schedulerEnabled === null || schedulerBusy ? 0.7 : 1,
+              cursor: schedulerEnabled === null || schedulerBusy ? "not-allowed" : "pointer",
+            }}>
+            {schedulerBusy && <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} />}
+            {schedulerEnabled === null ? "…" : schedulerEnabled ? "Scheduler: On" : "Scheduler: Off"}
+          </button>
           <button aria-label="Refresh" onClick={() => { setLoading(true); loadJobs(); }} disabled={loading} style={navBtnStyle}>
             <RefreshCw style={{ width: 12, height: 12, ...(loading ? { animation: "spin 1s linear infinite" } : {}) }} />
           </button>
@@ -1603,6 +1672,15 @@ function HeartbeatTab() {
     }
   }, []);
 
+  // Race any gateway-backed CLI call against a short timeout so a slow/offline
+  // gateway can never wedge the page on the loading spinner.
+  const withTimeout = useCallback(async <T,>(p: Promise<T>, ms: number, fallback: T): Promise<T> => {
+    let t: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<T>(res => { t = setTimeout(() => res(fallback), ms); });
+    try { return await Promise.race([p, timeout]); }
+    finally { clearTimeout(t!); }
+  }, []);
+
   const fetchConfig = useCallback(async () => {
     try {
       const r = await invoke<{ stdout: string; code: number }>("execute_command", {
@@ -1624,6 +1702,7 @@ function HeartbeatTab() {
           ...prev, every, prompt: cfg.prompt || "", target: cfg.target || "none",
           activeHours: cfg.activeHours, lightContext: cfg.lightContext,
           isolatedSession: cfg.isolatedSession,
+          enabled: cfg.enabled !== false, // reflect actual heartbeat enabled state from config
         }));
       }
     } catch { /* config may not exist yet */ }
@@ -1632,15 +1711,17 @@ function HeartbeatTab() {
   const fetchLast = useCallback(async () => {
     try {
       const r = await invoke<{ stdout: string; code: number }>("execute_command", {
-        command: "openclaw system heartbeat last --json", cwd: null,
+        // bound the gateway wait so it can't block the page
+        command: "openclaw system heartbeat last --json --timeout 4000", cwd: null,
       });
       if (r.code === 0 && r.stdout.trim()) {
         const p = JSON.parse(r.stdout);
-        const ts = p.timestamp ?? p.ts ?? p.lastRun ?? p.last;
-        if (ts) setStatus(prev => ({ ...prev, lastRun: ts }));
-        if (typeof p.enabled === "boolean") setStatus(prev => ({ ...prev, enabled: p.enabled }));
+        if (p && typeof p === "object") {
+          const ts = p.timestamp ?? p.ts ?? p.lastRun ?? p.last;
+          if (ts) setStatus(prev => ({ ...prev, lastRun: String(ts) }));
+        }
       }
-    } catch { /* may not have run yet */ }
+    } catch { /* may not have run yet / gateway offline */ }
   }, []);
 
   const loadInstructions = useCallback(async () => {
@@ -1653,12 +1734,18 @@ function HeartbeatTab() {
 
   useEffect(() => {
     (async () => {
-      await resolvePath();
-      await Promise.all([fetchConfig(), fetchLast()]);
-      await loadInstructions();
-      setLoading(false);
+      try {
+        await resolvePath();
+        // Gate the spinner ONLY on the fast local config read.
+        await withTimeout(fetchConfig(), 4000, undefined);
+        await loadInstructions();
+      } finally {
+        setLoading(false); // always clear, even on error/timeout
+      }
+      // Non-blocking: let the gateway-backed "last run" fill in afterwards.
+      void withTimeout(fetchLast(), 4000, undefined);
     })();
-  }, [resolvePath, fetchConfig, fetchLast, loadInstructions]);
+  }, [resolvePath, fetchConfig, fetchLast, loadInstructions, withTimeout]);
 
   const toggleHeartbeat = async () => {
     const was = status.enabled;

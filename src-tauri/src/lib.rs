@@ -1,19 +1,19 @@
-use std::process::{Command, Child, Stdio};
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
+use std::sync::{Arc, Mutex};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, Runtime, AppHandle,
+    AppHandle, Emitter, Manager, Runtime,
 };
-use serde::Serialize;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -29,16 +29,10 @@ struct CommandResult {
 struct ServerStatus {
     vllm_running: bool,
     openclaw_running: bool,
-    nvidia_stt_running: bool,
-    nvidia_tts_running: bool,
-    voice_gateway_running: bool,
 }
 
 struct ServerProcesses {
     openclaw: Option<Child>,
-    nvidia_stt: Option<Child>,
-    nvidia_tts: Option<Child>,
-    voice_gateway: Option<Child>,
     http_client: reqwest::Client,
 }
 
@@ -72,30 +66,33 @@ static REMOTE_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 fn get_chat_client(is_local: bool) -> reqwest::Client {
     if is_local {
-        LOCAL_HTTP_CLIENT.get_or_init(|| {
-            reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(3))
-                .timeout(std::time::Duration::from_secs(120))
-                .pool_max_idle_per_host(2)
-                .tcp_keepalive(std::time::Duration::from_secs(30))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new())
-        }).clone()
+        LOCAL_HTTP_CLIENT
+            .get_or_init(|| {
+                reqwest::Client::builder()
+                    .connect_timeout(std::time::Duration::from_secs(3))
+                    .timeout(std::time::Duration::from_secs(120))
+                    .pool_max_idle_per_host(2)
+                    .tcp_keepalive(std::time::Duration::from_secs(30))
+                    .build()
+                    .unwrap_or_else(|_| reqwest::Client::new())
+            })
+            .clone()
     } else {
-        REMOTE_HTTP_CLIENT.get_or_init(|| {
-            reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(15))
-                .timeout(std::time::Duration::from_secs(120))
-                .pool_max_idle_per_host(2)
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new())
-        }).clone()
+        REMOTE_HTTP_CLIENT
+            .get_or_init(|| {
+                reqwest::Client::builder()
+                    .connect_timeout(std::time::Duration::from_secs(15))
+                    .timeout(std::time::Duration::from_secs(120))
+                    .pool_max_idle_per_host(2)
+                    .build()
+                    .unwrap_or_else(|_| reqwest::Client::new())
+            })
+            .clone()
     }
 }
 
 struct AppState {
     servers: Mutex<ServerProcesses>,
-    scripts_dir: Mutex<Option<String>>,
     streaming: Mutex<HashMap<String, Arc<StreamingProcess>>>,
     openclaw_cli_lock: Arc<Mutex<()>>,
 }
@@ -105,12 +102,8 @@ impl Default for AppState {
         Self {
             servers: Mutex::new(ServerProcesses {
                 openclaw: None,
-                nvidia_stt: None,
-                nvidia_tts: None,
-                voice_gateway: None,
                 http_client: reqwest::Client::new(),
             }),
-            scripts_dir: Mutex::new(None),
             streaming: Mutex::new(HashMap::new()),
             openclaw_cli_lock: Arc::new(Mutex::new(())),
         }
@@ -196,6 +189,277 @@ fn openclaw_retry_safe(command: &str) -> bool {
         || c.contains(" health")
         || c.contains(" config get")
         || c.contains(" --json")
+}
+
+/// Deny-list guard for catastrophically destructive shell commands.
+///
+/// We intentionally keep `execute_command` flexible (the app surfaces many
+/// power-user actions), but block obviously irreversible operations that a
+/// compromised frontend / dependency could trigger silently. Returns
+/// `Some(reason)` if the command must be refused.
+fn dangerous_command_reason(command: &str) -> Option<&'static str> {
+    let c = command.to_lowercase();
+    // Whole-disk format / wipe
+    if c.contains("format ") && (c.contains(" c:") || c.contains(" /q") || c.contains(" /y")) {
+        return Some("disk format commands are blocked");
+    }
+    if c.contains("diskpart") {
+        return Some("diskpart is blocked");
+    }
+    // Recursive deletion of root paths
+    if c.contains("rm -rf /") || c.contains("rm -rf /*") || c.contains("rm -rf ~/") {
+        return Some("recursive deletion of root/home is blocked");
+    }
+    if c.contains("rd /s /q c:\\") || c.contains("rmdir /s /q c:\\") {
+        return Some("recursive deletion of system drive is blocked");
+    }
+    if c.contains("remove-item -recurse -force c:\\")
+        || c.contains("remove-item -recurse -force $env:userprofile")
+        || c.contains("remove-item -recurse -force ~")
+    {
+        return Some("recursive PowerShell deletion of root/home is blocked");
+    }
+    // Fork bombs
+    if c.contains(":(){:|:&};:") || c.contains(":(){ :|:& };:") {
+        return Some("fork bomb pattern is blocked");
+    }
+    // Mass shutdown / reboot pipes from untrusted sources
+    if c.contains("shutdown /s /f /t 0") || c.contains("shutdown -h now") {
+        return Some("system shutdown commands are blocked");
+    }
+    // Pipe-to-shell from the internet (classic remote code execution)
+    if (c.contains("curl ")
+        || c.contains("wget ")
+        || c.contains("iwr ")
+        || c.contains("invoke-webrequest"))
+        && (c.contains("| sh")
+            || c.contains("| bash")
+            || c.contains("| iex")
+            || c.contains("| powershell"))
+    {
+        return Some("piping remote content to a shell is blocked");
+    }
+    None
+}
+
+/* ───────────────────────────── PC Optimizer ─────────────────────────────
+   Safe, non-destructive Windows optimization. We only clear well-known
+   throwaway cache/temp locations and flush the DNS resolver cache. We never
+   touch user documents, the registry, or anything risky. All deletes are
+   best-effort (locked files are skipped silently). */
+
+#[derive(Serialize)]
+struct OptimizeStep {
+    name: String,
+    #[serde(rename = "freedBytes")]
+    freed_bytes: u64,
+    #[serde(rename = "filesRemoved")]
+    files_removed: u64,
+    ok: bool,
+    detail: String,
+}
+
+#[derive(Serialize)]
+struct OptimizeResult {
+    #[serde(rename = "freedBytes")]
+    freed_bytes: u64,
+    #[serde(rename = "filesRemoved")]
+    files_removed: u64,
+    steps: Vec<OptimizeStep>,
+    #[serde(rename = "durationMs")]
+    duration_ms: u64,
+}
+
+/// Recursively sum file sizes and counts under `path` (for reporting before a
+/// recursive delete). Best-effort: unreadable entries are skipped.
+#[cfg(target_os = "windows")]
+fn dir_size_and_count(path: &Path) -> (u64, u64) {
+    let mut size = 0u64;
+    let mut count = 0u64;
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_dir() {
+                    let (s, c) = dir_size_and_count(&entry.path());
+                    size += s;
+                    count += c;
+                } else {
+                    size += meta.len();
+                    count += 1;
+                }
+            }
+        }
+    }
+    (size, count)
+}
+
+/// Delete the *contents* of `dir` (never the directory itself). Returns
+/// `(bytes_freed, files_removed)`. Locked/in-use files are skipped silently.
+#[cfg(target_os = "windows")]
+fn clear_dir_contents(dir: &Path) -> (u64, u64) {
+    let mut freed = 0u64;
+    let mut count = 0u64;
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return (0, 0),
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.is_dir() {
+            let (b, c) = dir_size_and_count(&path);
+            if fs::remove_dir_all(&path).is_ok() {
+                freed += b;
+                count += c;
+            }
+        } else {
+            let sz = meta.len();
+            if fs::remove_file(&path).is_ok() {
+                freed += sz;
+                count += 1;
+            }
+        }
+    }
+    (freed, count)
+}
+
+/// Delete files in `dir` whose name starts with `prefix` (non-recursive).
+#[cfg(target_os = "windows")]
+fn delete_files_with_prefix(dir: &Path, prefix: &str) -> (u64, u64) {
+    let mut freed = 0u64;
+    let mut count = 0u64;
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let name = match entry.file_name().into_string() {
+                Ok(n) => n,
+                Err(_) => continue,
+            };
+            if !name.starts_with(prefix) {
+                continue;
+            }
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_file() {
+                    let sz = meta.len();
+                    if fs::remove_file(entry.path()).is_ok() {
+                        freed += sz;
+                        count += 1;
+                    }
+                }
+            }
+        }
+    }
+    (freed, count)
+}
+
+/// Flush the Windows DNS resolver cache without flashing a console window.
+#[cfg(target_os = "windows")]
+fn flush_dns() -> bool {
+    Command::new("cmd")
+        .args(["/C", "ipconfig", "/flushdns"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .stdin(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Run a suite of safe optimizations and return aggregated, per-step stats.
+#[tauri::command]
+async fn optimize_system() -> Result<OptimizeResult, String> {
+    tokio::task::spawn_blocking(|| {
+        let start = std::time::Instant::now();
+        let mut steps: Vec<OptimizeStep> = Vec::new();
+
+        #[cfg(target_os = "windows")]
+        {
+            // 1. User TEMP (%TEMP%)
+            if let Ok(temp) = std::env::var("TEMP") {
+                let (b, c) = clear_dir_contents(Path::new(&temp));
+                steps.push(OptimizeStep {
+                    name: "User temp files".into(),
+                    freed_bytes: b,
+                    files_removed: c,
+                    ok: true,
+                    detail: temp,
+                });
+            }
+
+            // 2. Windows TEMP (C:\Windows\Temp)
+            let win_temp = std::env::var("SystemRoot")
+                .map(|r| format!(r"{}\Temp", r))
+                .unwrap_or_else(|_| r"C:\Windows\Temp".to_string());
+            let (b, c) = clear_dir_contents(Path::new(&win_temp));
+            steps.push(OptimizeStep {
+                name: "Windows temp files".into(),
+                freed_bytes: b,
+                files_removed: c,
+                ok: true,
+                detail: win_temp,
+            });
+
+            if let Ok(local) = std::env::var("LOCALAPPDATA") {
+                // 3. Internet / app cache (INetCache)
+                let inet = format!(r"{}\Microsoft\Windows\INetCache", local);
+                let (b, c) = clear_dir_contents(Path::new(&inet));
+                steps.push(OptimizeStep {
+                    name: "Internet & app cache".into(),
+                    freed_bytes: b,
+                    files_removed: c,
+                    ok: true,
+                    detail: inet,
+                });
+
+                // 4. Thumbnail cache (thumbcache_*.db)
+                let explorer = format!(r"{}\Microsoft\Windows\Explorer", local);
+                let (b, c) = delete_files_with_prefix(Path::new(&explorer), "thumbcache_");
+                steps.push(OptimizeStep {
+                    name: "Thumbnail cache".into(),
+                    freed_bytes: b,
+                    files_removed: c,
+                    ok: true,
+                    detail: explorer,
+                });
+            }
+
+            // 5. Flush DNS resolver cache
+            let dns_ok = flush_dns();
+            steps.push(OptimizeStep {
+                name: "Flush DNS cache".into(),
+                freed_bytes: 0,
+                files_removed: 0,
+                ok: dns_ok,
+                detail: "ipconfig /flushdns".into(),
+            });
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            steps.push(OptimizeStep {
+                name: "Unsupported platform".into(),
+                freed_bytes: 0,
+                files_removed: 0,
+                ok: false,
+                detail: "System optimization is only available on Windows.".into(),
+            });
+        }
+
+        let freed_bytes: u64 = steps.iter().map(|s| s.freed_bytes).sum();
+        let files_removed: u64 = steps.iter().map(|s| s.files_removed).sum();
+
+        Ok(OptimizeResult {
+            freed_bytes,
+            files_removed,
+            steps,
+            duration_ms: start.elapsed().as_millis() as u64,
+        })
+    })
+    .await
+    .map_err(|e| format!("Optimize task join error: {}", e))?
 }
 
 /// GPU stats via nvidia-smi — routed through cmd.exe to prevent console flash.
@@ -294,6 +558,13 @@ async fn execute_command(
     command: String,
     cwd: Option<String>,
 ) -> Result<CommandResult, String> {
+    if let Some(reason) = dangerous_command_reason(&command) {
+        eprintln!(
+            "execute_command: refused dangerous command ({}): {}",
+            reason, command
+        );
+        return Err(format!("Command refused: {}", reason));
+    }
     let working_dir =
         cwd.unwrap_or_else(|| std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string()));
     let is_openclaw = command.trim_start().to_lowercase().starts_with("openclaw");
@@ -320,10 +591,20 @@ async fn execute_command(
 }
 
 #[tauri::command]
-fn start_streaming_command(state: tauri::State<AppState>, command: String, cwd: Option<String>) -> Result<String, String> {
-    let working_dir = cwd.unwrap_or_else(|| {
-        std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string())
-    });
+fn start_streaming_command(
+    state: tauri::State<AppState>,
+    command: String,
+    cwd: Option<String>,
+) -> Result<String, String> {
+    if let Some(reason) = dangerous_command_reason(&command) {
+        eprintln!(
+            "start_streaming_command: refused dangerous command ({}): {}",
+            reason, command
+        );
+        return Err(format!("Command refused: {}", reason));
+    }
+    let working_dir =
+        cwd.unwrap_or_else(|| std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string()));
 
     #[cfg(target_os = "windows")]
     let mut cmd = {
@@ -335,10 +616,7 @@ fn start_streaming_command(state: tauri::State<AppState>, command: String, cwd: 
             .stdin(Stdio::null());
 
         let sys_path = std::env::var("PATH").unwrap_or_default();
-        let extra_dirs = [
-            r"C:\Program Files\nodejs",
-            r"C:\Program Files\Git\cmd",
-        ];
+        let extra_dirs = [r"C:\Program Files\nodejs", r"C:\Program Files\Git\cmd"];
         let user_appdata = std::env::var("APPDATA")
             .map(|a| format!(r"{}\npm", a))
             .unwrap_or_default();
@@ -349,7 +627,10 @@ fn start_streaming_command(state: tauri::State<AppState>, command: String, cwd: 
                 full_path.push(';');
             }
         }
-        if !user_appdata.is_empty() && Path::new(&user_appdata).exists() && !sys_path.contains(&user_appdata) {
+        if !user_appdata.is_empty()
+            && Path::new(&user_appdata).exists()
+            && !sys_path.contains(&user_appdata)
+        {
             full_path.push_str(&user_appdata);
             full_path.push(';');
         }
@@ -372,7 +653,10 @@ fn start_streaming_command(state: tauri::State<AppState>, command: String, cwd: 
 
     let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn: {}", e))?;
     let pid = child.id();
-    let id = format!("stream-{}", STREAM_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
+    let id = format!(
+        "stream-{}",
+        STREAM_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
 
     let proc = Arc::new(StreamingProcess {
         stdout_buf: Mutex::new(String::new()),
@@ -393,19 +677,26 @@ fn start_streaming_command(state: tauri::State<AppState>, command: String, cwd: 
     if let Some(stdout) = stdout {
         std::thread::spawn(move || {
             let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    let mut buf = proc_out.stdout_buf.lock().unwrap_or_else(|e| e.into_inner());
-                    buf.push_str(&line);
-                    buf.push('\n');
-                    if buf.len() > STREAM_BUF_CAP {
-                        let trim = buf.len() - STREAM_BUF_CAP;
-                        let boundary = buf[trim..].find('\n').map(|p| trim + p + 1).unwrap_or(trim);
-                        buf.drain(..boundary);
-                        let mut cursor = proc_out.read_cursor.lock().unwrap_or_else(|e| e.into_inner());
-                        *cursor = cursor.saturating_sub(boundary);
-                        *proc_out.stdout_trimmed.lock().unwrap_or_else(|e| e.into_inner()) += boundary;
-                    }
+            for line in reader.lines().map_while(Result::ok) {
+                let mut buf = proc_out
+                    .stdout_buf
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                buf.push_str(&line);
+                buf.push('\n');
+                if buf.len() > STREAM_BUF_CAP {
+                    let trim = buf.len() - STREAM_BUF_CAP;
+                    let boundary = buf[trim..].find('\n').map(|p| trim + p + 1).unwrap_or(trim);
+                    buf.drain(..boundary);
+                    let mut cursor = proc_out
+                        .read_cursor
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    *cursor = cursor.saturating_sub(boundary);
+                    *proc_out
+                        .stdout_trimmed
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner()) += boundary;
                 }
             }
         });
@@ -415,19 +706,26 @@ fn start_streaming_command(state: tauri::State<AppState>, command: String, cwd: 
     if let Some(stderr) = stderr {
         std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    let mut buf = proc_err.stderr_buf.lock().unwrap_or_else(|e| e.into_inner());
-                    buf.push_str(&line);
-                    buf.push('\n');
-                    if buf.len() > STREAM_BUF_CAP {
-                        let trim = buf.len() - STREAM_BUF_CAP;
-                        let boundary = buf[trim..].find('\n').map(|p| trim + p + 1).unwrap_or(trim);
-                        buf.drain(..boundary);
-                        let mut cursor = proc_err.stderr_cursor.lock().unwrap_or_else(|e| e.into_inner());
-                        *cursor = cursor.saturating_sub(boundary);
-                        *proc_err.stderr_trimmed.lock().unwrap_or_else(|e| e.into_inner()) += boundary;
-                    }
+            for line in reader.lines().map_while(Result::ok) {
+                let mut buf = proc_err
+                    .stderr_buf
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                buf.push_str(&line);
+                buf.push('\n');
+                if buf.len() > STREAM_BUF_CAP {
+                    let trim = buf.len() - STREAM_BUF_CAP;
+                    let boundary = buf[trim..].find('\n').map(|p| trim + p + 1).unwrap_or(trim);
+                    buf.drain(..boundary);
+                    let mut cursor = proc_err
+                        .stderr_cursor
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    *cursor = cursor.saturating_sub(boundary);
+                    *proc_err
+                        .stderr_trimmed
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner()) += boundary;
                 }
             }
         });
@@ -437,16 +735,26 @@ fn start_streaming_command(state: tauri::State<AppState>, command: String, cwd: 
     std::thread::spawn(move || {
         let status = child.wait();
         let code = status.ok().and_then(|s| s.code()).unwrap_or(-1);
-        *proc_wait.exit_code.lock().unwrap_or_else(|e| e.into_inner()) = Some(code);
+        *proc_wait
+            .exit_code
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(code);
         *proc_wait.done.lock().unwrap_or_else(|e| e.into_inner()) = true;
     });
 
-    state.streaming.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), proc);
+    state
+        .streaming
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id.clone(), proc);
     Ok(id)
 }
 
 #[tauri::command]
-fn poll_streaming_command(state: tauri::State<AppState>, id: String) -> Result<StreamingPollResult, String> {
+fn poll_streaming_command(
+    state: tauri::State<AppState>,
+    id: String,
+) -> Result<StreamingPollResult, String> {
     let map = state.streaming.lock().unwrap_or_else(|e| e.into_inner());
     let proc = map.get(&id).ok_or("No such streaming command")?;
 
@@ -473,7 +781,12 @@ fn poll_streaming_command(state: tauri::State<AppState>, id: String) -> Result<S
         String::new()
     };
 
-    Ok(StreamingPollResult { new_output, new_stderr, done, exit_code })
+    Ok(StreamingPollResult {
+        new_output,
+        new_stderr,
+        done,
+        exit_code,
+    })
 }
 
 #[tauri::command]
@@ -581,10 +894,10 @@ fn read_file(path: String) -> Result<String, String> {
 
 #[tauri::command]
 fn read_file_base64(path: String) -> Result<String, String> {
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
     let resolved = resolve_path(&path);
-    let bytes = fs::read(&resolved)
-        .map_err(|e| format!("Failed to read file '{}': {}", resolved, e))?;
+    let bytes =
+        fs::read(&resolved).map_err(|e| format!("Failed to read file '{}': {}", resolved, e))?;
     let ext = Path::new(&resolved)
         .extension()
         .and_then(|e| e.to_str())
@@ -610,15 +923,17 @@ fn write_file(path: String, content: String) -> Result<(), String> {
     if let Some(parent) = Path::new(&resolved).parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
     }
-    fs::write(&resolved, &content).map_err(|e| format!("Failed to write file '{}': {}", resolved, e))?;
+    fs::write(&resolved, &content)
+        .map_err(|e| format!("Failed to write file '{}': {}", resolved, e))?;
     Ok(())
 }
 
 #[tauri::command]
 fn list_directory(path: String) -> Result<Vec<String>, String> {
     let resolved = resolve_path(&path);
-    let entries = fs::read_dir(&resolved).map_err(|e| format!("Failed to read directory '{}': {}", resolved, e))?;
-    
+    let entries = fs::read_dir(&resolved)
+        .map_err(|e| format!("Failed to read directory '{}': {}", resolved, e))?;
+
     let mut files: Vec<String> = entries
         .filter_map(|e| e.ok())
         .map(|e| {
@@ -630,13 +945,19 @@ fn list_directory(path: String) -> Result<Vec<String>, String> {
             }
         })
         .collect();
-    
+
     files.sort();
     Ok(files)
 }
 
 #[tauri::command]
-async fn http_proxy(state: tauri::State<'_, AppState>, method: String, url: String, body: Option<String>, headers: Option<std::collections::HashMap<String, String>>) -> Result<String, String> {
+async fn http_proxy(
+    state: tauri::State<'_, AppState>,
+    method: String,
+    url: String,
+    body: Option<String>,
+    headers: Option<std::collections::HashMap<String, String>>,
+) -> Result<String, String> {
     if let Ok(parsed) = url.parse::<reqwest::Url>() {
         match parsed.host_str() {
             Some("localhost") | Some("127.0.0.1") | Some("0.0.0.0") => {}
@@ -669,12 +990,17 @@ async fn http_proxy(state: tauri::State<'_, AppState>, method: String, url: Stri
         req = req.body(b);
     }
 
-    let resp = req.timeout(std::time::Duration::from_secs(120))
-        .send().await
+    let resp = req
+        .timeout(std::time::Duration::from_secs(120))
+        .send()
+        .await
         .map_err(|e| format!("Request failed: {}", e))?;
 
     let status = resp.status().as_u16();
-    let text = resp.text().await.map_err(|e| format!("Read body failed: {}", e))?;
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("Read body failed: {}", e))?;
 
     Ok(serde_json::json!({ "status": status, "body": text }).to_string())
 }
@@ -693,17 +1019,29 @@ fn start_direct_chat(
 ) -> Result<String, String> {
     if let Ok(parsed) = base_url.parse::<reqwest::Url>() {
         match parsed.host_str() {
-            Some("localhost") | Some("127.0.0.1") | Some("0.0.0.0")
-            | Some("api.openai.com") | Some("api.anthropic.com")
-            | Some("api.x.ai") | Some("generativelanguage.googleapis.com")
+            Some("localhost")
+            | Some("127.0.0.1")
+            | Some("0.0.0.0")
+            | Some("api.openai.com")
+            | Some("api.anthropic.com")
+            | Some("api.x.ai")
+            | Some("generativelanguage.googleapis.com")
             | Some("api.deepseek.com") => {}
-            _ => return Err(format!("start_direct_chat: host '{}' not in allowlist", parsed.host_str().unwrap_or("unknown"))),
+            _ => {
+                return Err(format!(
+                    "start_direct_chat: host '{}' not in allowlist",
+                    parsed.host_str().unwrap_or("unknown")
+                ))
+            }
         }
     } else {
         return Err("start_direct_chat: invalid base_url".to_string());
     }
 
-    let id = format!("stream-{}", STREAM_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
+    let id = format!(
+        "stream-{}",
+        STREAM_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
     let proc = Arc::new(StreamingProcess {
         stdout_buf: Mutex::new(String::new()),
         stderr_buf: Mutex::new(String::new()),
@@ -761,17 +1099,30 @@ fn start_direct_chat(
                                     let line = buf[..pos].to_string();
                                     buf = buf[pos + 1..].to_string();
                                     if let Some(data) = line.strip_prefix("data: ") {
-                                        if data.trim() == "[DONE]" { continue; }
-                                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                                        if data.trim() == "[DONE]" {
+                                            continue;
+                                        }
+                                        if let Ok(parsed) =
+                                            serde_json::from_str::<serde_json::Value>(data)
+                                        {
                                             let delta = parsed
                                                 .get("choices")
                                                 .and_then(|c| c.get(0))
                                                 .and_then(|c| c.get("delta"));
                                             if let Some(d) = delta {
-                                                let content = d.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                                                let reasoning = d.get("reasoning_content").and_then(|c| c.as_str()).unwrap_or("");
+                                                let content = d
+                                                    .get("content")
+                                                    .and_then(|c| c.as_str())
+                                                    .unwrap_or("");
+                                                let reasoning = d
+                                                    .get("reasoning_content")
+                                                    .and_then(|c| c.as_str())
+                                                    .unwrap_or("");
                                                 if !content.is_empty() || !reasoning.is_empty() {
-                                                    let mut out = proc_clone.stdout_buf.lock().unwrap_or_else(|e| e.into_inner());
+                                                    let mut out = proc_clone
+                                                        .stdout_buf
+                                                        .lock()
+                                                        .unwrap_or_else(|e| e.into_inner());
                                                     out.push_str(content);
                                                     out.push_str(reasoning);
                                                 }
@@ -781,7 +1132,10 @@ fn start_direct_chat(
                                 }
                             }
                             Err(e) => {
-                                let mut err = proc_clone.stderr_buf.lock().unwrap_or_else(|e| e.into_inner());
+                                let mut err = proc_clone
+                                    .stderr_buf
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner());
                                 err.push_str(&format!("Stream error: {}\n", e));
                                 break;
                             }
@@ -791,21 +1145,34 @@ fn start_direct_chat(
                 Ok(r) => {
                     let status = r.status();
                     let body = r.text().await.unwrap_or_default();
-                    let mut err = proc_clone.stderr_buf.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut err = proc_clone
+                        .stderr_buf
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     err.push_str(&format!("API error {}: {}\n", status, body));
                 }
                 Err(e) => {
-                    let mut err = proc_clone.stderr_buf.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut err = proc_clone
+                        .stderr_buf
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     err.push_str(&format!("Connection failed: {}\n", e));
                 }
             }
 
-            *proc_clone.exit_code.lock().unwrap_or_else(|e| e.into_inner()) = Some(0);
+            *proc_clone
+                .exit_code
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = Some(0);
             *proc_clone.done.lock().unwrap_or_else(|e| e.into_inner()) = true;
         });
     });
 
-    state.streaming.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), proc);
+    state
+        .streaming
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id.clone(), proc);
     Ok(id)
 }
 
@@ -813,11 +1180,12 @@ fn start_direct_chat(
 fn get_openclaw_token() -> Result<String, String> {
     let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
     let config_path = format!("{}/.openclaw/openclaw.json", home);
-    let content = fs::read_to_string(&config_path)
-        .map_err(|e| format!("Cannot read config: {}", e))?;
-    let json: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("Invalid JSON: {}", e))?;
-    let token = json.get("gateway")
+    let content =
+        fs::read_to_string(&config_path).map_err(|e| format!("Cannot read config: {}", e))?;
+    let json: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("Invalid JSON: {}", e))?;
+    let token = json
+        .get("gateway")
         .and_then(|g| g.get("auth"))
         .and_then(|a| a.get("token"))
         .and_then(|t| t.as_str())
@@ -873,8 +1241,9 @@ async fn run_python_script<R: Runtime>(
     script: String,
     args: Vec<String>,
 ) -> Result<CommandResult, String> {
-    let scripts_dir = find_scripts_dir(&app)
-        .ok_or_else(|| "scripts/ directory not found (looked in cwd, resource dir, and exe parents)".to_string())?;
+    let scripts_dir = find_scripts_dir(&app).ok_or_else(|| {
+        "scripts/ directory not found (looked in cwd, resource dir, and exe parents)".to_string()
+    })?;
     let script_path = scripts_dir.join(&script);
     if !script_path.exists() {
         return Err(format!("script not found: {}", script_path.display()));
@@ -888,10 +1257,13 @@ async fn run_python_script<R: Runtime>(
             cmd.arg(a);
         }
         cmd.env("PYTHONIOENCODING", "utf-8");
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(Stdio::null());
+        cmd.stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null());
         #[cfg(target_os = "windows")]
         cmd.creation_flags(CREATE_NO_WINDOW);
-        let output = cmd.output()
+        let output = cmd
+            .output()
             .map_err(|e| format!("failed to spawn python: {}", e))?;
         Ok(CommandResult {
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -905,24 +1277,25 @@ async fn run_python_script<R: Runtime>(
 
 fn find_python() -> Option<String> {
     let candidates = ["python", "python3", "py"];
-    
+
     for cmd in candidates {
         let mut command = Command::new(cmd);
-        command.args(["--version"])
+        command
+            .args(["--version"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .stdin(Stdio::null());
         #[cfg(target_os = "windows")]
         command.creation_flags(CREATE_NO_WINDOW);
         let result = command.status();
-        
+
         if let Ok(status) = result {
             if status.success() {
                 return Some(cmd.to_string());
             }
         }
     }
-    
+
     #[cfg(target_os = "windows")]
     {
         let common_paths = [
@@ -933,20 +1306,20 @@ fn find_python() -> Option<String> {
             r"C:\Program Files\Python311\python.exe",
             r"C:\Program Files\Python310\python.exe",
         ];
-        
+
         for path in common_paths {
             if Path::new(path).exists() {
                 return Some(path.to_string());
             }
         }
-        
+
         if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
             let python_paths = [
                 format!(r"{}\Programs\Python\Python312\python.exe", local_app_data),
                 format!(r"{}\Programs\Python\Python311\python.exe", local_app_data),
                 format!(r"{}\Programs\Python\Python310\python.exe", local_app_data),
             ];
-            
+
             for path in python_paths {
                 if Path::new(&path).exists() {
                     return Some(path);
@@ -954,42 +1327,8 @@ fn find_python() -> Option<String> {
             }
         }
     }
-    
+
     None
-}
-
-/// Spawn a background process with no visible window on Windows.
-#[cfg(target_os = "windows")]
-fn spawn_hidden(program: &str, args: &[&str]) -> std::io::Result<Child> {
-    fn escape_ps(s: &str) -> String {
-        s.replace('\'', "''")
-    }
-    let full_cmd = if args.is_empty() {
-        format!("& '{}'", escape_ps(program))
-    } else {
-        let args_str = args.iter()
-            .map(|a| format!("'{}'", escape_ps(a)))
-            .collect::<Vec<_>>()
-            .join(" ");
-        format!("& '{}' {}", escape_ps(program), args_str)
-    };
-    Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &full_cmd])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .stdin(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-}
-
-#[cfg(not(target_os = "windows"))]
-fn spawn_hidden(program: &str, args: &[&str]) -> std::io::Result<Child> {
-    Command::new(program)
-        .args(args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .stdin(Stdio::null())
-        .spawn()
 }
 
 #[tauri::command]
@@ -997,100 +1336,6 @@ fn get_server_status() -> ServerStatus {
     ServerStatus {
         vllm_running: check_port_in_use(8000),
         openclaw_running: check_port_in_use(18789),
-        nvidia_stt_running: check_port_in_use(8090),
-        nvidia_tts_running: check_port_in_use(8091),
-        voice_gateway_running: check_port_in_use(6500),
-    }
-}
-
-#[tauri::command]
-fn start_nvidia_speech_servers(state: tauri::State<AppState>) -> Result<String, String> {
-    let scripts_dir = state.scripts_dir.lock().unwrap_or_else(|e| e.into_inner());
-    let scripts_path = scripts_dir.as_ref().ok_or("Scripts directory not set")?;
-
-    let python_cmd = find_python().unwrap_or_else(|| "python".to_string());
-    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
-    let mut started = Vec::new();
-
-    if !check_port_in_use(8090) {
-        let stt_script = Path::new(scripts_path).join("nvidia_stt_worker.py");
-        if stt_script.exists() {
-            let script_str = stt_script.to_string_lossy().to_string();
-            match spawn_hidden(&python_cmd, &[&script_str]) {
-                Ok(child) => {
-                    servers.nvidia_stt = Some(child);
-                    started.push("NVIDIA STT (Nemotron)");
-                }
-                Err(e) => eprintln!("Failed to start NVIDIA STT: {}", e),
-            }
-        }
-    } else {
-        started.push("NVIDIA STT (already running)");
-    }
-
-    if !check_port_in_use(8091) {
-        let tts_script = Path::new(scripts_path).join("nvidia_tts_worker.py");
-        if tts_script.exists() {
-            let script_str = tts_script.to_string_lossy().to_string();
-            match spawn_hidden(&python_cmd, &[&script_str]) {
-                Ok(child) => {
-                    servers.nvidia_tts = Some(child);
-                    started.push("NVIDIA TTS (Magpie)");
-                }
-                Err(e) => eprintln!("Failed to start NVIDIA TTS: {}", e),
-            }
-        }
-    } else {
-        started.push("NVIDIA TTS (already running)");
-    }
-
-    if !check_port_in_use(6500) {
-        let gw_script = Path::new(scripts_path).join("voice_gateway.py");
-        if gw_script.exists() {
-            let script_str = gw_script.to_string_lossy().to_string();
-            match spawn_hidden(&python_cmd, &[&script_str]) {
-                Ok(child) => {
-                    servers.voice_gateway = Some(child);
-                    started.push("Voice Gateway");
-                }
-                Err(e) => eprintln!("Failed to start Voice Gateway: {}", e),
-            }
-        }
-    } else {
-        started.push("Voice Gateway (already running)");
-    }
-
-    if started.is_empty() {
-        Ok("No NVIDIA speech servers needed to start".to_string())
-    } else {
-        Ok(format!("Started: {}", started.join(", ")))
-    }
-}
-
-#[tauri::command]
-fn stop_nvidia_speech_servers(state: tauri::State<AppState>) -> Result<String, String> {
-    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
-    let mut stopped = Vec::new();
-
-    if let Some(mut child) = servers.nvidia_stt.take() {
-        kill_process_tree(&mut child);
-        stopped.push("NVIDIA STT");
-    }
-
-    if let Some(mut child) = servers.nvidia_tts.take() {
-        kill_process_tree(&mut child);
-        stopped.push("NVIDIA TTS");
-    }
-
-    if let Some(mut child) = servers.voice_gateway.take() {
-        kill_process_tree(&mut child);
-        stopped.push("Voice Gateway");
-    }
-
-    if stopped.is_empty() {
-        Ok("No NVIDIA speech servers were running".to_string())
-    } else {
-        Ok(format!("Stopped: {}", stopped.join(", ")))
     }
 }
 
@@ -1124,18 +1369,26 @@ async fn start_vllm_docker() -> Result<String, String> {
         return Ok("vLLM already running on port 8000".to_string());
     }
 
-    let compose_file = find_compose_file()
-        .ok_or("docker-compose.yml not found")?;
+    let compose_file = find_compose_file().ok_or("docker-compose.yml not found")?;
 
     tokio::task::spawn_blocking(move || {
         #[cfg(target_os = "windows")]
         let output = {
             let mut cmd = Command::new("cmd");
-            cmd.args(["/C", "docker", "compose", "-f", &compose_file, "up", "-d", "vllm"])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .stdin(Stdio::null())
-                .creation_flags(CREATE_NO_WINDOW);
+            cmd.args([
+                "/C",
+                "docker",
+                "compose",
+                "-f",
+                &compose_file,
+                "up",
+                "-d",
+                "vllm",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW);
             cmd.output()
         };
         #[cfg(not(target_os = "windows"))]
@@ -1151,9 +1404,17 @@ async fn start_vllm_docker() -> Result<String, String> {
                 let stdout = String::from_utf8_lossy(&out.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&out.stderr).to_string();
                 if out.status.success() {
-                    Ok(format!("vLLM container started. Model loading may take a few minutes.\n{}{}", stdout, stderr))
+                    Ok(format!(
+                        "vLLM container started. Model loading may take a few minutes.\n{}{}",
+                        stdout, stderr
+                    ))
                 } else {
-                    Err(format!("docker compose failed (exit {}): {}{}", out.status.code().unwrap_or(-1), stdout, stderr))
+                    Err(format!(
+                        "docker compose failed (exit {}): {}{}",
+                        out.status.code().unwrap_or(-1),
+                        stdout,
+                        stderr
+                    ))
                 }
             }
             Err(e) => Err(format!("Failed to run docker compose: {}", e)),
@@ -1165,8 +1426,7 @@ async fn start_vllm_docker() -> Result<String, String> {
 
 #[tauri::command]
 async fn stop_vllm_docker() -> Result<String, String> {
-    let compose_file = find_compose_file()
-        .ok_or("docker-compose.yml not found")?;
+    let compose_file = find_compose_file().ok_or("docker-compose.yml not found")?;
 
     tokio::task::spawn_blocking(move || {
         #[cfg(target_os = "windows")]
@@ -1223,20 +1483,26 @@ async fn start_openclaw_daemon(_state: tauri::State<'_, AppState>) -> Result<Str
 
     tokio::task::spawn_blocking(|| {
         let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\jarro".to_string());
-        let gateway_cmd_path = std::path::PathBuf::from(&home).join(".openclaw").join("gateway.cmd");
+        let gateway_cmd_path = std::path::PathBuf::from(&home)
+            .join(".openclaw")
+            .join("gateway.cmd");
 
         #[cfg(target_os = "windows")]
         let spawn_result = if gateway_cmd_path.exists() {
             let mut cmd = Command::new("cmd");
             cmd.args(["/c", gateway_cmd_path.to_str().unwrap_or("gateway.cmd")])
-                .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .stdin(Stdio::null())
                 .creation_flags(CREATE_NO_WINDOW);
             cmd.spawn()
         } else {
             let openclaw_bin = find_openclaw_bin();
             let mut cmd = Command::new(&openclaw_bin);
             cmd.args(["gateway", "start"])
-                .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .stdin(Stdio::null())
                 .creation_flags(CREATE_NO_WINDOW);
             cmd.spawn()
         };
@@ -1245,7 +1511,9 @@ async fn start_openclaw_daemon(_state: tauri::State<'_, AppState>) -> Result<Str
             let openclaw_bin = find_openclaw_bin();
             Command::new(&openclaw_bin)
                 .args(["gateway", "start"])
-                .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .stdin(Stdio::null())
                 .spawn()
         };
 
@@ -1257,7 +1525,10 @@ async fn start_openclaw_daemon(_state: tauri::State<'_, AppState>) -> Result<Str
                         return Ok("OpenClaw daemon started".to_string());
                     }
                 }
-                Err("Gateway started but not healthy within 75s — check openclaw config".to_string())
+                Err(
+                    "Gateway started but not healthy within 75s — check openclaw config"
+                        .to_string(),
+                )
             }
             Err(e) => Err(format!("Failed to start gateway: {}", e)),
         }
@@ -1266,24 +1537,15 @@ async fn start_openclaw_daemon(_state: tauri::State<'_, AppState>) -> Result<Str
     .map_err(|e| format!("Task error: {}", e))?
 }
 
-#[tauri::command]
-fn start_voice_servers(state: tauri::State<AppState>) -> Result<String, String> {
-    start_nvidia_speech_servers(state)
-}
-
-#[tauri::command]
-fn stop_voice_servers(state: tauri::State<AppState>) -> Result<String, String> {
-    stop_nvidia_speech_servers(state)
-}
-
 fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "Quit Crystal", true, None::<&str>)?;
     let show = MenuItem::with_id(app, "show", "Show Crystal", true, None::<&str>)?;
     let hide = MenuItem::with_id(app, "hide", "Hide to Tray", true, None::<&str>)?;
-    
+
     let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
 
-    let icon = app.default_window_icon()
+    let icon = app
+        .default_window_icon()
         .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?
         .clone();
 
@@ -1359,7 +1621,10 @@ fn sanitize_openclaw_config() {
     let mut doc: serde_json::Value = match serde_json::from_str(json_str) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("OpenClaw config is not valid JSON ({}), skipping sanitize", e);
+            eprintln!(
+                "OpenClaw config is not valid JSON ({}), skipping sanitize",
+                e
+            );
             return;
         }
     };
@@ -1403,10 +1668,7 @@ fn sanitize_openclaw_config() {
                 }
                 // Ensure required `models` array
                 if !prov.contains_key("models") {
-                    prov.insert(
-                        "models".to_string(),
-                        serde_json::Value::Array(vec![]),
-                    );
+                    prov.insert("models".to_string(), serde_json::Value::Array(vec![]));
                     changed = true;
                 }
             }
@@ -1471,7 +1733,9 @@ fn start_gateway_resilient<R: Runtime>(_app: &AppHandle<R>) {
             {
                 let mut cmd = Command::new(&openclaw_bin);
                 cmd.args(["gateway", "stop"])
-                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .stdin(Stdio::null())
                     .creation_flags(CREATE_NO_WINDOW);
                 let _ = cmd.output();
             }
@@ -1479,11 +1743,15 @@ fn start_gateway_resilient<R: Runtime>(_app: &AppHandle<R>) {
             {
                 let _ = Command::new(&openclaw_bin)
                     .args(["gateway", "stop"])
-                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .stdin(Stdio::null())
                     .output();
             }
             for _ in 0..10 {
-                if !check_port_in_use(18789) { break; }
+                if !check_port_in_use(18789) {
+                    break;
+                }
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }
             if check_port_in_use(18789) {
@@ -1492,7 +1760,9 @@ fn start_gateway_resilient<R: Runtime>(_app: &AppHandle<R>) {
                     let kill_cmd = "Get-NetTCPConnection -LocalPort 18789 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }";
                     let mut cmd = Command::new("powershell");
                     cmd.args(["-NoProfile", "-NonInteractive", "-Command", kill_cmd])
-                        .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .stdin(Stdio::null())
                         .creation_flags(CREATE_NO_WINDOW);
                     let _ = cmd.output();
                 }
@@ -1503,32 +1773,44 @@ fn start_gateway_resilient<R: Runtime>(_app: &AppHandle<R>) {
         // Prefer gateway.cmd which injects 1Password secrets via `op run`.
         // Fall back to bare `openclaw gateway start` if gateway.cmd is missing.
         let home = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\jarro".to_string());
-        let gateway_cmd_path = std::path::PathBuf::from(&home).join(".openclaw").join("gateway.cmd");
+        let gateway_cmd_path = std::path::PathBuf::from(&home)
+            .join(".openclaw")
+            .join("gateway.cmd");
         let use_gateway_cmd = gateway_cmd_path.exists();
 
         println!(
             "Triggering OpenClaw gateway via {}...",
-            if use_gateway_cmd { "gateway.cmd (1Password secrets)" } else { "openclaw CLI" }
+            if use_gateway_cmd {
+                "gateway.cmd (1Password secrets)"
+            } else {
+                "openclaw CLI"
+            }
         );
 
         #[cfg(target_os = "windows")]
         let spawn_result = if use_gateway_cmd {
             let mut cmd = Command::new("cmd");
             cmd.args(["/c", gateway_cmd_path.to_str().unwrap_or("gateway.cmd")])
-                .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .stdin(Stdio::null())
                 .creation_flags(CREATE_NO_WINDOW);
             cmd.spawn()
         } else {
             let mut cmd = Command::new(&openclaw_bin);
             cmd.args(["gateway", "start"])
-                .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .stdin(Stdio::null())
                 .creation_flags(CREATE_NO_WINDOW);
             cmd.spawn()
         };
         #[cfg(not(target_os = "windows"))]
         let spawn_result = Command::new(&openclaw_bin)
             .args(["gateway", "start"])
-            .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .stdin(Stdio::null())
             .spawn();
 
         match spawn_result {
@@ -1552,7 +1834,10 @@ fn start_gateway_resilient<R: Runtime>(_app: &AppHandle<R>) {
         while start.elapsed() < max_wait {
             std::thread::sleep(std::time::Duration::from_secs(3));
             if check_port_in_use(18789) && gateway_http_healthy() {
-                println!("OpenClaw gateway is ready on port 18789 ({:.0}s)", start.elapsed().as_secs_f64());
+                println!(
+                    "OpenClaw gateway is ready on port 18789 ({:.0}s)",
+                    start.elapsed().as_secs_f64()
+                );
                 return;
             }
         }
@@ -1596,7 +1881,9 @@ fn try_start_docker_desktop() {
             if Path::new(p).exists() {
                 println!("Starting Docker Desktop from {}...", p);
                 let mut cmd = Command::new(p);
-                cmd.stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                cmd.stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .stdin(Stdio::null())
                     .creation_flags(CREATE_NO_WINDOW);
                 let _ = cmd.spawn();
                 return;
@@ -1604,7 +1891,9 @@ fn try_start_docker_desktop() {
         }
         let mut cmd = Command::new("cmd");
         cmd.args(["/C", "start", "", "Docker Desktop"])
-            .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .stdin(Stdio::null())
             .creation_flags(CREATE_NO_WINDOW);
         let _ = cmd.spawn();
     }
@@ -1633,11 +1922,20 @@ fn ensure_docker_then_vllm(compose_file: &str) {
     #[cfg(target_os = "windows")]
     let output = {
         let mut cmd = Command::new("cmd");
-        cmd.args(["/C", "docker", "compose", "-f", compose_file, "up", "-d", "vllm"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW);
+        cmd.args([
+            "/C",
+            "docker",
+            "compose",
+            "-f",
+            compose_file,
+            "up",
+            "-d",
+            "vllm",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW);
         cmd.output()
     };
     #[cfg(not(target_os = "windows"))]
@@ -1649,7 +1947,9 @@ fn ensure_docker_then_vllm(compose_file: &str) {
         .output();
     match output {
         Ok(out) if out.status.success() => {
-            println!("vLLM Docker container started (model loading ~5min with CUDA graph compilation)");
+            println!(
+                "vLLM Docker container started (model loading ~5min with CUDA graph compilation)"
+            );
         }
         Ok(out) => {
             let stderr = String::from_utf8_lossy(&out.stderr);
@@ -1660,51 +1960,6 @@ fn ensure_docker_then_vllm(compose_file: &str) {
 }
 
 fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
-    // Try multiple paths to find scripts directory
-    let scripts_dir = {
-        // First, try current working directory (most common in dev)
-        std::env::current_dir().ok().and_then(|cwd| {
-            let scripts = cwd.join("scripts");
-            if scripts.exists() && scripts.join("nvidia_stt_worker.py").exists() {
-                println!("Found scripts in cwd: {:?}", scripts);
-                Some(scripts)
-            } else {
-                None
-            }
-        })
-    }.or_else(|| {
-        // Check bundled resources (production)
-        if let Ok(resource_path) = app.path().resource_dir() {
-            let bundled = resource_path.join("scripts");
-            if bundled.exists() && bundled.join("nvidia_stt_worker.py").exists() {
-                println!("Found scripts in resources: {:?}", bundled);
-                Some(bundled)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }).or_else(|| {
-        // Development mode - look relative to exe going up directories
-        std::env::current_exe().ok().and_then(|exe_path| {
-            // In dev mode, exe is at: src-tauri/target/debug/crystal.exe
-            // Scripts are at: [project root]/scripts/
-            let mut current = exe_path.clone();
-            for _ in 0..5 {
-                if let Some(parent) = current.parent() {
-                    current = parent.to_path_buf();
-                    let scripts = current.join("scripts");
-                    if scripts.exists() && scripts.join("nvidia_stt_worker.py").exists() {
-                        println!("Found scripts relative to exe: {:?}", scripts);
-                        return Some(scripts);
-                    }
-                }
-            }
-            None
-        })
-    });
-    
     start_gateway_resilient(app);
 
     // LLM backend: auto-start vLLM Docker container if not already running
@@ -1717,89 +1972,6 @@ fn setup_and_start_servers<R: Runtime>(app: &AppHandle<R>) {
         });
     } else {
         eprintln!("vLLM not detected on port 8000 and no docker-compose.yml found.");
-    }
-
-    if let Some(ref scripts_path) = scripts_dir {
-        if scripts_path.exists() {
-            println!("Scripts directory: {:?}", scripts_path);
-            
-            if let Some(state) = app.try_state::<AppState>() {
-                let mut dir = state.scripts_dir.lock().unwrap_or_else(|e| e.into_inner());
-                *dir = Some(scripts_path.to_string_lossy().to_string());
-            }
-            
-            let python_cmd = find_python();
-            
-            if let Some(ref python) = python_cmd {
-                println!("Using Python: {}", python);
-                
-                if let Some(state) = app.try_state::<AppState>() {
-                    let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
-
-                    // Kill orphaned voice servers from previous sessions
-                    #[cfg(target_os = "windows")]
-                    {
-                        for port in [8090u16, 8091, 6500] {
-                            if check_port_in_use(port) {
-                                let kill_cmd = format!("Get-NetTCPConnection -LocalPort {} -ErrorAction SilentlyContinue | ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}", port);
-                                let mut cmd = Command::new("powershell");
-                                cmd.args(["-NoProfile", "-NonInteractive", "-Command", &kill_cmd])
-                                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
-                                    .creation_flags(CREATE_NO_WINDOW);
-                                let _ = cmd.output();
-                            }
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(500));
-                    }
-
-                    // Start NVIDIA speech workers (primary)
-                    let nvidia_stt_script = scripts_path.join("nvidia_stt_worker.py");
-                    let nvidia_tts_script = scripts_path.join("nvidia_tts_worker.py");
-
-                    if nvidia_stt_script.exists() {
-                        println!("Starting NVIDIA STT worker (Nemotron/Parakeet)...");
-                        let script_str = nvidia_stt_script.to_string_lossy().to_string();
-                        match spawn_hidden(python, &[&script_str]) {
-                            Ok(child) => {
-                                servers.nvidia_stt = Some(child);
-                                println!("NVIDIA STT worker started on port 8090");
-                            }
-                            Err(e) => eprintln!("Failed to start NVIDIA STT: {}", e),
-                        }
-                    }
-
-                    if nvidia_tts_script.exists() {
-                        println!("Starting NVIDIA TTS worker (Magpie)...");
-                        let script_str = nvidia_tts_script.to_string_lossy().to_string();
-                        match spawn_hidden(python, &[&script_str]) {
-                            Ok(child) => {
-                                servers.nvidia_tts = Some(child);
-                                println!("NVIDIA TTS worker started on port 8091");
-                            }
-                            Err(e) => eprintln!("Failed to start NVIDIA TTS: {}", e),
-                        }
-                    }
-
-                    // Start Voice Gateway (unified STT/TTS API on port 6500)
-                    let gateway_script = scripts_path.join("voice_gateway.py");
-                    if gateway_script.exists() && !check_port_in_use(6500) {
-                        println!("Starting Voice Gateway...");
-                        let script_str = gateway_script.to_string_lossy().to_string();
-                        match spawn_hidden(python, &[&script_str]) {
-                            Ok(child) => {
-                                servers.voice_gateway = Some(child);
-                                println!("Voice Gateway started on port 6500");
-                            }
-                            Err(e) => eprintln!("Failed to start Voice Gateway: {}", e),
-                        }
-                    } else if check_port_in_use(6500) {
-                        println!("Voice Gateway already running on port 6500");
-                    }
-                }
-            } else {
-                eprintln!("Python not found - voice servers disabled.");
-            }
-        }
     }
 }
 
@@ -1824,21 +1996,6 @@ fn kill_process_tree(child: &mut Child) {
 fn cleanup_servers(app: &AppHandle<impl Runtime>) {
     if let Some(state) = app.try_state::<AppState>() {
         let mut servers = state.servers.lock().unwrap_or_else(|e| e.into_inner());
-        
-        if let Some(mut child) = servers.nvidia_stt.take() {
-            println!("Stopping NVIDIA STT worker...");
-            kill_process_tree(&mut child);
-        }
-
-        if let Some(mut child) = servers.nvidia_tts.take() {
-            println!("Stopping NVIDIA TTS worker...");
-            kill_process_tree(&mut child);
-        }
-        
-        if let Some(mut child) = servers.voice_gateway.take() {
-            println!("Stopping Voice Gateway...");
-            kill_process_tree(&mut child);
-        }
 
         // Stop OpenClaw gateway via CLI (managed by service manager, not a child process)
         if check_port_in_use(18789) {
@@ -1848,7 +2005,9 @@ fn cleanup_servers(app: &AppHandle<impl Runtime>) {
             {
                 let mut cmd = Command::new(&openclaw_bin);
                 cmd.args(["gateway", "stop"])
-                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .stdin(Stdio::null())
                     .creation_flags(CREATE_NO_WINDOW);
                 let _ = cmd.output();
             }
@@ -1856,7 +2015,9 @@ fn cleanup_servers(app: &AppHandle<impl Runtime>) {
             {
                 let _ = Command::new(&openclaw_bin)
                     .args(["gateway", "stop"])
-                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .stdin(Stdio::null())
                     .output();
             }
         }
@@ -1873,7 +2034,9 @@ fn cleanup_servers(app: &AppHandle<impl Runtime>) {
             let kill_cmd = "Get-NetTCPConnection -LocalPort 18789 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }";
             let mut cmd = Command::new("powershell");
             cmd.args(["-NoProfile", "-NonInteractive", "-Command", kill_cmd])
-                .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .stdin(Stdio::null())
                 .creation_flags(CREATE_NO_WINDOW);
             let _ = cmd.output();
         }
@@ -1881,14 +2044,18 @@ fn cleanup_servers(app: &AppHandle<impl Runtime>) {
         // Kill any streaming commands still running
         let mut streaming = state.streaming.lock().unwrap_or_else(|e| e.into_inner());
         for (id, proc) in streaming.iter() {
-            if proc.pid == 0 { continue; }
+            if proc.pid == 0 {
+                continue;
+            }
             println!("Killing streaming process {}...", id);
             let pid = proc.pid;
             #[cfg(target_os = "windows")]
             {
                 let mut cmd = Command::new("taskkill");
                 cmd.args(["/F", "/T", "/PID", &pid.to_string()])
-                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .stdin(Stdio::null())
                     .creation_flags(CREATE_NO_WINDOW);
                 let _ = cmd.output();
             }
@@ -1907,41 +2074,34 @@ fn cleanup_servers(app: &AppHandle<impl Runtime>) {
             #[cfg(target_os = "windows")]
             {
                 let mut cmd = Command::new("cmd");
-                cmd.args(["/C", "docker", "compose", "-f", &compose_file, "stop", "vllm"])
-                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
-                    .creation_flags(CREATE_NO_WINDOW);
+                cmd.args([
+                    "/C",
+                    "docker",
+                    "compose",
+                    "-f",
+                    &compose_file,
+                    "stop",
+                    "vllm",
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .stdin(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW);
                 let _ = cmd.output();
             }
             #[cfg(not(target_os = "windows"))]
             {
                 let _ = Command::new("docker")
                     .args(["compose", "-f", &compose_file, "stop", "vllm"])
-                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .stdin(Stdio::null())
                     .output();
             }
             println!("vLLM container stopped.");
         }
     }
 
-    // Kill any orphaned processes on Crystal-managed ports
-    #[cfg(target_os = "windows")]
-    {
-        let ports = [8090u16, 8091, 6500];
-        for port in ports {
-            if check_port_in_use(port) {
-                println!("Killing orphan on port {}...", port);
-                let kill_cmd = format!(
-                    "Get-NetTCPConnection -LocalPort {} -ErrorAction SilentlyContinue | ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}",
-                    port
-                );
-                let mut cmd = Command::new("powershell");
-                cmd.args(["-NoProfile", "-NonInteractive", "-Command", &kill_cmd])
-                    .stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null())
-                    .creation_flags(CREATE_NO_WINDOW);
-                let _ = cmd.output();
-            }
-        }
-    }
     println!("All Crystal services stopped.");
 }
 
@@ -1962,7 +2122,7 @@ pub fn run() {
         .setup(|app| {
             create_tray(app.handle())?;
 
-            // Start voice servers automatically
+            // Start gateway + vLLM backend automatically
             setup_and_start_servers(app.handle());
 
             Ok(())
@@ -1985,15 +2145,12 @@ pub fn run() {
             cleanup_streaming_command,
             get_gpu_stats,
             get_sys_stats,
+            optimize_system,
             read_file,
             read_file_base64,
             write_file,
             list_directory,
             get_server_status,
-            start_voice_servers,
-            stop_voice_servers,
-            start_nvidia_speech_servers,
-            stop_nvidia_speech_servers,
             start_openclaw_daemon,
             start_vllm_docker,
             stop_vllm_docker,

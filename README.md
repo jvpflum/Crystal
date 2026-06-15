@@ -1,895 +1,511 @@
-<p align="center">
-  <img src="public/icon.png" width="150" alt="Crystal" />
-</p>
-
 <h1 align="center">Crystal</h1>
 
 <p align="center">
-  <strong>The most complete desktop frontend for <a href="https://github.com/openclaw/openclaw">OpenClaw</a>.</strong><br/>
-  A native AI command center with 30 views, AI-powered search, 70+ slash commands, NVIDIA-accelerated voice, 7-provider LLM support with offline mode, MemPalace canonical memory (drawers + knowledge graph + automated mining), 1Password secret management, token cost analytics, a unified voice gateway, and a full agent workspace — all in a single desktop app.
+  <strong>A native desktop home base for long-running AI agents — and a GPU-first data-science workbench.</strong>
 </p>
 
 <p align="center">
-  <a href="#-features"><img src="https://img.shields.io/badge/30-Views-6366f1?style=flat-square" /></a>
-  <a href="#-ai-chat"><img src="https://img.shields.io/badge/70+-Slash%20Commands-3b82f6?style=flat-square" /></a>
-  <a href="#-voice-engine"><img src="https://img.shields.io/badge/NVIDIA%2BBrowser-Voice-10b981?style=flat-square" /></a>
-  <a href="#-multi-provider-llm"><img src="https://img.shields.io/badge/7-LLM%20Providers-f59e0b?style=flat-square" /></a>
-  <a href="#-tech-stack"><img src="https://img.shields.io/badge/Tauri-2.0-24c8db?style=flat-square&logo=tauri" /></a>
-  <a href="#-voice-engine"><img src="https://img.shields.io/badge/NVIDIA-RTX%20Voice-76b900?style=flat-square&logo=nvidia" /></a>
-  <a href="#-themes"><img src="https://img.shields.io/badge/6-Themes-ec4899?style=flat-square" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" /></a>
+  Crystal is a <a href="https://v2.tauri.app/">Tauri</a> desktop app that wraps an <a href="https://github.com/openclaw/openclaw">OpenClaw</a> gateway in a polished GUI, then layers on the
+  <strong>Crystal Data Science Workbench</strong>: structured tasks/projects/decisions/lessons, a 253-skill registry
+  (201 of them official NVIDIA skills), a Tailscale execution mesh, a local GPU/ML sidecar, and a Fine-Tuning Studio.
 </p>
 
 <p align="center">
-  <a href="#-whats-new">What's New</a> · <a href="#screenshots">Screenshots</a> · <a href="#-features">Features</a> · <a href="#-quick-start">Quick Start</a> · <a href="#-tech-stack">Tech Stack</a> · <a href="#-contributing">Contributing</a>
+  <img src="https://img.shields.io/badge/version-0.8.0-6366f1?style=flat-square" alt="version" />
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4?style=flat-square&logo=windows" alt="platform" />
+  <img src="https://img.shields.io/badge/Tauri-2-24c8db?style=flat-square&logo=tauri" alt="Tauri 2" />
+  <img src="https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react" alt="React 19" />
+  <img src="https://img.shields.io/badge/Rust-stable-dea584?style=flat-square&logo=rust" alt="Rust" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="MIT License" /></a>
 </p>
 
 ---
 
-## Screenshots
+## Table of Contents
 
-<p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Crystal home dashboard — system performance, lifetime tokens, cron jobs, and unified memory health" width="900" />
-</p>
-
-<p align="center"><em>Home dashboard — live system performance, lifetime token spend, cron health, and memory telemetry.</em></p>
-
-<p align="center">
-  <img src="docs/screenshots/command-center.png" alt="Crystal Command Center — scheduled job calendar with 24-hour activity strip" width="900" />
-</p>
-
-<p align="center"><em>Command Center — week calendar, 24-hour activity strip, and agenda of every scheduled agent run.</em></p>
-
----
-
-## What's New
-
-### April 2026 — MemPalace Canonical Memory
-
-LanceDB is retired. Crystal now runs on a single canonical memory system: **MemPalace** + **Knowledge Graph** + automated background mining, all surfaced through a unified Memory Health card and OpenClaw recall hook.
-
-- **Canonical store** — All memory lives in MemPalace (ChromaDB drawers + SQLite KG). Local ONNX MiniLM embeddings, no cloud dependency.
-- **Automated mining** — `palace-mine-incremental` cron runs every 30 min to ingest new workspace markdown into the right wing/room. Nightly KG extraction (`palace-kg-extract-nightly`, 1 AM) distills entities and triples.
-- **Channel-scoped wings** — Telegram chats, Crystal sessions, and CLI invocations write to per-channel wings (`channel_telegram_<chatId>`, `channel_web_<sessionId>`, `channel_cli_<host>`) so per-thread recall stays tight, with cross-wing tunnels bridging back to the workspace wing.
-- **`palace-recall` OpenClaw hook** — Two-stage retrieval injects channel-scoped drawers first, falls back to global, all in ~1.5 s with caching.
-- **Stitched MEMORY.md** — `HOT_MEMORY.md` (active session), `WARM_MEMORY.md` (stable facts), and `MEMORY_BASE.md` (long-term archive) are stitched into a single `MEMORY.md` for cold-start hydration.
-- **Memory Health dashboard card** — Replaces the old Vector Store widget on the Home view. Shows drawer count, KG entity/triple counts, recall hook status, last mine timestamp, and last KG extraction.
-- **Mining + KG Extract tabs** — New tabs in the Memory view show recent cron-ledger entries for the mining and extraction jobs.
-- **MCP janitor** — Background cron keeps orphaned `mempalace.mcp_server` stdio processes from accumulating (caps RAM at ~280–850 MB instead of unbounded).
-- **Heartbeat moved to OpenAI** — `agents.defaults.heartbeat.model` is now `openai/gpt-4o-mini` on an 8 h cadence so a stalled local model never blocks user chats. vLLM stays as the last-ditch fallback only.
-
-### April 2026 — Local LLM via vLLM + Docker
-
-Crystal now ships with a fully optimized local LLM inference stack via [vLLM](https://github.com/vllm-project/vllm) and Docker — no cloud API needed.
-
-**Model:** `nvidia/Qwen3-30B-A3B-NVFP4` (30B total / 3B active MoE, NVFP4 quantized)
-
-| Benchmark | Result |
-|-----------|--------|
-| Peak generation | **237 tok/s** (RTX 5090 reference) |
-| Sustained generation | **196–235 tok/s** (varies by GPU) |
-| Tool call (auto) | **~150 ms** |
-| Tool call (required) | **728 ms** |
-| Multi-tool (2 tools) | **638 ms** |
-| VRAM usage | ~17 GB of 32 GB |
-| KV cache | 259K tokens (FP8) |
-
-**Speed optimizations applied:**
-
-- **Marlin GEMM backend** (`VLLM_NVFP4_GEMM_BACKEND=marlin`) — Marlin kernels for NVFP4 weight decompression, significantly faster than default FlashInfer CUTLASS
-- **Marlin MoE** (`VLLM_USE_FLASHINFER_MOE_FP4=0`) — Routes MoE FP4 operations through Marlin instead of FlashInfer
-- **FP8 KV cache** (`--kv-cache-dtype fp8`) — Halves KV cache memory, doubles context capacity
-- **CUDA graphs** (`--performance-mode interactivity`) — Fine-grained CUDA graphs optimized for low single-request latency
-- **Prefix caching** (`--enable-prefix-caching`) — Caches repeated system prompts for instant reuse
-- **Chunked prefill** (`--max-num-batched-tokens 4096`) — Caps prefill batch size for lower latency
-- **Memory profiler** (`VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1`) — Accurate CUDA graph memory accounting for maximum KV cache allocation
-- **Expandable segments** (`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`) — Reduces CUDA memory fragmentation
-- **Hermes tool parser** — Reliable tool call extraction for function calling workflows
-- **Barubary attuned chat template** — Community-fixed Jinja template with 21 bug fixes over the official Qwen3 template (tool call bleed, parallel tools, streaming compat, thinking/tools conflict)
-
-**Quick start:**
-
-```bash
-# Set your HuggingFace token (for gated model access)
-echo "HF_TOKEN=hf_your_token_here" > .env
-
-# Start vLLM (first run downloads ~15 GB model)
-docker compose up -d
-
-# Check status
-.\scripts\vllm-docker.ps1 status
-```
-
-The server is OpenAI-compatible at `http://localhost:8000`. Crystal auto-detects it on startup.
-
----
-
-### April 2026 — v0.8.0 Chat Settings, GPU HUD, Voice Gateway, Forge Pipeline
-
-#### World-Class Chat Experience
-- **In-Chat Settings Drawer** — Gear icon in the chat header opens a 300px slide-out panel with model selector, temperature/max tokens/top-p sliders, thinking level picker, response style presets (Concise/Balanced/Detailed), and streaming toggle. All settings persisted to localStorage via new `chatSettingsStore`.
-- **Offline Mode Toggle** — One-click switch to local models. Auto-detects vLLM on port 8000, stores/restores cloud model on toggle. Green "LOCAL" badge in header when active.
-- **Regenerate Response** — RefreshCw button on the latest assistant message to re-run the prompt with current settings.
-- **Edit & Resend** — Pencil icon on user messages opens inline edit mode. Truncates history at that point and resends with the edited content.
-- **Message Feedback** — ThumbsUp/ThumbsDown on every assistant message, persisted in conversation data. Filled icon when selected.
-- **Conversation Export** — Download icon + `Ctrl+Shift+E` exports the full conversation as a formatted Markdown file with metadata header.
-- **In-Chat Search** — Search icon + `Ctrl+F` opens a search bar that filters messages and highlights matches with an amber border glow.
-- **Keyboard Shortcuts** — `Ctrl+Shift+N` (new chat), `Ctrl+F` (search), `Ctrl+Shift+E` (export), `Escape` (close settings/search).
-- **Parameters Wired to Pipeline** — Temperature, max tokens, and top-p are now written to `agents.defaults` in `openclaw.json` via `applySessionOverrides()` before each chat, with deduplication to avoid redundant config writes.
-- **Message Count** — Live message count shown in header.
-
-#### GPU Monitor HUD Redesign
-- **HUD-Inspired Design** — Complete rewrite of `GpuMonitor.tsx` with cyberpunk HUD styling: corner brackets, scan-line overlay, decorative tick marks on ring gauges.
-- **Large GPU Core Ring** — 100px ring gauge with 12 cyan tick marks, pulsing center glow above 80% utilization.
-- **Secondary Metric Rings** — Three 58px rings for VRAM, Temperature, and Power draw with color-coded thresholds.
-- **Segmented Bars** — 20-segment notched progress bars for VRAM and Power replacing smooth gradients. Filled segments glow, empty segments show dim outlines.
-- **Stats Grid** — Four-column grid showing Core%, VRAM%, Temp, and Power with glowing monospace values.
-- **Utilization History Chart** — Vertical bar chart showing last 20 GPU utilization samples with HUD grid lines and color gradient (green to amber).
-- **HUD Section Label** — "01//GPU MONITOR" numbering style with cyan monospace font replaces generic section label in HomeView.
-
-#### Unified Voice Gateway
-- **Voice Gateway Service** — New `voice_gateway.py` FastAPI service on port 6500 that unifies STT and TTS backends. Normalizes HTTP (`/stt/transcribe`, `/tts/speak`) and WebSocket (`/stt/realtime`, `/tts/realtime`) endpoints. Routes to NVIDIA Parakeet STT (`nvidia_stt_worker.py`, port 8090) and NVIDIA Magpie TTS (`nvidia_tts_worker.py`, port 8091), with the browser Web Speech API as an emergency fallback when local services are unavailable.
-- **vLLM Integration** — vLLM added as the local LLM backend (port 8000). Rust backend auto-starts Docker/vLLM on launch. New provider in Settings, token usage store, and secrets management.
-- **STT Worker FastAPI Rewrite** — `nvidia_stt_worker.py` rewritten from aiohttp to FastAPI with `/transcribe`, `/ws`, `/health`, and auto-generated `/docs` endpoints.
-- **Voice Pipeline Optimization** — 20ms audio chunking, Web Audio API playback (replacing HTMLAudioElement), parallel provider initialization, warm-mic pause/resume, health check caching (5s TTL), and pre-connection audio buffering.
-
-#### Forge Software Factory Overhaul
-- **Automatic 4-Stage Pipeline** — Plan → Code → Test → Review stages with specialized agent prompts. Each stage streams live output via Rust `start_streaming_command`.
-- **Tabbed Interface** — Pipeline, Workspace, History, and Deploy tabs replacing the old two-tab layout.
-- **Build Model** — New `Build` data structure with pipeline stages, per-stage status/output, and build metadata.
-
-### April 2026 — v0.7.0 Major Feature Release
-
-#### Agent & View Consolidation
-- **Agents/Office Merge** — `OfficeView` fully merged into `AgentsView`. The Agents view now includes a live monitoring dashboard with agent cards, session counts, token usage, task dispatch form, and "Send to Chat" buttons. The Office nav entry, route, and file have been removed; all references redirect to Agents.
-
-#### Dashboard Enhancements
-- **Memory Health Card** — Unified dashboard widget showing MemPalace drawer count, KG entity/triple counts, recall-hook status, and last mine timestamp. Powered by `fetchMemoryStatus` calling `mempalace_query.py status` directly.
-- **Memory Palace Widget** — Memory section shows MemPalace status with drawer count ring gauge, wing/room counts, and active/inactive status indicator with click-through to Memory view.
-- **Floating Performance Graphs** — System Performance ring gauges (CPU/RAM/Storage) and Lifetime Tokens radial burst now render with fully transparent backgrounds — no card outline or shadow — so they appear to float directly on the page.
-- **NVIDIA Logo (Official)** — Replaced the incorrect GPU section logo with the official NVIDIA "eye" SVG from Simple Icons. The `NvidiaLogo` component is now exported from `GpuMonitor.tsx` for reuse.
-- **NVIDIA Logo for Local LLM** — The local model card uses the official `NvidiaLogo` with NVIDIA green (`#76b900`) branding, reflecting that local inference runs on NVIDIA GPUs via vLLM.
-
-#### Calendar Redesign
-- **Agenda Timeline** — The Command Center Calendar tab completely rebuilt from an overcrowded 24×7 grid to a scalable agenda-style view with:
-  - Week navigation (Previous / Today / Next Week)
-  - Clickable 7-day picker row with per-day job counts
-  - 24-hour activity heatmap with color intensity proportional to job density
-  - Stats bar (Total Jobs, Fires Today, Active Hours, Recurring, Daily)
-  - Vertical timeline grouped by hour with expandable job cards
-  - Frequency breakdown summary
-  - "NOW" badge on the current hour
-
-#### Tools & Skills Management
-- **Skill Enable/Disable Toggles** — Each skill card in the Tools → Skills tab now has an inline toggle switch. Skills can be enabled/disabled directly from the UI without CLI or config file edits. Disabled skills are visually dimmed with an "OFF" badge.
-- **ClawHub Tab** — New "Hub" tab in Tools for discovering and installing verified 3rd-party skills from ClawHub. Includes search, install, update individual skills, update all, and sync. Installed skills displayed in a grid with version badges.
-
-#### Token Usage & Cost Estimation
-- **Estimated Costs** — Usage page now calculates estimated dollar costs for all providers: cloud APIs (OpenAI, Anthropic, DeepSeek, xAI, Google) use published per-million-token rates; local GPU (vLLM, NVIDIA STT/TTS) uses electricity-based estimates (configurable wattage and $/kWh).
-- **Local Compute Savings** — Prominent comparison card showing "If sent to cloud API" vs. "Actual electricity cost" with a savings multiplier badge.
-- **$/M Tok Column** — Input/Output token breakdown table now includes a blended cost-per-million-tokens column and GPU badges for local providers.
-- **Pricing Methodology** — Detailed footer explaining how cloud and local costs are estimated.
-
-#### Navigation Overhaul
-- **Three Collapsible Sections** — Sidebar reorganized into:
-  - **MISSION** (top) — Home, City, Chat, Command Center
-  - **CLAW** (middle) — Agents, Forge, Memory, Models, Channels, Skills, Hooks, Tools
-  - **SYSTEM** (bottom) — Usage, Doctor, Settings
-  - All three sections are independently collapsible with chevron toggles.
-- **Tools Moved to Claw** — Tools tab relocated from the System section to the Claw section for easier access alongside Skills and Memory.
-- **Skills Nav Entry** — New sidebar entry for Skills/Marketplace under the Claw section.
-
-#### AI Search & Command Intelligence
-- **System Prompt Rewrite** — The Crystal AI chatbot (Ctrl+K search and slash commands) now has comprehensive knowledge of all 30+ views, including Dashboard sections (ring gauges, vector store, GPU), Command Center tabs, Agents monitoring, Forge capabilities, Memory tiers and vector DB, Tools tabs (Skills/Hub/Keys/Sandbox & Tools), Usage analytics, and all extended views.
-- **Navigation Tips** — AI responses now include actionable tips like "To manage cron jobs: Navigate to Command Center → Scheduled tab".
-- **Expanded View Map** — 80+ keyword-to-view mappings (up from ~45), covering aliases like `"forge"`, `"vector store"`, `"clawhub"`, `"sandbox"`, `"api costs"`, `"gpu monitor"`, etc.
-- **Slash Commands Sync** — 30+ navigation slash commands added/updated, stale duplicates removed (`/office`, duplicate `/agents`), new commands: `/city`, `/calendar`, `/heartbeat`, `/forge`, `/usage`, `/hub`, `/sessions`, `/tasks`, `/approvals`, `/subagents`, `/webhooks`, `/voice`, `/devices`.
-- **Command Palette Refresh** — Updated icons (LayoutDashboard for Command Center), added City and Usage as top-level entries, accurate descriptions matching current functionality.
-
-### April 2026 — v0.6.0.1 Dashboard Polish, Audit & Bug Fixes
-
-- **Dashboard Redesign** — Complete visual overhaul with SVG data visualizations: ring gauges (CPU, RAM, Storage), radial burst (lifetime tokens), smooth bezier sparklines (CPU/RAM trends), mini bar charts (cron jobs), dot matrix (memory), and glow progress bars — all theme-aware.
-- **Apple-Meets-Futuristic UX** — Every card lifts, scales, and glows on hover with spring-eased micro-interactions. Press-down feedback on clickable elements. Smooth cubic-bezier transitions throughout. Status dots pulse when disconnected.
-- **Dual LLM Model Display** — Dashboard LLM card shows both hosted (OpenAI with official logo) and local (NVIDIA/vLLM) models side by side with independent status indicators.
-- **GPU Monitor Redesign** — Rebuilt with ring gauge, glow bars, metric chips, NVIDIA-green branding, hover interactions, and theme-aware colors to match the new dashboard aesthetic.
-- **Quick Actions Relocated** — Moved from dashboard to Command Center Workflows tab for a cleaner home screen.
-- **Voice Button Cleanup** — Removed duplicate voice orb from dashboard (kept in chat).
-- **8 Bug Fixes from Full Audit:**
-  - CommandPalette: `selectedIndex` could go to -1 on empty lists
-  - Onboarding: rejected `Promise.allSettled` branches left prereq rows stuck loading
-  - AgentsView: stale closure in `loadAgents` callback
-  - DataStore: five unguarded `JSON.parse` calls wrapped in try/catch
-  - AppStore: invalid persisted view validated against `VALID_VIEWS` set
-  - HomeView: `RingGauge` positioning fix, `RadialBurst` deterministic rendering
-  - App.tsx: `FloatingOrb` accessibility — added contextual `aria-label`
-- **Version Sync** — `Cargo.toml` and `tauri.conf.json` both aligned to v0.6.0.
-- **CSS Animations** — Added `pulse-dot` keyframe for disconnected status indicators.
-
-### April 2026 — v0.6.0 City, Memory & Performance
-
-- **Crystal City — Future-Punk Visualization** — Full cyberpunk isometric city with neon buildings, holographic billboards, flying drones, electric arcs, rain, steam vents, scanlines, and shooting stars. Agents walk between buildings, display current tasks in speech bubbles, and show status rings. HUD includes activity feed, agent roster, and live clock.
-- **Memory System Overhaul** — New Knowledge Base tab for browsing, viewing, and editing all workspace `.md` files (SOUL.md, USER.md, AGENTS.md, etc.). MemPalace integration with spatial hierarchy, Knowledge Graph, and AAAK compression.
-- **Sidebar Consolidation** — Navigation reduced from 31 to 15 items with collapsible OpenClaw section. All views remain accessible via Ctrl+K command palette.
-- **Concurrency Limiter** — `cache.ts` now throttles CLI commands to 3 concurrent requests max, preventing WebSocket handshake timeouts and gateway lane stalls.
-- **Batched Prefetching** — Data store prefetches in 3 sequential batches with 30s cooldown instead of flooding the gateway with 12+ parallel requests.
-- **Reduced Polling** — Gateway reconnection intervals, City polling, and data refresh rates all reduced to minimize gateway load.
-- **Factory Builds Tab** — Live Claude Code sub-agent builds with spawn, steer, send, and log streaming.
-
-### April 2026 — v0.5.0 Full OpenClaw Alignment
-
-- **Live Agent Office** — OfficeView rebuilt with real-time agent monitoring. Shows all OpenClaw agents with live sessions, running tasks, token counts, and dispatch functionality — no more fake preset agents.
-- **Skill Launcher Factory** — FactoryView rebuilt with a searchable Skills tab showing all 18+ workspace skills (bill-sweep, bounty-hunter, car-broker, etc.) with eligibility status, missing dependency details, and one-click launch. Projects tab preserved for autonomous code builds with any agent ID.
-- **Skill-Based Workflows** — 12 real workflows mapped to OpenClaw skills: Bill Sweep, Bounty Scout, Car Deal Finder, Home Service Quote, Market Research, VC Evaluation, Code Review, and more — across Finance, Home, Development, System, Research, and Productivity categories.
-- **AI-Powered Command Palette** — Ctrl+K now detects questions and answers them with GPT-4o-mini. Shows inline AI responses with navigation suggestions and a "Deep Dive in Chat" button for deeper exploration.
-- **Telegram Topics Dashboard** — HomeView now shows all Telegram topics (Finance #16, Home #17, System #38, Neighborhood #89, Factory #1195) with cron delivery counts.
-- **Cron Health Monitor** — Dashboard displays enabled/total ratio, failure count, health bar, and next firing time.
-- **Delivery Target Labels** — Calendar, CronView, and Command Center all show which Telegram topic each cron job delivers to (e.g., "→ telegram · Finance (#16)").
-- **Data Layer Expansion** — Added `getSkills()` and `getSessions()` caches to the data store for consistent, fast access across views.
-- **Dynamic Agent Types** — Factory store no longer hardcoded to `claude-code`/`cortex` — supports any agent ID string.
-
-### March 2026 — v0.4.0
-
-- **Multi-Provider LLM Support** — Connect to vLLM, OpenAI, Anthropic, Google, OpenRouter, Groq, or Mistral.
-- **NVIDIA RTX Voice Engine** — GPU-accelerated speech with Nemotron/Parakeet STT and Magpie TTS.
-- **Software Factory** — Launch and manage coding agents with live log streaming.
-- **ClawHub** — Built-in skill registry with search, install, publish, and sync.
-- **Agent Workspace** — Visual editor for 9 agent identity files.
-- **28 Views** — Workspace, Messaging, Directory, Sub-Agents, Devices, Webhooks, Voice Calls, and more.
-- **60+ Slash Commands** — Full command coverage across all features.
-- **Image Generation** — DALL·E via the `openai-image-gen` skill.
-- **Voice Calls** — Notify/converse modes with expose controls and call history.
-- **DNS Configuration** — Custom domain support from Settings.
+- [What is Crystal?](#what-is-crystal)
+- [Feature overview](#feature-overview)
+- [Architecture](#architecture)
+- [The Crystal Data Science Workbench](#the-crystal-data-science-workbench)
+  - [Tasks, Projects, Decisions & Lessons](#tasks-projects-decisions--lessons)
+  - [Skills Registry & NVIDIA Skills](#skills-registry--nvidia-skills)
+  - [Execution targets & the Tailscale mesh](#execution-targets--the-tailscale-mesh)
+  - [The crystal-gpu sidecar](#the-crystal-gpu-sidecar)
+  - [Fine-Tuning Studio](#fine-tuning-studio)
+- [Memory: MemPalace](#memory-mempalace)
+- [Channels](#channels)
+- [The desktop shell](#the-desktop-shell)
+- [Prerequisites](#prerequisites)
+- [Quickstart](#quickstart)
+- [Configuration](#configuration)
+- [Project layout](#project-layout)
+- [Development](#development)
+- [Troubleshooting](#troubleshooting)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
 ## What is Crystal?
 
-Crystal wraps [OpenClaw](https://github.com/openclaw/openclaw) — an open-source autonomous AI agent framework — in a native desktop application with a real GUI. Instead of terminal commands and config files, you get a polished Windows app where everything is one click (or one voice command) away.
+[OpenClaw](https://github.com/openclaw/openclaw) is a local-first personal AI agent framework: a gateway that
+hosts agents, tools, channels, memory, and a JSON-RPC control plane. Crystal is the **native desktop application on
+top of it** — instead of editing config files and reading terminal output, you get a single Windows app that starts
+the services for you and exposes everything through a clean GUI.
 
-### Crystal vs. OpenClaw CLI
+Crystal is two things at once:
 
-| | OpenClaw CLI | Crystal |
-|---|---|---|
-| Interface | Terminal | Native desktop GUI with 30 views |
-| Setup | Manual config files | One-click onboarding wizard |
-| LLM Providers | Manual configuration | 7 providers with visual API key management |
-| Server management | Start services manually | Auto-starts vLLM, gateway, and voice servers |
-| Model management | CLI commands | Visual model browser with VRAM charts |
-| Skills & plugins | `npx openclaw skills list` | Toggle switches, ClawHub, one-click Power Up |
-| Voice | Separate setup | NVIDIA Parakeet STT and Magpie TTS via Voice Gateway (browser fallback) |
-| System monitoring | None | Live GPU, CPU, RAM, disk dashboards |
-| Coding agents | Separate tools | Built-in Factory with skill launcher + any agent |
-| Agent identity | Edit files manually | Visual workspace editor with presets |
-| Memory | Flat file + basic recall | MemPalace spatial hierarchy + Knowledge Graph + automated mining |
-| Secrets | `.env` files or inline | 1Password vault with `op run` injection |
-| Themes | None | 6 polished themes |
+1. **A control surface for OpenClaw** — chat with your agent, watch sessions and activity, manage channels, models,
+   hooks, skills, memory, and run diagnostics.
+2. **The Crystal Data Science Workbench** — an operational + strategic layer (the internal `crystal-os` plugin) that
+   gives the agent durable tasks, projects, decisions, and lessons; a unified skills registry; a Tailscale-based
+   execution mesh; a GPU/ML sidecar; and a Fine-Tuning Studio.
 
----
-
-## Why Crystal?
-
-- **Local-First, Cloud-Optional.** Run everything on your own GPU with vLLM, or connect to OpenAI, Anthropic, Google, Groq, OpenRouter, or Mistral when you need it. Your data stays on your machine unless you choose otherwise.
-- **Zero Configuration.** Crystal auto-starts vLLM (via Docker), the OpenClaw gateway, and all voice servers on launch. The onboarding wizard handles the rest.
-- **Actually Useful.** Crystal isn't a chatbot wrapper. It creates files, runs shell commands, manages your system, automates workflows, generates images, controls a browser, monitors hardware, and manages distributed agent nodes — through natural language or voice.
-- **NVIDIA-Accelerated Voice.** GPU-powered speech recognition (Parakeet STT) and synthesis (Magpie TTS) through the Voice Gateway, with the browser Web Speech API as an emergency fallback when local NVIDIA services are unavailable.
-- **Production-Grade Security.** All secrets stored in 1Password and injected at runtime. Path-scoped filesystem access control. Device authentication on the gateway. No plaintext API keys anywhere.
-- **Canonical MemPalace Memory.** Spatial hierarchy (94.8% recall) with AAAK compression, temporal knowledge graph, automated markdown mining every 30 min, channel-scoped wings, and an OpenClaw recall hook. Only ~170 tokens loaded at cold start.
+> [!NOTE]
+> **Naming.** *Crystal* is the desktop app. The data-science layer is the **Crystal Data Science Workbench**. Its
+> internal plugin id is `crystal-os` — you only see that name in config keys (`plugins.entries.crystal-os`) and CLI
+> verbs (`openclaw os …`). The Workbench features require an OpenClaw runtime that has the `crystal-os` plugin built
+> and enabled (see [Configuration](#configuration)); without it, Crystal still runs as a full OpenClaw desktop client.
 
 ---
 
-## Features
+## Feature overview
 
-### AI Chat
-
-Full-featured conversation interface with multi-conversation sidebar, Markdown rendering, syntax-highlighted code blocks, streaming typewriter responses, live TPS counter, thinking level control, in-chat settings drawer, offline mode toggle, message feedback, regenerate, edit-and-resend, conversation export, and in-chat search.
-
-**6 Built-In Tools:**
-
-| Tool | Description |
-|------|-------------|
-| `shell` | Execute any shell command |
-| `read_file` | Read file contents from any path |
-| `write_file` | Create or overwrite files |
-| `list_directory` | Browse directory contents |
-| `web_search` | Search the web (top 5 results) |
-| `web_fetch` | Fetch and read any URL |
-
-**60+ Slash Commands** — type `/` to access navigation, model switching, thinking levels (`/think high`, `/fast on`), session export, debug tools, sub-agent management, approval workflows, and more.
-
-**Interactive Action Buttons** — The AI renders clickable buttons in responses (navigate views, enable plugins, run commands, copy text) so you can act on suggestions instantly.
-
-**File Attachments** — Drag-and-drop or paste images, audio, video, documents (txt, md, code, pdf), up to 25 MB.
-
-**Image Generation** — Ask Crystal to create images and it routes to DALL·E via the `openai-image-gen` skill.
+| Area | What you get |
+|------|--------------|
+| **Desktop shell** | Custom frameless window, global show/hide shortcut, system tray, command palette (`Ctrl+K`), onboarding wizard, themeable UI, lazy-loaded views. |
+| **Chat** | Streaming conversations against a local model (vLLM) or a cloud provider, with a live TPS readout, thinking-level control, and Markdown/code rendering. |
+| **Local LLM** | Auto-managed [vLLM](https://github.com/vllm-project/vllm) container serving `nvidia/Qwen3-30B-A3B-NVFP4` on an OpenAI-compatible API (port `8000`). |
+| **Data Science Workbench** | Board (tasks), Projects, Lessons, Decisions, Targets, and Studio views backed by the `crystal-os` plugin. |
+| **Skills** | A unified registry of **253 callable skills** — **201 official NVIDIA skills** plus your Crystal `SKILL.md` and custom skills — browsable and invocable. |
+| **Execution mesh** | Dispatch GPU/CPU work to any machine on your Tailscale tailnet (desktops, laptops, robots, cloud GPUs) with capability-based best-node routing. |
+| **GPU/ML sidecar** | `crystal-gpu`, a localhost FastAPI service for hardware detection, GPU-first data science, GPU embeddings, and the Fine-Tuning Studio pipeline. |
+| **Memory** | MemPalace canonical memory (temporal knowledge graph + hybrid/spatial retrieval), with standalone GPU re-index and evaluation tooling. |
+| **Channels** | Telegram and Discord front and centre, plus the broader OpenClaw channel set. |
+| **Ops** | Agents, Sessions, Activity, Hooks, Tools & Skills, Models, Usage/cost analytics, Doctor, Security, and a Forge build view. |
 
 ---
 
-### Dashboard
+## Architecture
 
-Futuristic bird's-eye view of your entire system with Apple-level polish and micro-interactions:
+Crystal is a thin, fast desktop shell. The React frontend never talks to the network directly — the Rust backend owns
+service lifecycle and brokers every call: it runs the `openclaw` CLI (newline-delimited JSON envelopes), proxies HTTP,
+and streams LLM tokens over SSE. Heavy and GPU work is delegated to the `crystal-gpu` sidecar and, optionally, to other
+machines on a Tailscale mesh.
 
-- **System Performance** — Floating SVG ring gauges for CPU, RAM, and Storage with color-coded thresholds, transparent backgrounds, and hover scale animations
-- **Lifetime Tokens** — Radial burst visualization aggregating session token usage with hover rotation effect (floating, no card background)
-- **CPU & Memory Trends** — Smooth bezier sparkline charts with gradient fills, glowing endpoints, and live percentage readouts
-- **Cron Jobs** — Mini bar chart (active/disabled/failed) with one-click navigation to the scheduler
-- **Stats Tiles** — Sessions, Agents, Skills, Heartbeat — each with hover lift, glow, and press feedback
-- **Memory Palace** — MemPalace status widget with drawer count ring gauge, wing/room counts, and active status indicator with click-through to Memory view
-- **Memory Health** — Unified card showing drawer count, Knowledge Graph entity/triple counts, recall-hook status, last mine timestamp, and last KG extraction
-- **Dual LLM Display** — Shows both hosted model (OpenAI logo + model name) and local model (NVIDIA/vLLM) with independent connection status dots
-- **Uptime & Version** — System uptime with OpenClaw version badge
-- **Telegram Topics** — Topic tags with cron delivery counts and hover highlights
-- **Security** — Audit status card with glow progress bar and navigation chevron
-- **PC Optimizer** — 12 one-click system optimizations with per-button hover/press animations and result indicators
-- **GPU Monitor** — Official NVIDIA-branded card with ring gauge utilization, VRAM glow bar, temperature/power metric chips, and status indicator
-- **Status Pills** — Gateway and Telegram connection indicators with pulsing dots when disconnected
+```mermaid
+flowchart TD
+    subgraph Desktop["Crystal desktop app (Tauri)"]
+        UI["React 19 + Zustand UI<br/>(views, command palette, themes)"]
+        RS["Rust backend<br/>(CLI bridge · HTTP proxy · SSE · service lifecycle)"]
+        UI <--> RS
+    end
 
----
+    RS -->|"openclaw … --json / health"| GW["OpenClaw Gateway<br/>(JSON-RPC control plane · :18789)"]
+    RS -->|"SSE chat completions"| VLLM["vLLM (Docker)<br/>OpenAI-compatible · :8000"]
+    RS -->|"cloud chat (SSE)"| CLOUD["Cloud LLM providers<br/>(OpenAI, …)"]
 
-### Voice Engine
+    GW --> PLUGIN["crystal-os plugin<br/>(Data Science Workbench)<br/>SQLite + workspace markdown"]
+    GW --> MEM["MemPalace<br/>(KG + vector + spatial memory)"]
+    GW --> CH["Channels<br/>(Telegram · Discord · …)"]
 
-Crystal ships with an NVIDIA-first voice stack. The desktop app talks to the **Voice Gateway** (`voice_gateway.py`, port **6500**), which proxies HTTP and WebSocket traffic to **NVIDIA Parakeet STT** (`nvidia_stt_worker.py`, port **8090**) and **NVIDIA Magpie TTS** (`nvidia_tts_worker.py`, port **8091**). If those services are unreachable, **Browser** (Web Speech API) is used as an emergency fallback.
+    PLUGIN -->|"GPU/ML skills · /hardware · /embed"| SIDE["crystal-gpu sidecar<br/>FastAPI · :8099"]
+    PLUGIN -->|"best-node dispatch over tailnet"| MESH["Execution mesh<br/>(secondary desktop · macbook · robot · cloud GPU)"]
+    MESH -.->|"each node runs"| SIDE
+    SIDE -.->|"GPU re-index"| MEM
+```
 
-**Speech-to-Text (2 providers):**
-
-| Provider | Engine | Details |
-|----------|--------|---------|
-| **NVIDIA Parakeet** | Parakeet ASR | GPU-accelerated via `nvidia_stt_worker.py`, port 8090 (via gateway 6500), lowest latency |
-| **Browser** | Web Speech API | Zero-setup emergency fallback |
-
-**Text-to-Speech (2 providers):**
-
-| Provider | Engine | Details |
-|----------|--------|---------|
-| **NVIDIA Magpie** | Magpie TTS | GPU-accelerated via `nvidia_tts_worker.py`, port 8091 (via gateway 6500), natural voice |
-| **Browser** | Web Speech API | Zero-setup emergency fallback |
-
-**Voice Orb** — Animated button with state-aware gradients and ring animations across 9 states: idle, listening, processing, thinking, transcribing, awaiting confirmation, executing, speaking, and error.
-
-**Voice Calls** — Dedicated VoiceCall view with notify/converse modes, expose controls (serve/funnel/off), and call history.
+**Key ports:** OpenClaw gateway `18789` · vLLM (OpenAI-compatible) `8000` · crystal-gpu sidecar `8099`.
 
 ---
 
-### Multi-Provider LLM
+## The Crystal Data Science Workbench
 
-Crystal supports 7 LLM providers. Manage API keys visually in Settings and switch models on the fly — or toggle offline mode in the chat settings drawer to auto-switch to local inference.
+The Workbench is the `crystal-os` plugin: a durable **operational + strategic awareness layer** for the agent. It is
+additive and opt-in — a plugin plus a sidecar, not a core rewrite — and it persists to its own SQLite database
+(`~/.openclaw/crystal-os/crystal-os.sqlite3`) while linking out to MemPalace and workspace markdown.
 
-| Provider | Type |
-|----------|------|
-| **vLLM** | Local (OpenAI-compatible on port 8000, auto-started via Docker) |
-| **OpenAI** | Cloud API |
-| **Anthropic** | Cloud API |
-| **Google** | Cloud API |
-| **OpenRouter** | Cloud API (multi-model) |
-| **Groq** | Cloud API (fast inference) |
-| **Mistral** | Cloud API |
+In the desktop app these surfaces live under the **Crystal Data Science Workbench** navigation group: **Board**, **Projects**,
+**Lessons**, **Decisions**, **Targets**, and **Studio**.
 
-AI configuration includes temperature (0–2), max tokens, top-p, response style presets, context window, system prompt editing, and thinking level control (auto, minimal, medium, high). All parameters can be adjusted in the chat settings drawer and are wired directly to the OpenClaw agent pipeline.
+### Tasks, Projects, Decisions & Lessons
 
----
+| Entity | What it is | Where |
+|--------|-----------|-------|
+| **Tasks** | First-class tasks with a full status lifecycle (`backlog → todo → in_progress → blocked → review → completed → archived`), subtasks, and a dependency DAG with **automatic blocker detection**. Every execution attempt is recorded. | **Board** |
+| **Projects** | Group goals, milestones, and tasks, and own a `project_state` operating-memory snapshot (current milestone, blockers, next actions, open questions). On creation they scaffold human-readable docs under `~/.openclaw/workspace/projects/<slug>/`. | **Projects** |
+| **Decisions** | Architecture/strategy choices captured with context, options considered, the chosen option, and rationale — searchable before you make a related call. | **Decisions** |
+| **Lessons** | Recorded `problem → solution → outcome` with a confidence score, linked to the source run — consult before risky work, record after notable outcomes. | **Lessons** |
 
-### Software Factory (Forge)
+These let the agent (and you) keep work coherent across turns, sessions, and machines instead of relying on free-text
+chat history.
 
-Four-tab automated software factory with a 4-stage build pipeline:
+### Skills Registry & NVIDIA Skills
 
-**Pipeline Tab** — Automatic Plan → Code → Test → Review pipeline:
-- Specialized agent prompts per stage
-- Live streaming output via Rust `start_streaming_command`
-- Per-stage status tracking (pending, running, success, failure)
+The Skills Registry (in the **Tools & Skills** view) is a unified, searchable catalog of *callable* skills reconciled
+from three sources:
 
-**Workspace Tab** — Browse and manage build workspace files:
-- Directory browser with file tree and inline file viewer
-- Run workspace exploration for active builds
+- **`nvidia`** — the **201 official NVIDIA agent skills** from [github.com/nvidia/skills](https://github.com/nvidia/skills),
+  installed under `~/.openclaw/workspace/skills/<name>/SKILL.md`.
+- **`crystal`** — your existing OpenClaw `SKILL.md` skills (read-only).
+- **`custom`** — skills you register yourself.
 
-**History Tab** — Complete build history with logs and metadata
+After import the registry holds **253 callable skills**. Every skill is mapped to one of seven categories, and to the
+GPU libraries it exercises (cuDF, NeMo, TensorRT-LLM, cuOpt, …):
 
-**Deploy Tab** — Deployment management for completed builds
+| Category | Count | Examples |
+|----------|------:|----------|
+| Training | 72 | NeMo RL / AutoModel / Megatron-Bridge, AutoML/TAO, ASR fine-tune |
+| Inference | 37 | Dynamo deploy/serve/router, TensorRT-LLM, NIM, RAG, Riva |
+| Automation | 34 | install / configure / run-on-slurm / monitor lifecycle ops |
+| Development | 23 | CUDA-tile (TileGym) kernels, recipe/plugin dev, DeepStream |
+| Data Science | 20 | cuDF, cuPyNumeric, cuOpt, DICOM, dataset convert/load |
+| Evaluation | 9 | eval, gap analysis, RCA, dataset validation, readiness checks |
+| Research | 6 | PhysicsNeMo, Earth-2, CUDA-Q, neural reconstruction |
 
----
+Agents use two tools — `skill_search` (discover by intent) and `skill_invoke` (run end-to-end, with input/output
+validation). GPU/ML skills dispatch through the execution engine to the `crystal-gpu` sidecar, falling back to CPU when
+no accelerated target is healthy. Humans browse and invoke the same catalog from the UI.
 
-### Agent Workspace
+> The skills are *registered* by default, but agents can only *call* them when the `crystal-os` plugin is enabled, its
+> tools (`skill_search`, `skill_invoke`) are allowlisted, and `skills.limits` are raised above 201. See
+> [Configuration](#configuration).
 
-Edit 9 agent identity and behavior files with a visual editor:
+### Execution targets & the Tailscale mesh
 
-| File | Purpose |
-|------|---------|
-| `AGENTS.md` | Agent definitions and routing |
-| `SOUL.md` | Core personality and values |
-| `IDENTITY.md` | Name, role, capabilities |
-| `USER.md` | User preferences and context |
-| `TOOLS.md` | Available tools and permissions |
-| `MEMORY.md` | Curated long-term memory |
-| `BOOT.md` | Startup instructions |
-| `BOOTSTRAP.md` | First-run initialization |
-| `HEARTBEAT.md` | Recurring autonomous behavior |
+All cross-machine work goes through a single `ExecutionTarget` abstraction (`dispatch / monitor / retrieve / cancel`,
+plus `healthCheck`) so no machine is ever hardcoded. Remote nodes are reached **privately over a
+[Tailscale](https://tailscale.com) tailnet** — by MagicDNS hostname or `100.x` CGNAT address, never a LAN or public IP.
 
-Includes presets and standing orders with program, authority, trigger, approval gate, and escalation configuration.
+| Target kind | Transport | Typical use |
+|-------------|-----------|-------------|
+| `local_desktop` | local process | CPU fallback, always available |
+| `secondary_desktop` | SSH / Tailscale SSH | another desktop or GPU rig |
+| `macbook` | SSH / Tailscale SSH | laptop node |
+| `robot` | SSH / Tailscale SSH | edge / robot node |
+| `cloud_gpu` | HTTP job API over tailnet | rented cloud GPU |
+| `future_dgx` | HTTP job API over tailnet | reserved DGX-class box |
 
----
+Capability tracking pulls each node's `crystal-gpu /hardware` report (GPU model/VRAM, CUDA, RAM, libraries) and
+**best-node dispatch** picks the healthiest, least-loaded target that fits the job's required tags and VRAM — with
+**local CPU fallback** so a routed job is never stranded. The whole system **degrades gracefully when the `tailscale`
+CLI is absent** (reachability becomes `unknown`; it falls back to direct SSH over the same mesh hostname).
 
-### ClawHub & Marketplace
+```bash
+# Register a GPU rig reachable as MagicDNS "gpu-rig":
+openclaw os targets add --kind secondary_desktop --label "GPU rig" \
+  --tailscale-host gpu-rig --tags tag:gpu,tag:trusted --json
 
-Four-tab marketplace for extending Crystal:
+# Preview where a 24 GB-VRAM CUDA job would go (dry run):
+openclaw os targets dispatch --capabilities gpu,cuda --vram 24 --json
+```
 
-- **Skills** — Browse 51+ OpenClaw skills. Filter by status (All, Ready, No API Key). Toggle enable/disable. View source, dependencies, and homepage links. macOS-only skills auto-hidden on Windows.
-- **Plugins** — Browse and toggle OpenClaw plugins. Run diagnostics with `openclaw plugins doctor`.
-- **Power Up** — One-click setup: enables every disabled plugin and skill, runs security audit with auto-fix, reindexes memory. Per-step progress with expandable output.
-- **ClawHub** — Search and install skills from the registry. Publish your own skills (slug, name, version, tags, path, changelog). Sync installed skills with dry-run preview.
+### The crystal-gpu sidecar
 
-### Tools
+`crystal-gpu` is a self-contained FastAPI service (default `http://127.0.0.1:8099`) that is **independent of the
+Workbench DB and MemPalace** and **runs even with no GPU libraries installed** (graceful CPU degradation). It owns:
 
-Centralized management hub with four tabs:
+- **Hardware detection** (`GET /hardware`) — GPU/VRAM/CUDA/RAM/CPU/storage + installed libs + recommendations.
+- **GPU-first data science** (`POST /datascience/run`) — inspects a dataset, picks the optimal backend (RAPIDS
+  cuDF/cuML/Dask-cuDF vs pandas/sklearn), prefers GPU when beneficial, falls back to CPU, and benchmarks every run.
+- **GPU embeddings** (`POST /embed`) — BGE-class embeddings on GPU when available; returns `model` + `dimension` so
+  callers can detect index drift. This is what the MemPalace re-index consumes.
+- **NVIDIA skill descriptors** (`GET /skills`) — declarative specs the Workbench registry imports.
+- **Fine-Tuning Studio** (`/studio/*`) — see below.
 
-- **Skills** — All loaded OpenClaw skills with inline enable/disable toggle switches. Stats bar shows enabled/disabled/eligible counts. Disabled skills are visually dimmed with "OFF" badge. Dependency warnings before enabling.
-- **Hub** — ClawHub integration for discovering and installing verified 3rd-party skills. Search, one-click install, update individual or all skills, sync with registry.
-- **Keys** — Cloud LLM API key management (Anthropic, OpenAI, Google, OpenRouter, Groq, Mistral) with per-provider connectivity tests, mask/reveal, and direct writes to `auth-profiles.json`.
-- **Sandbox & Tools** — OpenClaw sandbox container/browser inventory, sandbox policy explanation, and tool permission inspection.
+> [!IMPORTANT]
+> **Windows note.** RAPIDS and NeMo are friction-prone on native Windows. For GPU data science and training, prefer
+> **WSL2** or the **Docker** image — the hardware detector reports this and the engine falls back to pandas safely.
 
-### Usage & Cost Analytics
+### Fine-Tuning Studio
 
-Comprehensive token usage analytics and cost estimation:
+The Studio (the **Studio** view + the sidecar) drives a typed dataset-to-model pipeline:
 
-- **Per-Provider Breakdown** — Tracks tokens across Anthropic, OpenAI, vLLM, NVIDIA STT/TTS, and other connected APIs.
-- **Estimated Costs** — Cloud APIs priced at published per-million-token rates; local GPU priced at electricity costs (configurable wattage, $/kWh rate, and throughput).
-- **Local Compute Savings** — Side-by-side comparison showing hypothetical cloud cost vs. actual electricity cost with savings multiplier badge.
-- **Token Split Table** — Input/Output breakdown per provider with $/M Tok column and GPU badges for local providers.
-- **Pricing Methodology** — Transparent footer explaining how all costs are estimated.
+```
+Import → Analysis → Cleaning → Dedup → PIIDetection → Split →
+BaseModelSelection → TrainingConfig → FineTune → Eval → Deploy → Reporting
+```
 
----
-
-### Command Center
-
-Unified hub for workflows, scheduling, and automation:
-
-- **Calendar** — Agenda-style timeline with week navigation, clickable 7-day picker, 24-hour activity heatmap, per-hour job grouping, expandable job cards, "NOW" badge on current hour, frequency breakdown, and quick stats (Total Jobs, Fires Today, Active Hours, Recurring, Daily)
-- **Workflows** — 12 skill-based templates across 6 categories (Finance, Home, Development, System, Research, Productivity) plus custom workflow builder with `{{INPUT}}` template variables and quick actions
-- **Cron Jobs** — Schedule recurring AI tasks with cron expressions. 6 quick templates, interactive syntax reference, per-job run/enable/disable/remove, delivery target labels
-- **Heartbeat** — Configure autonomous agent behavior
-
----
-
-### Channel Integrations
-
-Connect Crystal to 11 messaging platforms:
-
-| Channel | Type |
-|---------|------|
-| WhatsApp | Web bridge |
-| Telegram | Bot API |
-| Discord | Bot with voice, threads, reactions |
-| Slack | Workspace bot |
-| Signal | End-to-end encrypted |
-| Google Chat | Workspace integration |
-| Email | IMAP/SMTP monitoring |
-| Matrix | Federated messaging |
-| IRC | Classic IRC |
-| Linear | Issue tracker |
-| Nostr | Decentralized protocol |
-
-Per-channel: add/remove, login/logout, view capabilities, configure tokens, resolve contacts/groups.
+The **data-prep stages run for real today** (analysis, cleaning, dedup, PII detection, split, base-model selection,
+training config, reporting, with a `report.json` artifact). **Training / eval / deploy run behind pluggable backends** —
+`Trainer` implementations (Unsloth QLoRA, Axolotl, NeMo) and `Deployer` implementations (vLLM / NIM / OpenAI-compatible).
+Real training requires the GPU sidecar with the appropriate libraries installed (and is best run on a GPU node via the
+mesh). Treat end-to-end training as **gated on that runtime** rather than turnkey from a fresh install.
 
 ---
 
-### GPU & System Monitoring
+## Memory: MemPalace
 
-**GPU Monitor** (via `nvidia-smi`, polled every 30s):
-- HUD-themed card with scan-line overlay and decorative corner brackets
-- GPU Core — Large 100px ring gauge with 12 cyan tick marks and pulsing center glow (>80%)
-- Secondary metrics — Three 58px ring gauges for VRAM, Temperature, and Power
-- VRAM & Power — 20-segment notched progress bars with glowing filled segments
-- Stats grid — Monospace key-value display for Core%, VRAM%, Temp, Power
-- Utilization history — 20-sample vertical bar chart with HUD grid lines and green-to-amber gradient
-- HUD section label — "01//GPU MONITOR" numbering style in cyan monospace
+MemPalace is Crystal's canonical memory store — a temporal knowledge graph plus hybrid BM25 + vector + spatial document
+layers (L0–L3). The **Memory** view browses and edits it.
 
-**System Monitor** (polled every 30s):
-- CPU, RAM, Storage — SVG ring gauges with animated stroke transitions
-- CPU & Memory trend sparklines with bezier curves and gradient fills
-- Uptime display with OpenClaw version
+The Workbench ships **standalone, non-destructive upgrade tools** in `memory-tools/` (no edits to the external MemPalace
+package), each degrading gracefully when MemPalace, Chroma, the sidecar, or GPU libs are absent:
 
----
+- **GPU re-index** (`reindex_embeddings.py`) re-embeds drawers via the sidecar `/embed` into a new `*_v2` collection,
+  leaving the live index intact and recording `embedding_model` + `dimension` for drift detection.
+- **Bi-temporal KG** (`kg_bitemporal.py`) adds `created_at / valid_at / invalid_at / expired_at` additively and
+  *invalidates* (never deletes) superseded facts for time-travel / as-of queries.
+- **Entity resolution** (`entity_resolution.py`) merges near-duplicate entities and links new captures to existing drawers.
+- **Evaluation harness** (`eval_harness.py`) scores recall@k / MRR / temporal accuracy and gates the index swap.
 
-### Sandboxing
-
-Crystal currently relies on **OpenClaw's native tool policy layer** for agent containment on Windows:
-
-| Layer | What It Does |
-|-------|-------------|
-| Tool policy | `tools.allow` / `tools.deny` allowlists in `openclaw.json` gate which tools an agent can invoke |
-| Gateway routing | `tools.exec.host = gateway` routes shell exec through the gateway process rather than direct host spawn |
-| Workload isolation | Heavy/risky workloads (vLLM, voice workers) run in Docker containers via NVIDIA Container Toolkit |
-| Permissions UI | Tools → Sandbox & Tools tab inspects active containers, sandbox policy, and tool permissions |
-
-> **OpenShell on Windows:** [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) (Landlock + seccomp + OPA proxy) is Linux-kernel-dependent and ships wheels only for `manylinux` and `macosx_arm64`. There is no native `win_amd64` build, and a port would require either AppContainer/Job-Object/Hyper-V rewrites or a WSL2 forwarder shim. On Linux/macOS hosts, Crystal still understands `agents.defaults.sandbox.mode = openshell` and will route accordingly when the CLI is present.
+> [!NOTE]
+> MemPalace's built-in query embedder is a fixed CPU MiniLM-L6-v2 (384-dim). A different-dimension GPU index therefore
+> can't be served *through* MemPalace's own search without forking the package — the re-index + `search_v2.py` path
+> makes the GPU index usable today; a true in-place embedder swap is the one item blocked upstream. See
+> `memory-tools/README.md`.
 
 ---
 
-### Security
+## Channels
 
-- **1Password Integration** — All API keys and tokens stored in 1Password vault, injected at runtime via `op run`. Zero plaintext secrets in config files.
-- **Path-Scoped Access Control** — `access-policy.json` enforces RWX permissions per path. Agents get read-only by default, read-write to their own workspace, and zero access to `.ssh` and config files.
-- **Device Authentication** — Gateway UI requires device auth (no `dangerouslyDisableDeviceAuth`).
-- **Filesystem Isolation** — `fs.workspaceOnly` restricts agent file access to designated workspaces.
-- **Security Audit** — Standard and deep scan modes with pass/warn/fail scoring
-- **Auto Fix** — One-click remediation for detected issues
-- **Tool Permissions** — View and manage allowed/denied tool policies
-- **Approval Rules** — Auto/manual execution approval policies
+Crystal surfaces OpenClaw's channels in the **Channels** view. The primary, first-class channels are **Telegram** and
+**Discord** (the package describes Telegram as the remote channel of choice); the broader OpenClaw channel set
+(WhatsApp, Slack, Signal, iMessage, Google Chat, Email, Matrix, IRC, Linear, Nostr, …) is available where the underlying
+OpenClaw build supports it.
 
 ---
 
-### Agent Management
+## The desktop shell
 
-- **Agents** — Unified agent hub combining agent configuration with live monitoring dashboard. Shows all real OpenClaw agents with identity, emoji, model, running tasks, recent sessions, token usage, task dispatch form, and "Send to Chat" buttons. Includes agent CRUD, sessions tab, and 30-second auto-refresh. Four specialized agents (main, research, home, finance) each with purpose-built SOUL.md identity files.
-- **Tasks** — Background task monitoring with filtering by status and kind. Audit and maintenance controls
-- **Approvals** — Exec approval management with allowlist configuration per agent
-- **Sub-Agents & ACP** — Unified view for spawning, steering, and managing sub-agents and ACP sessions (Codex, Claude Code, Gemini CLI)
-
----
-
-### Memory
-
-Crystal runs on a single canonical memory system: **MemPalace** (drawers + spatial hierarchy + temporal knowledge graph) plus an automated mining/extraction pipeline and an OpenClaw recall hook.
-
-**MemPalace Core**
-- **Spatial Hierarchy** — Memories organized into Wings > Rooms > Halls with cross-wing Tunnels for shared topics. Wing+room scoping achieves 94.8% recall vs 60.9% for flat search.
-- **Layered Loading** — L0 identity (~50 tokens) + L1 critical facts (~120 tokens) injected at startup. L2 room recall loaded on-demand. L3 deep semantic search for explicit queries. Only ~170 tokens at cold start.
-- **AAAK Compression** — 30x lossless compression natively readable by any LLM. Turns 1,000 tokens of prose into ~120 tokens of structured shorthand.
-- **Temporal Knowledge Graph** — SQLite-backed entity-relationship triples with valid_from/ended dates. Facts expire, contradictions are detected, historical queries supported.
-- **Entity Registry** — Disambiguates people, projects, and aliases for accurate recall.
-- **Cross-Wing Tunnels** — 25+ explicit tunnels linking related rooms across wings for cross-domain recall.
-- **Local ONNX Embeddings** — MiniLM-L6-v2 runs locally for vector encoding. No cloud dependency.
-
-**Automated Pipeline**
-- **`palace-mine-incremental`** — Cron every 30 min ingests new workspace markdown into the right wing/room based on `mempalace.yaml` rules.
-- **`palace-kg-extract-nightly`** — 1 AM nightly job distills entities and triples from recent drawers via vLLM.
-- **`palace-recall` Hook** — OpenClaw `before_agent_start` hook performs two-stage retrieval (channel-scoped first, then global) and injects relevant drawers as `prependContext`. Cached, ~1.5 s end-to-end.
-- **Channel-Scoped Wings** — Telegram (`channel_telegram_<chatId>`), Crystal sessions (`channel_web_<sessionId>`), and CLI (`channel_cli_<host>`) get their own wings so per-thread recall stays tight.
-- **Stitched MEMORY.md** — `HOT_MEMORY.md` + `WARM_MEMORY.md` + `MEMORY_BASE.md` are stitched into a single `MEMORY.md` for cold-start hydration.
-- **MCP Janitor** — Hourly cron reaps orphaned `mempalace.mcp_server` stdio processes so RAM stays bounded.
-
-**UI Tabs**
-- **Palace** — Wing/room/hall browser, tunnel explorer, KG entity query, identity (L0) editor, and actions for mining, compression, and repair.
-- **Knowledge Base** — Browse and edit all workspace `.md` files (SOUL.md, USER.md, AGENTS.md, TOOLS.md, etc.) with category filtering.
-- **Curated Memory** — View, add, and delete entries in `MEMORY.md`.
-- **Daily Memory** — Browse daily memory logs with automatic cron capture.
-- **Semantic Search** — Hybrid search across MemPalace drawers and the KG.
-- **Mining** — Recent ledger entries for `palace-mine-incremental`.
-- **KG Extract** — Recent ledger entries for `palace-kg-extract-nightly`.
+- **Frameless, transparent window** (1100×750 default, custom title bar and resize handles).
+- **Global toggle shortcut** to show/hide Crystal, plus a **system tray** icon.
+- **Command palette** (`Ctrl+K`) to jump to any view.
+- **Onboarding wizard** on first run (checks prerequisites, configures the LLM, verifies the gateway).
+- **Themeable, lazy-loaded views** — each view is code-split and kept alive briefly after navigation for snappy switching.
+- **Auto-managed services** — on launch the Rust backend starts the OpenClaw gateway (preferring a `gateway.cmd`
+  wrapper that injects 1Password secrets via `op run`) and the vLLM Docker container, and stops them on exit.
 
 ---
 
-### Multi-Node Orchestration
-
-Manage distributed OpenClaw nodes:
-- List nodes with status indicators (running/stopped/idle)
-- Run or invoke individual nodes with custom prompts
-- Broadcast messages to all nodes
-- Notify nodes of events
-
----
-
-### Browser Automation
-
-Control a headless browser through OpenClaw's `browser-use` skill:
-- Start/stop browser instances
-- Navigate URLs, open tabs
-- View and filter all open tabs
-- Capture screenshots
-- Auth token auto-loaded from config
-
----
-
-### Webhooks
-
-- Create and manage webhook endpoints
-- View incoming webhook events
-- Configure webhook routing and handlers
-
----
-
-### Messaging & Directory
-
-- **Messaging** — Unified messaging view across connected channels
-- **Directory** — Contact directory with search and channel resolution
-- **Devices** — Connected device management
-
----
-
-### Activity & Logs
-
-- **Activity Feed** — Real-time event stream from the OpenClaw gateway. Filter by type (Chat, Tool Call, Tool Result, Error, Heartbeat). Color-coded entries.
-- **Gateway Logs** — Raw log viewer with auto-refresh, search highlighting, log level coloring (ERROR/WARN/INFO/DEBUG), line numbers, copy-all.
-
----
-
-### Hooks
-
-Event-driven lifecycle hooks for the OpenClaw agent:
-- List installed hooks with enable/disable toggles
-- Expandable detail panels (description, triggers, config)
-- Install new hooks by spec
-- Bulk update and eligibility checks
-
----
-
-### Doctor / Diagnostics
-
-| Command | Description |
-|---------|-------------|
-| Doctor | Basic system check |
-| Deep Scan | Comprehensive diagnostic |
-| Auto Fix | Automatic remediation |
-| Status | Overall system status |
-| Gateway Health | Connectivity check |
-| Config Validate | Configuration validation |
-
-Terminal-style output with color-coded results and summary cards (Passed / Warnings / Failed).
-
----
-
-### Sessions
-
-- Browse all active agent sessions sorted by recency
-- Per-session: agent ID, model provider, model name, description
-- Token usage stats (input, output, total)
-- Context window usage bar (color-coded at 60%/85%)
-- Per-session delete and bulk cleanup
-
----
-
-## Themes
-
-6 built-in themes with visual preview swatches:
-
-| Theme | Style | Accent |
-|-------|-------|--------|
-| **Midnight** | Deep dark | Blue |
-| **SoCal** | Warm sunset | Orange |
-| **Arctic** | Clean light | Sky blue |
-| **Ember** | Dark warm glow | Red |
-| **Slate** | Soft light | Indigo |
-| **NVIDIA** | Dark with green | NVIDIA Green |
-
----
-
-## Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl + Space` | Toggle Crystal window (global) |
-| `Ctrl + K` | Command palette (with AI-powered search) |
-| `Ctrl + N` | New conversation |
-| `Ctrl + F` | Search in conversation (in chat) |
-| `Ctrl + Shift + N` | New chat (in chat) |
-| `Ctrl + Shift + E` | Export conversation (in chat) |
-| `Ctrl + ,` | Settings |
-| `Ctrl + Shift + D` | Doctor |
-| `Ctrl + Shift + S` | Security |
-| `Ctrl + 1–9` | Switch between views |
-| `Escape` | Close settings drawer / search bar |
-| `/` | Slash command menu (in chat) |
-| `Enter` | Send message |
-| `Shift + Enter` | New line in message |
-
----
-
-## Onboarding
-
-First-run wizard with 5 steps:
-
-1. **Welcome** — Introduction with Crystal branding
-2. **Prerequisites** — Auto-checks Node.js, Docker, OpenClaw, NVIDIA GPU
-3. **LLM Setup** — Configure local vLLM or cloud provider
-4. **Gateway** — Verify/start the OpenClaw gateway on port 18789
-5. **Launch** — Summary of checks, selected model, and gateway status
-
----
-
-## Performance
-
-Crystal is engineered to feel instant:
-
-- **Lazy-loaded views** — All 30 views use `React.lazy()` + `Suspense`. Only the active view's code is loaded.
-- **CLI response caching** — Shared cache with TTL deduplicates OpenClaw CLI calls across views.
-- **Visibility-aware polling** — GPU monitor, system monitor, and model poller pause when hidden. Zero background work on inactive tabs.
-- **Vendor bundle splitting** — React, markdown rendering, and animation libraries cached as separate chunks.
-- **Fine-grained state subscriptions** — Zustand selectors prevent unnecessary re-renders across all components.
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Desktop Runtime | [Tauri 2.0](https://v2.tauri.app/) (~3 MB runtime) |
-| Frontend | React 19, TypeScript, Tailwind CSS 4, Zustand |
-| Backend | Rust (Tokio, Reqwest, Serde) |
-| AI Agent | [OpenClaw](https://github.com/openclaw/openclaw) |
-| LLM (Local) | [vLLM](https://github.com/vllm-project/vllm) via Docker (auto-started) |
-| LLM (Cloud) | OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral |
-| Voice Gateway | FastAPI (`voice_gateway.py`, port 6500) |
-| Voice STT | NVIDIA Parakeet (`nvidia_stt_worker.py`, port 8090 via gateway 6500), Web Speech API (fallback) |
-| Voice TTS | NVIDIA Magpie (`nvidia_tts_worker.py`, port 8091 via gateway 6500), Web Speech API (fallback) |
-| Memory | [MemPalace](https://github.com/ultrawideband/mempalace) (Wings/Rooms/Halls + Knowledge Graph, ChromaDB + SQLite) |
-| Memory Embeddings | Local ONNX MiniLM-L6-v2 (no cloud) |
-| Memory Hook | `palace-recall` OpenClaw extension (channel-scoped two-stage retrieval) |
-| Image Gen | OpenAI DALL·E (via OpenClaw skill) |
-| Sandbox | OpenClaw native tool policy (Linux/macOS may opt into [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell); no native Windows support yet) |
-| Icons | Lucide React |
-| Markdown | react-markdown + remark-gfm + rehype-highlight |
-| Animations | Framer Motion |
-
----
-
-## Requirements
+## Prerequisites
 
 | Requirement | Details |
 |-------------|---------|
-| **OS** | Windows 10/11 (macOS/Linux planned) |
-| **GPU** | Any NVIDIA RTX with 16 GB+ VRAM for local LLM + voice (24 GB+ recommended) |
-| **Node.js** | v18+ |
-| **Package Manager** | pnpm |
-| **Rust** | Latest stable toolchain |
-| **Docker** | Docker Desktop with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) *(for vLLM local inference)* |
-| **Python** | 3.10+ *(optional, for Voice Gateway and NVIDIA STT/TTS workers)* |
+| **OS** | Windows 10/11 (the build targets MSI/NSIS installers). |
+| **Node.js** | v18+ for the app toolchain. The OpenClaw gateway runtime itself prefers Node 22.16+ / 24. |
+| **pnpm** | `pnpm@10.30.3` (declared in `package.json`). |
+| **Rust** | Latest stable toolchain (for the Tauri backend). |
+| **OpenClaw** | An OpenClaw install reachable on the `openclaw` CLI. Workbench features need a build with the `crystal-os` plugin. |
+| **Docker** *(local LLM)* | Docker Desktop + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) to run vLLM. |
+| **NVIDIA GPU** *(local LLM)* | An RTX-class GPU with enough VRAM for the NVFP4 30B MoE model (≈17 GB+ for the model; 24 GB+ recommended). |
+| **Python 3** *(crystal-gpu)* | For the GPU/ML sidecar (a virtualenv; optional GPU libs for RAPIDS/embeddings). |
 
-> **Cloud-only mode:** If you don't have an NVIDIA GPU, you can still use Crystal with cloud LLM providers and browser-based voice. Set your API keys in Settings and you're good to go.
+> **Cloud-only mode:** no NVIDIA GPU? Skip vLLM/Docker and point Crystal at a cloud LLM provider via API keys.
 
 ---
 
-## Quick Start
+## Quickstart
 
-### 1. Install prerequisites
+All app commands run from the `mogwai/` directory.
 
-```bash
-# Node.js:  https://nodejs.org
-# Rust:     https://rustup.rs
-# Docker:   https://www.docker.com/products/docker-desktop/
-# pnpm:     npm install -g pnpm
-```
-
-### 2. Clone and install
+### 1. Install dependencies
 
 ```bash
-git clone https://github.com/your-org/Crystal.git
-cd Crystal
 pnpm install
 ```
 
-### 3. Run
+### 2. Run in development
 
 ```bash
 pnpm tauri dev
 ```
 
-Crystal auto-starts Docker/vLLM, the OpenClaw gateway, and voice servers on launch. The onboarding wizard walks you through everything else.
+This launches the Vite dev server and the Tauri shell. On first launch Crystal attempts to start the OpenClaw gateway
+(port `18789`) and the vLLM container, and the onboarding wizard walks you through anything missing.
 
-### 4. Voice setup *(optional)*
+### 3. Build a release installer
 
 ```bash
-pip install -r scripts/requirements.txt
+pnpm tauri build
 ```
 
-Crystal auto-launches the Voice Gateway plus NVIDIA Parakeet STT and Magpie TTS workers on startup when Python and GPU prerequisites are satisfied. If those processes fail to start or are unreachable, the app uses the browser Web Speech API as an emergency fallback.
+Produces MSI and NSIS installers for Windows.
 
-### 5. Cloud LLM setup *(optional)*
+### 4. (Optional) Start the local LLM manually
 
-Open **Settings → API Keys** and add keys for any providers you want to use (OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral).
+```bash
+# from mogwai/ — set a HuggingFace token for the gated model first
+echo "HF_TOKEN=hf_your_token_here" > .env
+docker compose up -d            # serves nvidia/Qwen3-30B-A3B-NVFP4 on :8000
+```
+
+### 5. (Optional) Start the crystal-gpu sidecar
+
+```bash
+cd ../crystal-gpu
+python -m venv .venv && .\.venv\Scripts\Activate.ps1
+pip install fastapi "uvicorn[standard]" "pydantic>=2" PyYAML psutil pandas pyarrow numpy scikit-learn
+python -m app.main              # http://127.0.0.1:8099  (docs at /docs)
+```
+
+### Useful scripts
+
+| Command | Purpose |
+|---------|---------|
+| `pnpm dev` | Vite dev server only (no Tauri shell). |
+| `pnpm build` | Type-check (`tsc`) + production frontend build. |
+| `pnpm tauri dev` | Full desktop app with hot reload. |
+| `pnpm tauri build` | Build the desktop installer. |
+| `pnpm test` | Run the Vitest suite once. |
+| `pnpm test:watch` | Run Vitest in watch mode. |
 
 ---
 
-## Project Structure
+## Configuration
+
+Crystal reads the standard OpenClaw config at `~/.openclaw/openclaw.json`. The bits that matter most for Crystal:
+
+### Local LLM provider (vLLM)
+
+The vLLM container exposes an OpenAI-compatible API at `http://127.0.0.1:8000/v1`; Crystal auto-detects it and can chat
+against it directly. Cloud providers are configured with their API keys (managed in the **Tools & Skills → Keys** UI,
+which writes to OpenClaw's auth profiles).
+
+### Enabling the Crystal Data Science Workbench (`crystal-os`)
+
+The Workbench is opt-in. For the agent to use it, the active config needs:
+
+```jsonc
+{
+  "plugins": {
+    "entries": {
+      "crystal-os": {
+        "enabled": true,
+        "config": {
+          // optional: override the GPU sidecar base URL
+          "sidecarBaseUrl": "http://127.0.0.1:8099"
+        }
+      }
+    }
+  },
+  "tools": {
+    // crystal-os tools are declared "optional", so allowlist the ones you want
+    "alsoAllow": ["skill_search", "skill_invoke"]
+  },
+  "skills": {
+    "limits": {
+      "maxSkillsLoadedPerSource": 256,  // default 200 caps the 201 NVIDIA skills
+      "maxSkillsInPrompt": 256
+    }
+  }
+}
+```
+
+The plugin must also be **built** (its `dist/` present) in the OpenClaw runtime serving the CLI, and config changes that
+affect loaded plugins/limits require a **gateway restart**.
+
+### crystal-gpu sidecar (env vars)
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `CRYSTAL_GPU_HOST` / `CRYSTAL_GPU_PORT` | `127.0.0.1` / `8099` | Bind host/port (localhost-only by default). |
+| `CRYSTAL_GPU_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | Default embedding model. |
+| `CRYSTAL_GPU_EMBED_DEVICE` | `auto` | `auto` \| `cuda` \| `cpu`. |
+| `CRYSTAL_GPU_PREFER_GPU` | `true` | GPU-first backend selection. |
+| `CRYSTAL_GPU_STUDIO_WORKDIR` | `~/.crystal-gpu/studio` | Where Studio reports are written. |
+
+### Execution mesh (env vars)
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `CRYSTAL_OS_NODE_SIDECAR_PORT` | `8099` | Sidecar port on a mesh node (for `/hardware`/`/health`). |
+| `CRYSTAL_OS_REMOTE_TIMEOUT_MS` | `30000` | Timeout for SSH / HTTP remote ops. |
+| `CRYSTAL_OS_SIDECAR_BASE` | `http://127.0.0.1:8099` | Local sidecar base (for `local_desktop` caps). |
+
+No machine IPs are configured anywhere — nodes are addressed by Tailscale host.
+
+---
+
+## Project layout
+
+This README documents the **Crystal desktop app** in `mogwai/`. The full system spans sibling directories in the parent
+workspace:
 
 ```
-Crystal/
-├── src/                              # React frontend
+mogwai/                      # Crystal desktop app (this repo)
+├── src/                     # React 19 + TypeScript frontend
 │   ├── components/
-│   │   ├── shell/                    # TitleBar, Navigation, CommandPalette (AI-powered), Onboarding, Toast
-│   │   ├── views/                    # 30 feature views
-│   │   ├── voice/                    # VoiceOrb, TranscriptPanel, ConfirmationCard, EventLog
-│   │   ├── chat/                     # ChatSettingsDrawer (model, offline mode, params, presets)
-│   │   ├── factory/                  # DirectoryBrowser, FileTree, FileViewer, RunWorkspace
-│   │   └── widgets/                  # GpuMonitor (HUD-themed)
-│   ├── hooks/                        # useOpenClaw, useVoice, useStorage, useKeyboardShortcuts
+│   │   ├── shell/           # TitleBar, Navigation, CommandPalette, Onboarding, Toast
+│   │   └── views/           # Feature views (Home, Chat, Board, Projects, Studio, Targets, …)
 │   ├── lib/
-│   │   ├── agent.ts                  # AI agent (system prompt, tool loop, action buttons, image gen)
-│   │   ├── openclaw.ts               # OpenClaw client (gateway, LLM, memory, channels, config)
-│   │   ├── tools.ts                  # Tool implementations (shell, files, web)
-│   │   ├── cache.ts                  # CLI response cache with TTL + deduplication
-│   │   ├── factory.ts                # Factory agent runner (any agent ID)
-│   │   ├── search-ai.ts              # AI-powered command palette search (GPT-4o-mini)
-│   │   ├── workflows.ts              # 12 skill-based workflow definitions
-│   │   ├── voice.ts                  # Voice service orchestration
-│   │   ├── voice/                    # Voice provider architecture
-│   │   │   ├── providers/            # NVIDIA Parakeet STT, Magpie TTS, Browser
-│   │   │   ├── bridge/               # Speech bridge
-│   │   │   ├── state-machine.ts      # 9-state voice FSM
-│   │   │   ├── intent-router.ts      # Voice intent classification
-│   │   │   ├── conversation-agent.ts # Voice conversation handler
-│   │   │   └── session-store.ts      # Voice session persistence
-│   │   ├── memory-palace.ts           # MemPalace integration (wings, rooms, halls, KG, mining)
-│   │   ├── telegram.ts               # Telegram topic helpers
-│   │   ├── version.ts                # App version constant
-│   │   └── storage.ts                # Local storage abstraction
-│   ├── styles/
-│   │   └── viewStyles.ts             # Shared style module (glowCard, animations, micro-interactions)
-│   └── stores/
-│       ├── appStore.ts               # App state (view, voice, gateway, thinking level)
-│       ├── themeStore.ts             # 6 themes with CSS variable mapping
-│       ├── dataStore.ts              # Data caching layer (8 cache entries: cron, agents, memory, system, tasks, channels, skills, sessions)
-│       ├── tokenUsageStore.ts        # Per-provider token tracking with cost estimation
-│       ├── chatSettingsStore.ts      # Chat settings (offline mode, temperature, maxTokens, topP, responseStyle)
-│       └── factoryStore.ts           # Factory build pipeline state (4-stage pipeline)
-├── src-tauri/                        # Rust backend
-│   ├── src/
-│   │   ├── lib.rs                    # 13 Tauri commands, server lifecycle, system tray
-│   │   └── main.rs                   # Entry point
-│   ├── icons/                        # App icons (all sizes + .ico + .icns)
-│   └── tauri.conf.json               # Tauri configuration
-├── docker-compose.yml                # vLLM Docker config (Qwen3 NVFP4 + Marlin)
-├── chat_template.jinja               # Barubary attuned chat template (21 fixes)
-├── scripts/                          # Voice & inference server scripts
-│   ├── vllm-docker.ps1               # vLLM Docker management (start/stop/status/logs)
-│   ├── voice_gateway.py              # Unified voice gateway (FastAPI, port 6500)
-│   ├── nvidia_stt_worker.py          # NVIDIA Parakeet STT worker (FastAPI, port 8090)
-│   ├── nvidia_tts_worker.py          # NVIDIA Magpie TTS worker (FastAPI, port 8091)
-│   ├── start_voice_servers.py        # Voice server launcher (gateway + NVIDIA workers)
-│   ├── requirements.txt              # Python dependencies
-│   ├── setup.ps1                     # Full setup script
-│   └── start-all.ps1                 # Manual service launcher
-└── public/                           # Static assets
-    └── icon.png                      # Crystal icon
+│   │   ├── openclaw.ts      # OpenClaw client (gateway, LLM, memory, channels, crystal-os)
+│   │   └── memory-palace.ts # MemPalace integration
+│   └── stores/              # Zustand stores (appStore, dataStore, osStore, …)
+├── src-tauri/               # Rust backend
+│   ├── src/lib.rs           # Tauri commands, service lifecycle, system tray
+│   ├── tauri.conf.json      # Tauri config (window, bundle, CSP)
+│   └── Cargo.toml
+├── docker-compose.yml       # vLLM (Qwen3-30B-A3B-NVFP4, NVFP4 + Marlin + FP8 KV)
+└── package.json
+
+../crystal-gpu/              # Python GPU/ML sidecar (FastAPI, :8099)
+../crystal-os-docs/          # Durable Workbench docs (CAPABILITIES, NVIDIA_SKILLS, TAILSCALE_MESH)
+../memory-tools/             # Standalone MemPalace upgrade/eval tooling
 ```
+
+> The `crystal-os` plugin itself lives in the OpenClaw runtime's `extensions/crystal-os/` (the OpenClaw fork), not in
+> this repo — Crystal calls it via `openclaw os … --json`.
 
 ---
 
-## By the Numbers
+## Development
 
-| | Count |
-|---|---|
-| Views | 30 |
-| Slash commands | 70+ |
-| Voice providers | 4 (2 STT + 2 TTS: NVIDIA + browser fallback each) |
-| LLM providers | 7 (vLLM local + 6 cloud) |
-| Themes | 6 |
-| Tools | 6 |
-| Channel integrations | 11 |
-| Workspace files | 9 |
-| Workflow templates | 12 |
-| Workflow categories | 6 |
-| Cron templates | 6 |
-| Telegram topics | 5 |
-| Diagnostic commands | 6 |
-| Keyboard shortcuts | 14 |
-| Tauri commands | 13 |
-| OpenClaw skills | 51+ |
-| Memory layers | 4 (L0 identity, L1 facts, L2 room recall, L3 deep search) |
-| Data cache entries | 8 |
-| AI search view mappings | 80+ |
-| Nav sections | 3 (Mission / Claw / System) |
-| Token cost providers | 9 |
-| Chat settings controls | 7 |
+```bash
+pnpm install        # install deps
+pnpm tauri dev      # run the desktop app with hot reload
+pnpm test           # run unit tests (Vitest)
+pnpm build          # type-check + build the frontend bundle
+```
+
+- **Frontend:** React 19, TypeScript, Tailwind CSS 4, Zustand 5, Vite 7, Lucide icons, `react-markdown` +
+  `remark-gfm` + `rehype-highlight`.
+- **Backend:** Rust (Tokio, Reqwest, Serde) with `tauri-plugin-global-shortcut`, `-opener`, and `-single-instance`.
+  The backend exposes ~20 Tauri commands (shell exec + streaming, file IO, system/GPU stats, the HTTP proxy, direct
+  chat streaming, and gateway/vLLM lifecycle).
+- The frontend talks **only** to the Rust backend; the backend brokers all external calls.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause / fix |
+|---------|--------------------|
+| Gateway never connects | The OpenClaw gateway isn't healthy on `18789`. Crystal tries to start it (via `gateway.cmd` or `openclaw gateway start`); run `openclaw doctor` and check that the CLI is on `PATH`. |
+| Chat says no local model | vLLM isn't up on `8000`. Start Docker Desktop, then `docker compose up -d`; first run downloads ~15 GB and CUDA-graph compilation can take several minutes. Or switch to a cloud provider. |
+| "Crystal Data Science Workbench is not enabled" | The `crystal-os` plugin isn't loaded by the `openclaw` binary serving the CLI — it must be built and enabled (see [Configuration](#configuration)), then restart the gateway. |
+| Only 200 of 201 NVIDIA skills load | `skills.limits.maxSkillsLoadedPerSource` defaults to 200 — raise it to 256. |
+| GPU data science falls back to CPU on Windows | Expected — RAPIDS/NeMo aren't supported on native Windows. Use WSL2 or the Docker image. |
+| Mesh node won't win VRAM-constrained routing | Its sidecar `/hardware` is unreachable. Run `openclaw os targets caps` to refresh; the node is marked `unreachable` until it recovers. |
+
+---
+
+## Roadmap
+
+These are explicitly aspirational — tracked here rather than implied as shipped:
+
+- **Real training/eval/deploy** in Fine-Tuning Studio across all backends (the data-prep pipeline is real today;
+  training runs behind pluggable Unsloth/Axolotl/NeMo trainers).
+- **Tag-based ACL enforcement** in mesh dispatch (tags are stored now; Tailscale ACLs remain the real boundary).
+- **Real resource reservation** for the mesh scheduler instead of coarse in-flight run counts.
+- **In-place GPU embedder swap** for MemPalace (currently served via the `*_v2` re-index + `search_v2.py` path).
+- **macOS / Linux desktop builds** (current installers target Windows).
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Please open an issue first to discuss changes.
+Contributions are welcome — please open an issue to discuss substantial changes first.
 
 ```bash
-# Development with hot reload
-pnpm tauri dev
-
-# Production build
-pnpm tauri build
+pnpm install
+pnpm tauri dev      # iterate
+pnpm test           # keep the suite green
 ```
-
----
 
 ## License
 
-MIT
+[MIT](LICENSE) © 2026 Jarrod (Crystal / Mogwai).
 
----
-
-<p align="center">
-  <sub>Built with Tauri, React, Rust, and OpenClaw.<br/>Local-first. Cloud-optional. Yours to own.</sub>
-</p>
+<p align="center"><sub>Built with Tauri, React, Rust, and OpenClaw. Local-first. GPU-accelerated. Yours to own.</sub></p>

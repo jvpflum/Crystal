@@ -115,8 +115,25 @@ export class MemoryPalaceClient {
 
     this._palacePathPromise = (async () => {
       try {
+        // Ask the bridge to resolve the *data-bearing* palace. The GPU re-index
+        // moved the live vectors into `memory-palace-active` while the mempalace
+        // config still points at the now-empty `memory-palace`; hard-coding the
+        // latter here is exactly why the dashboard read EMPTY. `resolve` runs
+        // the same data-aware resolver the rest of the bridge uses and prefers
+        // whichever directory actually holds drawers.
+        const resolved = await this.runScript<{ palace?: string }>(["resolve"], 15_000);
+        const fromBridge = resolved?.palace?.trim().replace(/\r?\n/g, "");
+        if (fromBridge) {
+          this.palacePath = fromBridge;
+          return fromBridge;
+        }
+
+        // Fallback: prefer the active store on disk, else the legacy path.
         const result = await invoke<{ stdout: string }>("execute_command", {
-          command: `echo $env:USERPROFILE\\.openclaw\\memory-palace`,
+          command:
+            `$a="$env:USERPROFILE\\.openclaw\\memory-palace-active"; ` +
+            `if (Test-Path "$a\\chroma.sqlite3") { Write-Output $a } ` +
+            `else { Write-Output "$env:USERPROFILE\\.openclaw\\memory-palace" }`,
           cwd: null,
         });
         const path = result.stdout.trim().replace(/\r?\n/g, "");

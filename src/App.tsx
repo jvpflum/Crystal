@@ -2,7 +2,6 @@ import "@/stores/themeStore";
 import { useEffect, useState, useCallback, useRef, lazy, Suspense } from "react";
 import { TitleBar } from "@/components/shell/TitleBar";
 import { ResizeHandles } from "@/components/shell/ResizeHandles";
-import { Navigation } from "@/components/shell/Navigation";
 import { CommandPalette } from "@/components/shell/CommandPalette";
 import { LobsterIcon } from "@/components/LobsterIcon";
 import { ToastProvider } from "@/components/shell/Toast";
@@ -47,11 +46,16 @@ const DirectoryView = lazy(() => import("@/components/views/DirectoryView").then
 const DevicesView = lazy(() => import("@/components/views/DevicesView").then(m => ({ default: m.DevicesView })));
 const SubagentsView = lazy(() => import("@/components/views/SubagentsView").then(m => ({ default: m.SubagentsView })));
 const WebhooksView = lazy(() => import("@/components/views/WebhooksView").then(m => ({ default: m.WebhooksView })));
-const VoiceCallView = lazy(() => import("@/components/views/VoiceCallView").then(m => ({ default: m.VoiceCallView })));
 const TasksView = lazy(() => import("@/components/views/TasksView").then(m => ({ default: m.TasksView })));
 const ApprovalsView = lazy(() => import("@/components/views/ApprovalsView").then(m => ({ default: m.ApprovalsView })));
 const CityView = lazy(() => import("@/components/views/CityView").then(m => ({ default: m.CityView })));
 const UsageView = lazy(() => import("@/components/views/UsageView").then(m => ({ default: m.UsageView })));
+const BoardView = lazy(() => import("@/components/views/BoardView").then(m => ({ default: m.BoardView })));
+const ProjectsView = lazy(() => import("@/components/views/ProjectsView").then(m => ({ default: m.ProjectsView })));
+const LessonsView = lazy(() => import("@/components/views/LessonsView").then(m => ({ default: m.LessonsView })));
+const DecisionsView = lazy(() => import("@/components/views/DecisionsView").then(m => ({ default: m.DecisionsView })));
+const TargetsView = lazy(() => import("@/components/views/TargetsView").then(m => ({ default: m.TargetsView })));
+const StudioView = lazy(() => import("@/components/views/StudioView").then(m => ({ default: m.StudioView })));
 
 const KEEP_ALIVE_MS = 30_000;
 
@@ -189,12 +193,11 @@ function App() {
     };
   }, [setGatewayConnected]);
 
-  // Global service health polling — tracks vLLM + voice readiness
+  // Global service health polling — tracks vLLM readiness
   useEffect(() => {
     let disposed = false;
     const setSvc = useAppStore.getState().setServiceStatus;
     setSvc("vllm", "starting");
-    setSvc("voice", "starting");
 
     const poll = async () => {
       if (disposed) return;
@@ -202,13 +205,11 @@ function App() {
         const status = await invoke<{
           vllm_running: boolean;
           openclaw_running: boolean;
-          nvidia_stt_running: boolean;
-          nvidia_tts_running: boolean;
-          voice_gateway_running: boolean;
         }>("get_server_status");
         setSvc("vllm", status.vllm_running ? "ready" : "starting");
-        setSvc("voice", (status.nvidia_stt_running || status.voice_gateway_running) ? "ready" : "starting");
-      } catch { /* ignore */ }
+      } catch (e) {
+        console.warn("[App] get_server_status failed:", e);
+      }
     };
 
     poll();
@@ -218,7 +219,9 @@ function App() {
 
   // Global warmUp — pre-cache model config and memory context on app start
   useEffect(() => {
-    openclawClient.warmUp().catch(() => {});
+    openclawClient.warmUp().catch((e) => {
+      console.warn("[App] openclawClient.warmUp failed:", e);
+    });
   }, []);
 
   if (!isInitialized) {
@@ -240,7 +243,7 @@ function App() {
         <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
           <Loader2 style={{ width: 28, height: 28, color: "var(--accent)" }} className="animate-spin" />
           <p style={{ fontSize: 14, color: "var(--text-secondary)", fontWeight: 500 }}>Shutting down services...</p>
-          <p style={{ fontSize: 11, color: "var(--text-muted)" }}>Stopping gateway, vLLM, and voice servers</p>
+          <p style={{ fontSize: 11, color: "var(--text-muted)" }}>Stopping gateway and vLLM</p>
         </div>
       </div>
     );
@@ -257,7 +260,6 @@ function App() {
         <div className="app-chrome" style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <TitleBar />
           <div style={{ flex: 1, display: "flex", minHeight: 0, overflow: "hidden" }}>
-            <Navigation />
             <main className="app-main" style={{ flex: 1, minWidth: 0, overflow: "hidden", position: "relative" }}>
               <Suspense fallback={<ViewFallback />}>
                 <ViewSlot id="home" active={currentView === "home"}><ErrorBoundary><HomeView /></ErrorBoundary></ViewSlot>
@@ -285,11 +287,16 @@ function App() {
                 <ViewSlot id="devices" active={currentView === "devices"}><ErrorBoundary><DevicesView /></ErrorBoundary></ViewSlot>
                 <ViewSlot id="subagents" active={currentView === "subagents"}><ErrorBoundary><SubagentsView /></ErrorBoundary></ViewSlot>
                 <ViewSlot id="webhooks" active={currentView === "webhooks"}><ErrorBoundary><WebhooksView /></ErrorBoundary></ViewSlot>
-                <ViewSlot id="voicecall" active={currentView === "voicecall"}><ErrorBoundary><VoiceCallView /></ErrorBoundary></ViewSlot>
                 <ViewSlot id="tasks" active={currentView === "tasks"}><ErrorBoundary><TasksView /></ErrorBoundary></ViewSlot>
                 <ViewSlot id="approvals" active={currentView === "approvals"}><ErrorBoundary><ApprovalsView /></ErrorBoundary></ViewSlot>
                 <ViewSlot id="city" active={currentView === "city"}><ErrorBoundary><CityView /></ErrorBoundary></ViewSlot>
                 <ViewSlot id="usage" active={currentView === "usage"}><ErrorBoundary><UsageView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="board" active={currentView === "board"}><ErrorBoundary><BoardView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="projects" active={currentView === "projects"}><ErrorBoundary><ProjectsView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="lessons" active={currentView === "lessons"}><ErrorBoundary><LessonsView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="decisions" active={currentView === "decisions"}><ErrorBoundary><DecisionsView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="targets" active={currentView === "targets"}><ErrorBoundary><TargetsView /></ErrorBoundary></ViewSlot>
+                <ViewSlot id="studio" active={currentView === "studio"}><ErrorBoundary><StudioView /></ErrorBoundary></ViewSlot>
               </Suspense>
             </main>
           </div>
@@ -310,15 +317,13 @@ function App() {
 
 function FloatingOrb() {
   const setMinimized = useAppStore(s => s.setMinimized);
-  const setVoiceState = useAppStore(s => s.setVoiceState);
-  const voiceState = useAppStore(s => s.voiceState);
   return (
     <div className="app-root h-screen w-screen" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div className="app-atmosphere" aria-hidden />
       <button
         className="glass"
-        aria-label={voiceState === "idle" ? "Start listening" : "Restore Crystal window"}
-        onClick={() => voiceState === "idle" ? setVoiceState("listening") : setMinimized(false)}
+        aria-label="Restore Crystal window"
+        onClick={() => setMinimized(false)}
         onDoubleClick={() => setMinimized(false)}
         style={{
           position: "relative", zIndex: 1,

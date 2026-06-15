@@ -3,8 +3,6 @@ import { appDataDir } from "@tauri-apps/api/path";
 
 export interface StoredSettings {
   model: string;
-  wakeWord: string;
-  ttsVoice: string;
   theme: string;
   windowAlwaysOnTop: boolean;
 }
@@ -31,8 +29,6 @@ export interface StoredData {
 
 const DEFAULT_SETTINGS: StoredSettings = {
   model: "gpt-oss:20b",
-  wakeWord: "hey crystal",
-  ttsVoice: "nova",
   theme: "glass-dark",
   windowAlwaysOnTop: false,
 };

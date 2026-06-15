@@ -7,7 +7,7 @@ import {
   Clock, Anchor, Wrench, Shield, Stethoscope, Activity, Settings,
   Trash2, HeartPulse, ShieldCheck, Thermometer, RotateCcw, Search,
   Network, Globe, FolderOpen, Mail, Users, GitBranch, Factory,
-  Smartphone, Webhook, Phone, Sparkles, Loader2, ArrowRight, ExternalLink,
+  Smartphone, Webhook, Sparkles, Loader2, ArrowRight, ExternalLink,
   Map, BarChart3,
 } from "lucide-react";
 
@@ -88,7 +88,6 @@ export function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: 
     { id: "directory",    icon: Users,       label: "Directory",    description: "Contact directory",                   category: "Navigation", action: () => setView("directory" as AppView) },
     { id: "devices",      icon: Smartphone,  label: "Devices",      description: "Connected devices",                  category: "Navigation", action: () => setView("devices" as AppView) },
     { id: "webhooks",     icon: Webhook,     label: "Webhooks",     description: "Webhook endpoint management",        category: "Navigation", action: () => setView("webhooks" as AppView) },
-    { id: "voicecall",    icon: Phone,       label: "Voice Calls",  description: "Voice call interface (Riva STT/TTS)", category: "Navigation", action: () => setView("voicecall" as AppView) },
 
     // Quick actions
     { id: "clear-chat",   icon: Trash2,      label: "Clear chat",      description: "Clear current conversation",       category: "Actions", action: () => { setView("conversation" as AppView); } },

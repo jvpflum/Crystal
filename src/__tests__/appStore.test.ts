@@ -6,9 +6,7 @@ describe("appStore", () => {
     useAppStore.setState({
       currentView: "home",
       pendingCommandCenterTab: null,
-      voiceState: "idle",
       isMinimized: false,
-      transcript: "",
       gatewayConnected: false,
       thinkingLevel: undefined,
     });
@@ -31,7 +29,7 @@ describe("appStore", () => {
       "factory", "models", "sessions", "templates",
       "channels", "memory", "tools", "activity", "settings",
       "security", "hooks", "doctor", "nodes", "browser", "workspace",
-      "messaging", "directory", "devices", "subagents", "webhooks", "voicecall",
+      "messaging", "directory", "devices", "subagents", "webhooks",
       "tasks", "approvals", "city", "usage",
     ];
     for (const view of views) {
@@ -43,6 +41,11 @@ describe("appStore", () => {
   it("remaps legacy 'office' view to 'agents'", () => {
     useAppStore.getState().setView("office" as AppView);
     expect(useAppStore.getState().currentView).toBe("agents");
+  });
+
+  it("remaps the former 'skills' registry view to 'tools' (folded into Tools & Skills)", () => {
+    useAppStore.getState().setView("skills" as AppView);
+    expect(useAppStore.getState().currentView).toBe("tools");
   });
 
   it("opens Command Center with a specific tab", () => {
@@ -59,23 +62,10 @@ describe("appStore", () => {
     expect(state.currentView).not.toBe("acp");
   });
 
-  it("manages voice state", () => {
-    useAppStore.getState().setVoiceState("listening");
-    expect(useAppStore.getState().voiceState).toBe("listening");
-
-    useAppStore.getState().setVoiceState("processing");
-    expect(useAppStore.getState().voiceState).toBe("processing");
-  });
-
   it("manages minimized state", () => {
     expect(useAppStore.getState().isMinimized).toBe(false);
     useAppStore.getState().setMinimized(true);
     expect(useAppStore.getState().isMinimized).toBe(true);
-  });
-
-  it("manages transcript", () => {
-    useAppStore.getState().setTranscript("Hello world");
-    expect(useAppStore.getState().transcript).toBe("Hello world");
   });
 
   it("manages gateway connection state", () => {

@@ -20,7 +20,6 @@ export default defineConfig(async () => ({
         manualChunks: {
           "vendor-react": ["react", "react-dom"],
           "vendor-markdown": ["react-markdown", "rehype-highlight", "remark-gfm"],
-          "vendor-motion": ["framer-motion"],
           "vendor-zustand": ["zustand"],
         },
       },

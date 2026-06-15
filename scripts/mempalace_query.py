@@ -34,6 +34,67 @@ def _fail(msg: str, code: int = 1) -> None:
     sys.exit(code)
 
 
+def _has_palace_data(path: str) -> bool:
+    """True if *path* holds a NON-EMPTY chroma store (has vectors). An empty
+    ``chroma.sqlite3`` (a stale/placeholder palace, e.g. the old
+    ``memory-palace`` left behind by the GPU re-index) is treated as no-data so
+    the resolver prefers the dir that actually holds drawers. Kept consistent
+    with ``memory-tools/palace_common.py``."""
+    db = os.path.join(path, "chroma.sqlite3")
+    if not os.path.isfile(db):
+        return False
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            n = con.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+            return int(n) > 0
+        finally:
+            con.close()
+    except Exception:
+        # Can't introspect -> assume it counts as data (don't be over-clever).
+        return True
+
+
+def _resolve_palace(explicit: str | None) -> str:
+    """Resolve the palace path, *preferring a directory that actually holds a
+    palace* (a non-empty chroma store). Priority: explicit ``--palace`` ->
+    MEMPALACE/MEMPAL env vars -> mempalace config (only if it has data) ->
+    first data-bearing candidate -> config path -> sensible default.
+
+    This is the fix for the "memory shows EMPTY" symptom: the GPU re-index moved
+    the live vectors into ``~/.openclaw/memory-palace-active`` but the mempalace
+    config still points at the now-empty ``~/.openclaw/memory-palace``. The old
+    resolver returned the config path unconditionally, so every read hit the
+    empty store. We now skip a configured-but-empty palace in favour of the dir
+    that holds the drawers, matching ``memory-tools/palace_common.py`` and the
+    installed ``~/.openclaw/scripts`` copy."""
+    if explicit:
+        return explicit
+    env_val = os.environ.get("MEMPALACE_PALACE_PATH") or os.environ.get("MEMPAL_PALACE_PATH")
+    if env_val:
+        return env_val
+
+    config_path = None
+    try:
+        from mempalace.config import MempalaceConfig  # type: ignore
+
+        config_path = MempalaceConfig().palace_path
+    except Exception:
+        config_path = None
+    if config_path and _has_palace_data(config_path):
+        return config_path
+
+    for cand in (
+        os.path.expanduser("~/.openclaw/memory-palace-active"),
+        os.path.expanduser("~/.openclaw/memory-palace"),
+        os.path.expanduser("~/.mempalace/palace"),
+    ):
+        if _has_palace_data(cand):
+            return cand
+
+    return config_path or os.path.expanduser("~/.openclaw/memory-palace")
+
+
 # ---------------------------------------------------------------------------
 # status
 # ---------------------------------------------------------------------------
@@ -133,6 +194,24 @@ def cmd_status(args: argparse.Namespace) -> None:
             "roomsPerWing": gs.get("rooms_per_wing", {}) or {},
             "topTunnels": gs.get("top_tunnels", []) or [],
         }
+    except Exception:
+        pass
+
+    # Flat snake_case aliases so this rich-status script also satisfies the
+    # installed-copy consumers (dataStore.ts reads drawers/rooms/kg_nodes/...).
+    # `wings` intentionally stays the rich array for the Crystal frontend; the
+    # flat consumer reads a numeric `wingCount` instead. (Deliverable 1)
+    try:
+        kg = out.get("kgStats") or {}
+        rooms_total = sum(len(w.get("rooms", [])) for w in out.get("wings", []) or [])
+        out["palace"] = palace
+        out["drawers"] = int(out.get("totalDrawers", 0) or 0)
+        out["wingCount"] = len(out.get("wings", []) or [])
+        out["rooms"] = rooms_total
+        out["closets"] = 0
+        out["kg_nodes"] = int((kg or {}).get("entities", 0) or 0)
+        out["kg_edges"] = int((kg or {}).get("triples", 0) or 0)
+        out["last_mine_at"] = None
     except Exception:
         pass
 
@@ -325,39 +404,111 @@ def cmd_explicit_tunnels(args: argparse.Namespace) -> None:
 # Search & wake-up
 # ---------------------------------------------------------------------------
 
+def _resolve_query(args: argparse.Namespace) -> str | None:
+    """Accept the query from either the positional arg (palace-recall /
+    installed-script style: ``search <query> --results N``) or the ``--query``
+    flag (Crystal frontend style: ``search --query <query> --n N``)."""
+    return getattr(args, "query_opt", None) or getattr(args, "query", None)
+
+
 def cmd_search(args: argparse.Namespace) -> None:
     try:
         from mempalace.searcher import search_memories
     except Exception as e:
         _fail(f"mempalace import failed: {e}")
-    parsed = search_memories(
-        args.query,
-        args.palace,
-        wing=args.wing,
-        room=args.room,
-        n_results=args.n,
-    ) or {}
-    out = {
-        "query": parsed.get("query", args.query),
-        "filters": parsed.get("filters", {}) or {},
-        "totalBeforeFilter": int(parsed.get("total_before_filter", 0) or 0),
-        "results": [],
+    query = _resolve_query(args)
+    if not query:
+        _fail("search requires a query (positional or --query)")
+    kwargs: dict[str, Any] = {
+        "wing": args.wing,
+        "room": args.room,
+        "n_results": args.n,
     }
+    # max_distance is supported by newer mempalace; pass only if requested so we
+    # stay compatible with older installs.
+    if getattr(args, "max_distance", None):
+        kwargs["max_distance"] = args.max_distance
+    try:
+        parsed = search_memories(query, args.palace, **kwargs) or {}
+    except TypeError:
+        # Older signature without max_distance: retry without it.
+        kwargs.pop("max_distance", None)
+        parsed = search_memories(query, args.palace, **kwargs) or {}
+    results = []
     for r in parsed.get("results", []) or []:
-        out["results"].append({
+        source_file = str(r.get("source_file", "?") or "?")
+        matched_via = str(r.get("matched_via", "drawer") or "drawer")
+        similarity = float(r.get("similarity", 0) or 0)
+        # Emit BOTH camelCase (Crystal frontend) and snake_case (palace-recall /
+        # installed-script consumers) so a single drawer entry satisfies every
+        # caller regardless of which copy of this script is invoked.
+        results.append({
             "text": str(r.get("text", "") or ""),
             "wing": str(r.get("wing", "unknown") or "unknown"),
             "room": str(r.get("room", "unknown") or "unknown"),
-            "sourceFile": str(r.get("source_file", "?") or "?"),
-            "similarity": float(r.get("similarity", 0) or 0),
+            "sourceFile": source_file,
+            "source_file": source_file,
+            "similarity": similarity,
             "distance": float(r.get("distance", 0) or 0),
             "closetBoost": float(r.get("closet_boost", 0) or 0),
-            "matchedVia": str(r.get("matched_via", "drawer") or "drawer"),
+            "matchedVia": matched_via,
+            "matched_via": matched_via,
             "bm25Score": float(r.get("bm25_score", 0) or 0),
             "drawerIndex": r.get("drawer_index"),
             "totalDrawers": r.get("total_drawers"),
         })
-    _emit(out)
+    _emit({
+        "query": parsed.get("query", query),
+        "palace": args.palace,
+        "count": len(results),
+        "filters": parsed.get("filters", {}) or {},
+        "totalBeforeFilter": int(parsed.get("total_before_filter", 0) or 0),
+        "results": results,
+    })
+
+
+def cmd_save(args: argparse.Namespace) -> None:
+    """File a single drawer with an explicit wing/room. Mirrors the installed
+    ``~/.openclaw/scripts`` copy so channel integrations work with either."""
+    text = args.text
+    if not text and not sys.stdin.isatty():
+        text = sys.stdin.read()
+    text = (text or "").strip()
+    if not text:
+        _fail("empty text")
+    try:
+        from mempalace.palace import get_collection
+    except Exception as e:
+        _fail(f"mempalace import failed: {e}")
+    import hashlib
+    from datetime import datetime, timezone
+
+    wing = (args.wing or "captures").strip() or "captures"
+    room = (args.room or "general").strip() or "general"
+    try:
+        col = get_collection(args.palace, create=True)
+    except Exception as e:
+        _fail(f"collection: {e}")
+    drawer_id = args.id or "drawer_" + hashlib.sha256(
+        f"{wing}|{room}|{text}|{datetime.now(timezone.utc).isoformat()}".encode("utf-8")
+    ).hexdigest()[:24]
+    metadata: dict[str, Any] = {
+        "wing": wing,
+        "room": room,
+        "agent": args.agent or "channel",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if args.source:
+        metadata["source_file"] = args.source
+    if args.channel:
+        metadata["channel"] = args.channel
+    if args.channel_id:
+        metadata["channel_id"] = args.channel_id
+    try:
+        col.upsert(ids=[drawer_id], documents=[text], metadatas=[metadata])
+    except Exception as e:
+        _fail(f"upsert: {e}")
+    _emit({"id": drawer_id, "wing": wing, "room": room, "palace": args.palace, "bytes": len(text)})
 
 
 def cmd_wake_up(args: argparse.Namespace) -> None:
@@ -428,14 +579,31 @@ def cmd_repair(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# resolve — expose the resolved (data-bearing) palace path to the frontend so
+# the TS client never has to hard-code which directory the live store lives in.
+# ---------------------------------------------------------------------------
+
+def cmd_resolve(args: argparse.Namespace) -> None:
+    palace = args.palace
+    _emit({
+        "palace": palace,
+        "hasData": _has_palace_data(palace),
+        "chromaPath": os.path.join(palace, "chroma.sqlite3"),
+        "kgPath": _kg_path(palace),
+    })
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="mempalace_query")
     # --palace is global so callers can pass it before *or* after the
-    # subcommand. The Crystal frontend always passes it first.
-    p.add_argument("--palace", required=True)
+    # subcommand. The Crystal frontend always passes it first. It is optional:
+    # when omitted we resolve via env / mempalace config / sensible defaults so
+    # this stays interchangeable with the installed ~/.openclaw/scripts copy.
+    p.add_argument("--palace", default=None)
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("status")
@@ -475,11 +643,27 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_explicit_tunnels)
 
     s = sub.add_parser("search")
-    s.add_argument("--query", required=True)
+    # Dual calling conventions (Deliverable 1, backward-compatible aliases):
+    #   palace-recall / installed style:  search "<query>" --results N
+    #   Crystal frontend style:           search --query "<query>" --n N
+    s.add_argument("query", nargs="?", default=None, help="Query (positional)")
+    s.add_argument("--query", dest="query_opt", default=None, help="Query (flag alias)")
     s.add_argument("--wing", default=None)
     s.add_argument("--room", default=None)
-    s.add_argument("--n", type=int, default=5)
+    s.add_argument("--n", "--results", dest="n", type=int, default=5)
+    s.add_argument("--max-distance", dest="max_distance", type=float, default=None)
     s.set_defaults(func=cmd_search)
+
+    s = sub.add_parser("save")
+    s.add_argument("text", nargs="?", default=None, help="Body text (or read stdin)")
+    s.add_argument("--wing", default=None)
+    s.add_argument("--room", default=None)
+    s.add_argument("--agent", default="channel")
+    s.add_argument("--source", default=None)
+    s.add_argument("--channel", default=None)
+    s.add_argument("--channel-id", dest="channel_id", default=None)
+    s.add_argument("--id", default=None)
+    s.set_defaults(func=cmd_save)
 
     s = sub.add_parser("wake-up")
     s.add_argument("--wing", default=None)
@@ -502,6 +686,9 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("repair")
     s.set_defaults(func=cmd_repair)
 
+    s = sub.add_parser("resolve")
+    s.set_defaults(func=cmd_resolve)
+
     return p
 
 
@@ -513,6 +700,7 @@ def main() -> None:
             pass
     parser = build_parser()
     args = parser.parse_args()
+    args.palace = _resolve_palace(getattr(args, "palace", None))
     try:
         args.func(args)
     except SystemExit:

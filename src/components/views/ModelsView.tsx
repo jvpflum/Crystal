@@ -114,9 +114,45 @@ function providerInfo(key: string): { provider: string; color: string; icon: "cl
   return { provider: p, color: "var(--text-muted)", icon: "cloud" };
 }
 
+/**
+ * Disk-backed cache so the page paints the last-known catalog instantly on a
+ * fresh session (stale-while-revalidate), instead of blocking on a cold
+ * `openclaw models list --json` round-trip. The CLI's in-memory cache is wiped
+ * on every app restart, which is why the first load felt slow.
+ */
+const MODELS_CACHE_KEY = "crystal_models_cache";
+
+interface ModelsCache {
+  models: Model[];
+  fallbacks: string[];
+  ts: number;
+}
+
+function loadModelsCache(): ModelsCache | null {
+  try {
+    const raw = localStorage.getItem(MODELS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ModelsCache;
+    if (!parsed || !Array.isArray(parsed.models)) return null;
+    return { models: parsed.models, fallbacks: Array.isArray(parsed.fallbacks) ? parsed.fallbacks : [], ts: parsed.ts || 0 };
+  } catch {
+    return null;
+  }
+}
+
+function saveModelsCache(patch: Partial<Pick<ModelsCache, "models" | "fallbacks">>): void {
+  try {
+    const cur = loadModelsCache() ?? { models: [], fallbacks: [], ts: 0 };
+    localStorage.setItem(MODELS_CACHE_KEY, JSON.stringify({ ...cur, ...patch, ts: Date.now() }));
+  } catch {
+    /* quota or serialisation error */
+  }
+}
+
 export function ModelsView() {
-  const [models, setModels] = useState<Model[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [models, setModels] = useState<Model[]>(() => loadModelsCache()?.models ?? []);
+  // Paint instantly when we have a cached catalog; only block on a true cold start.
+  const [loading, setLoading] = useState(() => (loadModelsCache()?.models?.length ?? 0) === 0);
   const [error, setError] = useState<string | null>(null);
   const [settingDefault, setSettingDefault] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -130,7 +166,7 @@ export function ModelsView() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanResults, setScanResults] = useState<string | null>(null);
-  const [fallbacks, setFallbacks] = useState<string[]>([]);
+  const [fallbacks, setFallbacks] = useState<string[]>(() => loadModelsCache()?.fallbacks ?? []);
   const [fallbackInput, setFallbackInput] = useState("");
   const [fallbackLoading, setFallbackLoading] = useState(false);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("medium");
@@ -142,14 +178,17 @@ export function ModelsView() {
   const loadModels = useCallback(async () => {
     setError(null);
 
-    // Try openclaw models list first (full catalog)
+    // Try openclaw models list first (full catalog). Bound the timeout so a cold
+    // / stalled gateway falls through to the fast config-based path quickly
+    // instead of blocking the render up to the 15s default.
     try {
-      const result = await cachedCommand("openclaw models list --json", { ttl: 30_000 });
+      const result = await cachedCommand("openclaw models list --json", { ttl: 30_000, timeout: 6_000 });
       if (result.code === 0) {
         const data = JSON.parse(result.stdout);
         const list: Model[] = data.models || [];
         if (list.length > 0) {
           setModels(list);
+          saveModelsCache({ models: list });
           setLoading(false);
           return;
         }
@@ -190,6 +229,7 @@ export function ModelsView() {
       const list = Array.from(merged.values());
       setModels(list);
       setFallbacks(configData.fallbacks);
+      if (list.length > 0) saveModelsCache({ models: list, fallbacks: configData.fallbacks });
 
       if (list.length === 0) {
         setError("Could not discover models. Is OpenClaw gateway running?");
@@ -229,7 +269,9 @@ export function ModelsView() {
       const result = await cachedCommand("openclaw models fallbacks list --json", { ttl: 120_000 });
       if (result.code === 0) {
         const data = JSON.parse(result.stdout);
-        setFallbacks(data.fallbacks || []);
+        const fb = data.fallbacks || [];
+        setFallbacks(fb);
+        saveModelsCache({ fallbacks: fb });
         return;
       }
     } catch { /* timed out — try config */ }
@@ -237,7 +279,9 @@ export function ModelsView() {
       const cfg = await cachedCommand("openclaw config get agents.defaults.model.fallbacks --json", { ttl: 60_000 });
       if (cfg.code === 0) {
         const data = JSON.parse(cfg.stdout);
-        setFallbacks(Array.isArray(data.value) ? data.value : Array.isArray(data) ? data : []);
+        const fb = Array.isArray(data.value) ? data.value : Array.isArray(data) ? data : [];
+        setFallbacks(fb);
+        saveModelsCache({ fallbacks: fb });
       }
     } catch { /* ignore */ }
   }, []);
@@ -643,8 +687,21 @@ export function ModelsView() {
       {/* Model List */}
       <div style={{ ...scrollArea, padding: "0 24px 20px" }}>
         {loading ? (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
-            <Loader2 style={{ width: 24, height: 24, color: "var(--accent)", animation: "spin 1s linear infinite" }} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }} aria-busy="true" aria-label="Loading models">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} style={{
+                display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: 12,
+                background: "var(--bg-elevated)", border: "1px solid var(--border)",
+                opacity: 1 - i * 0.12,
+              }}>
+                <div className="animate-pulse" style={{ width: 28, height: 28, borderRadius: 8, background: "var(--bg-hover)", flexShrink: 0 }} />
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div className="animate-pulse" style={{ width: "40%", height: 11, borderRadius: 4, background: "var(--bg-hover)" }} />
+                  <div className="animate-pulse" style={{ width: "22%", height: 9, borderRadius: 4, background: "var(--bg-hover)" }} />
+                </div>
+                <div className="animate-pulse" style={{ width: 52, height: 18, borderRadius: 6, background: "var(--bg-hover)", flexShrink: 0 }} />
+              </div>
+            ))}
           </div>
         ) : error ? (
           <div style={emptyState}>

@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master, main]
   pull_request:
-    branches: [main]
+    branches: [master, main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   frontend:
-    name: Frontend (TypeScript + Lint)
+    name: Frontend (Typecheck + Lint + Test + Build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +38,12 @@ jobs:
         run: pnpm exec eslint src --max-warnings 0
         continue-on-error: true
 
+      - name: Test
+        run: pnpm test
+
+      - name: Build (frontend bundle)
+        run: pnpm build
+
   rust:
     name: Rust (Tauri Backend)
     runs-on: windows-latest
@@ -57,9 +63,7 @@ jobs:
       - name: Format check
         working-directory: src-tauri
         run: cargo fmt --check
-        continue-on-error: true
 
       - name: Clippy
         working-directory: src-tauri
         run: cargo clippy -- -D warnings
-        continue-on-error: true

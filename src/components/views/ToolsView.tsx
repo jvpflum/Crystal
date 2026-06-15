@@ -3,9 +3,10 @@ import {
   Box, Globe, Shield, RefreshCw, Loader2, AlertTriangle,
   Terminal, Info, ChevronDown, ChevronRight, Search,
   CheckCircle2, XCircle, Zap, Play, KeyRound, ExternalLink,
-  Download, RotateCw, Package, Tag, X,
+  Download, RotateCw, Package, Tag, X, Sparkles,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { SkillsRegistryView } from "@/components/views/SkillsRegistryView";
 import { OpenClawKeysTab } from "@/components/tools/OpenClawKeysTab";
 import { cachedCommand } from "@/lib/cache";
 import { useDataStore } from "@/stores/dataStore";
@@ -24,7 +25,7 @@ interface OCSkill {
   missing: { bins: string[]; anyBins: string[]; env: string[]; config: string[]; os: string[] };
 }
 
-type TabId = "skills" | "hub" | "sandbox" | "keys";
+type TabId = "skills" | "registry" | "hub" | "sandbox" | "keys";
 
 export function ToolsView() {
   const [tab, setTab] = useState<TabId>("skills");
@@ -41,6 +42,7 @@ export function ToolsView() {
         <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--border)" }}>
           {([
             { id: "skills" as TabId, label: "Skills", icon: <Zap style={{ width: 11, height: 11 }} /> },
+            { id: "registry" as TabId, label: "Registry", icon: <Sparkles style={{ width: 11, height: 11 }} /> },
             { id: "hub" as TabId, label: "Hub", icon: <Globe style={{ width: 11, height: 11 }} /> },
             { id: "keys" as TabId, label: "Keys", icon: <KeyRound style={{ width: 11, height: 11 }} /> },
             { id: "sandbox" as TabId, label: "Sandbox & Tools", icon: <Box style={{ width: 11, height: 11 }} /> },
@@ -57,7 +59,11 @@ export function ToolsView() {
         </div>
       </div>
 
-      {tab === "skills" ? <SkillsTab /> : tab === "hub" ? <HubTab /> : tab === "keys" ? <OpenClawKeysTab /> : <SandboxTab />}
+      {tab === "skills" ? <SkillsTab />
+        : tab === "registry" ? <div style={{ flex: 1, minHeight: 0, display: "flex" }}><SkillsRegistryView /></div>
+        : tab === "hub" ? <HubTab />
+        : tab === "keys" ? <OpenClawKeysTab />
+        : <SandboxTab />}
     </div>
   );
 }

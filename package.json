@@ -2,7 +2,7 @@
   "name": "crystal",
   "private": true,
   "version": "0.8.0",
-  "description": "Crystal is a desktop home base for long-running AI agents. Powered by OpenClaw, vLLM, NVIDIA Parakeet STT, and NVIDIA Magpie TTS, with Telegram as a remote channel.",
+  "description": "Crystal is a desktop home base for long-running AI agents. Powered by OpenClaw and vLLM, with Telegram as a remote channel.",
   "keywords": [
     "ai-agents",
     "desktop-app",
@@ -10,11 +10,8 @@
     "openclaw",
     "vllm",
     "nvidia",
-    "parakeet",
-    "magpie",
     "llm",
     "mempalace",
-    "voice-assistant",
     "local-ai"
   ],
   "license": "MIT",

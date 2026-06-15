@@ -28,22 +28,16 @@ export type AppView =
   | "devices"
   | "subagents"
   | "webhooks"
-  | "voicecall"
   | "tasks"
   | "approvals"
   | "city"
-  | "usage";
-
-export type VoiceState =
-  | "idle"
-  | "listening"
-  | "processing"
-  | "thinking"
-  | "transcribing"
-  | "awaiting_confirmation"
-  | "executing"
-  | "speaking"
-  | "error";
+  | "usage"
+  | "board"
+  | "projects"
+  | "lessons"
+  | "decisions"
+  | "targets"
+  | "studio";
 
 export type ThinkingLevel = "auto" | "minimal" | "medium" | "high";
 
@@ -54,14 +48,8 @@ interface AppState {
   setView: (view: AppView, opts?: { centerTab?: CommandCenterTabId }) => void;
   clearPendingCommandCenterTab: () => void;
 
-  voiceState: VoiceState;
-  setVoiceState: (state: VoiceState) => void;
-
   isMinimized: boolean;
   setMinimized: (minimized: boolean) => void;
-
-  transcript: string;
-  setTranscript: (text: string) => void;
 
   gatewayConnected: boolean;
   setGatewayConnected: (c: boolean) => void;
@@ -69,7 +57,6 @@ interface AppState {
   serviceStatus: {
     gateway: "off" | "starting" | "ready";
     vllm: "off" | "starting" | "ready";
-    voice: "off" | "starting" | "ready";
   };
   setServiceStatus: (svc: keyof AppState["serviceStatus"], status: "off" | "starting" | "ready") => void;
   allServicesReady: () => boolean;
@@ -86,7 +73,8 @@ const VALID_VIEWS = new Set<string>([
   "models", "sessions", "templates", "channels", "memory",
   "tools", "activity", "settings", "security", "hooks", "doctor", "nodes",
   "browser", "workspace", "messaging", "directory", "devices", "subagents",
-  "webhooks", "voicecall", "tasks", "approvals", "city", "usage",
+  "webhooks", "tasks", "approvals", "city", "usage",
+  "board", "projects", "lessons", "decisions", "targets", "studio",
 ]);
 
 function loadPersistedNavigation(): { view: AppView; centerTab: CommandCenterTabId | null } {
@@ -104,6 +92,15 @@ function loadPersistedNavigation(): { view: AppView; centerTab: CommandCenterTab
       localStorage.setItem(PERSISTED_VIEW_KEY, "tools");
       return { view: "tools", centerTab: null };
     }
+    if (saved === "voicecall") {
+      localStorage.setItem(PERSISTED_VIEW_KEY, "home");
+      return { view: "home", centerTab: null };
+    }
+    // Skills Registry was folded into Tools & Skills (Registry tab).
+    if (saved === "skills") {
+      localStorage.setItem(PERSISTED_VIEW_KEY, "tools");
+      return { view: "tools", centerTab: null };
+    }
     if (saved && VALID_VIEWS.has(saved)) return { view: saved as AppView, centerTab: null };
   } catch { /* ignore */ }
   return { view: "home", centerTab: null };
@@ -116,7 +113,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   pendingCommandCenterTab: initialNav.centerTab,
   setView: (view, opts) => {
     const v = view as string;
-    const resolved = (v === "office" ? "agents" : v === "marketplace" ? "tools" : view) as AppView;
+    const resolved = (v === "office" ? "agents" : v === "marketplace" || v === "skills" ? "tools" : view) as AppView;
     let pending = get().pendingCommandCenterTab;
     if (resolved === "command-center") {
       pending = opts?.centerTab ?? null;
@@ -128,19 +125,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   clearPendingCommandCenterTab: () => set({ pendingCommandCenterTab: null }),
 
-  voiceState: "idle",
-  setVoiceState: (state) => set({ voiceState: state }),
-
   isMinimized: false,
   setMinimized: (minimized) => set({ isMinimized: minimized }),
-
-  transcript: "",
-  setTranscript: (text) => set({ transcript: text }),
 
   gatewayConnected: false,
   setGatewayConnected: (c) => set({ gatewayConnected: c }),
 
-  serviceStatus: { gateway: "off", vllm: "off", voice: "off" },
+  serviceStatus: { gateway: "off", vllm: "off" },
   setServiceStatus: (svc, status) => set((s) => ({
     serviceStatus: { ...s.serviceStatus, [svc]: status },
   })),

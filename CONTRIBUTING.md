@@ -19,7 +19,7 @@ Thanks for your interest in contributing to Crystal — the desktop home base fo
 - [Rust](https://rustup.rs) stable (for the Tauri backend)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for local vLLM)
 - NVIDIA GPU with 16GB+ VRAM (recommended; CPU/cloud path also supported)
-- Python 3.11+ (optional; only needed for voice workers)
+- Python 3.11+ (optional; only needed for the MemPalace query helper)
 
 ### Getting started
 
@@ -43,7 +43,7 @@ The Tauri dev server runs the frontend on port 1420 and boots the Rust backend a
 
 ## Branch and commit conventions
 
-- Branch off `main` with a descriptive name: `feat/voice-orb-redesign`, `fix/gateway-reconnect`
+- Branch off `main` with a descriptive name: `feat/command-palette-redesign`, `fix/gateway-reconnect`
 - Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`
 - Keep PRs focused — one logical change per PR
 

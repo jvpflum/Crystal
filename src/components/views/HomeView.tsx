@@ -14,6 +14,7 @@ import {
   RefreshCw, Power, RotateCcw, FolderCog, ShieldCheck,
   MonitorDown, Layers, XCircle, ChevronRight,
   Castle, DoorOpen, Network, GitBranch, Pickaxe, Sparkles,
+  Rocket, CheckCircle2, X, HardDrive, FileX, Gauge,
 } from "lucide-react";
 import { useDataStore } from "@/stores/dataStore";
 import { useTokenUsageStore, formatLifetimeTokens } from "@/stores/tokenUsageStore";
@@ -160,7 +161,7 @@ function OpenAILogo({ size = 18, color = "currentColor" }: { size?: number; colo
    ═══════════════════════════════════════════════════════════════ */
 
 import {
-  EASE, SPRING, glowCard,
+  EASE, SPRING, MONO, glowCard,
   hoverLift, hoverReset, pressDown, pressUp,
 } from "@/styles/viewStyles";
 
@@ -563,7 +564,10 @@ export function HomeView() {
       const [agentsR, cronR, skillsR, sessionsR] = await Promise.allSettled([
         getAgents(), getCronJobs(), getSkills(), getSessions(),
       ]);
-      getMemoryStatus(true);
+      // Use the cached/SWR path (no force): the dashboard must not block on a
+      // cold memory probe, and degrades to a zero state when the KG/palace
+      // backend is empty or being repaired (fetchMemoryStatus never throws).
+      getMemoryStatus().catch(() => {});
       memoryPalaceClient.isInitialized().then(init => {
         if (!init || cancelled) return;
         setPalaceReady(true);
@@ -1368,9 +1372,52 @@ const OPTIMIZER_ACTIONS: OptimizerAction[] = [
   { id: "gpu-reset", icon: Layers, label: "GPU Reset", desc: "Restart display driver", color: "#06b6d4", command: `$dev = Get-PnpDevice -Class Display -Status OK -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -match 'NVIDIA' }; if ($dev) { Disable-PnpDevice -InstanceId $dev.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Enable-PnpDevice -InstanceId $dev.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Write-Output "NVIDIA GPU driver restarted" } else { Write-Output "No NVIDIA device found" }`, successMsg: "GPU driver restarted", confirm: "This will restart your NVIDIA GPU driver. Screen may flicker. Continue?" },
 ];
 
+interface OptimizeStep {
+  name: string;
+  freedBytes: number;
+  filesRemoved: number;
+  ok: boolean;
+  detail: string;
+}
+
+interface OptimizeResult {
+  freedBytes: number;
+  filesRemoved: number;
+  steps: OptimizeStep[];
+  durationMs: number;
+}
+
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes < 1) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / Math.pow(1024, i);
+  return `${value >= 100 || i === 0 ? Math.round(value) : value.toFixed(1)} ${units[i]}`;
+}
+
 function PcOptimizer() {
   const [runningId, setRunningId] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, { success: boolean; message: string }>>({});
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizeResult, setOptimizeResult] = useState<OptimizeResult | null>(null);
+  const [optimizeError, setOptimizeError] = useState<string | null>(null);
+  const [showModal, setShowModal] = useState(false);
+
+  const runFullOptimize = async () => {
+    if (optimizing) return;
+    setOptimizing(true);
+    setOptimizeError(null);
+    setOptimizeResult(null);
+    setShowModal(true);
+    try {
+      const result = await invoke<OptimizeResult>("optimize_system");
+      setOptimizeResult(result);
+    } catch (e) {
+      setOptimizeError(String(e));
+    } finally {
+      setOptimizing(false);
+    }
+  };
 
   const runAction = async (action: OptimizerAction) => {
     if (action.confirm && !window.confirm(action.confirm)) return;
@@ -1391,6 +1438,27 @@ function PcOptimizer() {
     <div style={glowCard("#fbbf24", { padding: "16px 18px" })}
       data-glow="#fbbf24" onMouseEnter={hoverLift} onMouseLeave={hoverReset}>
       <SectionLabel text="PC Optimizer" />
+
+      <button onClick={runFullOptimize} disabled={optimizing}
+        onMouseDown={pressDown} onMouseUp={pressUp}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          width: "100%", padding: "10px 0", marginBottom: 10, borderRadius: 10,
+          border: "1px solid rgba(251,191,36,0.25)",
+          background: "linear-gradient(135deg, rgba(251,191,36,0.16), rgba(251,191,36,0.06))",
+          color: "#fbbf24", fontSize: 12, fontWeight: 600, letterSpacing: "0.02em",
+          cursor: optimizing ? "wait" : "pointer", opacity: optimizing ? 0.6 : 1,
+          transition: `all 0.2s ${EASE}`,
+        }}
+        onMouseEnter={e => { if (!optimizing) e.currentTarget.style.borderColor = "rgba(251,191,36,0.5)"; }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(251,191,36,0.25)"; }}
+      >
+        {optimizing
+          ? <Loader2 style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} />
+          : <Rocket style={{ width: 14, height: 14, filter: "drop-shadow(0 0 4px #fbbf24)" }} />}
+        {optimizing ? "Optimizing…" : "Optimize Now"}
+      </button>
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
         {OPTIMIZER_ACTIONS.map(action => {
           const Icon = action.icon;
@@ -1451,6 +1519,158 @@ function PcOptimizer() {
             </button>
           );
         })}
+      </div>
+
+      {showModal && (
+        <OptimizeModal
+          optimizing={optimizing}
+          result={optimizeResult}
+          error={optimizeError}
+          onClose={() => setShowModal(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── PC Optimizer — result modal ── */
+
+function OptimizeModal({
+  optimizing, result, error, onClose,
+}: {
+  optimizing: boolean;
+  result: OptimizeResult | null;
+  error: string | null;
+  onClose: () => void;
+}) {
+  const dismissable = !optimizing;
+  const accent = error ? "#f87171" : optimizing ? "#fbbf24" : "#4ade80";
+
+  return (
+    <div
+      onClick={() => dismissable && onClose()}
+      style={{
+        position: "fixed", inset: 0, zIndex: 3000,
+        background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        animation: `fadeIn 0.2s ${EASE}`,
+      }}
+    >
+      <style>{`@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }`}</style>
+      <div
+        onClick={e => e.stopPropagation()}
+        style={glowCard(accent, {
+          width: 440, maxWidth: "90vw", maxHeight: "80vh", overflowY: "auto",
+          padding: "22px 24px", boxShadow: "0 24px 70px rgba(0,0,0,0.5)",
+        })}
+      >
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: 12, flexShrink: 0,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            background: `color-mix(in srgb, ${accent} 14%, transparent)`,
+          }}>
+            {optimizing
+              ? <Loader2 style={{ width: 20, height: 20, color: accent, animation: "spin 1s linear infinite" }} />
+              : error
+                ? <XCircle style={{ width: 20, height: 20, color: accent }} />
+                : <CheckCircle2 style={{ width: 20, height: 20, color: accent, filter: `drop-shadow(0 0 6px ${accent})` }} />}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
+              {optimizing ? "Optimizing your PC…" : error ? "Optimization failed" : "Optimization complete"}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+              {optimizing
+                ? "Clearing caches and flushing DNS"
+                : error
+                  ? "Some steps could not run"
+                  : `Done in ${(((result?.durationMs ?? 0) / 1000)).toFixed(1)}s`}
+            </div>
+          </div>
+          {dismissable && (
+            <button aria-label="Close" onClick={onClose} style={{
+              background: "none", border: "none", cursor: "pointer", padding: 4,
+              color: "var(--text-muted)", display: "flex", flexShrink: 0,
+            }}>
+              <X style={{ width: 16, height: 16 }} />
+            </button>
+          )}
+        </div>
+
+        {error ? (
+          <div style={{
+            fontSize: 12, lineHeight: 1.5, color: "#f87171",
+            background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.2)",
+            borderRadius: 10, padding: "12px 14px", fontFamily: MONO, wordBreak: "break-word",
+          }}>
+            {error}
+          </div>
+        ) : optimizing ? (
+          <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "8px 0 4px" }}>
+            Running safe cleanup steps — this only takes a moment.
+          </div>
+        ) : result ? (
+          <>
+            {/* Headline stats */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 18 }}>
+              {[
+                { icon: HardDrive, label: "Reclaimed", value: formatBytes(result.freedBytes), color: "#4ade80" },
+                { icon: FileX, label: "Files cleaned", value: result.filesRemoved.toLocaleString(), color: "#fbbf24" },
+                { icon: Gauge, label: "Duration", value: `${(result.durationMs / 1000).toFixed(1)}s`, color: "#06b6d4" },
+              ].map(stat => {
+                const Icon = stat.icon;
+                return (
+                  <div key={stat.label} style={{
+                    display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+                    padding: "12px 6px", borderRadius: 10,
+                    background: `color-mix(in srgb, ${stat.color} 6%, transparent)`,
+                    border: `1px solid color-mix(in srgb, ${stat.color} 18%, transparent)`,
+                  }}>
+                    <Icon style={{ width: 16, height: 16, color: stat.color }} />
+                    <span style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", fontFamily: MONO }}>{stat.value}</span>
+                    <span style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{stat.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Per-step breakdown */}
+            <div style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600, marginBottom: 8 }}>
+              Breakdown
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {result.steps.map((step, i) => (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "8px 10px", borderRadius: 8,
+                  background: "rgba(255,255,255,0.02)",
+                  border: "1px solid rgba(255,255,255,0.04)",
+                }}>
+                  {step.ok
+                    ? <CheckCircle2 style={{ width: 13, height: 13, color: "#4ade80", flexShrink: 0 }} />
+                    : <XCircle style={{ width: 13, height: 13, color: "#f87171", flexShrink: 0 }} />}
+                  <span style={{ flex: 1, fontSize: 11.5, color: "var(--text)" }}>{step.name}</span>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: MONO }}>
+                    {step.freedBytes > 0
+                      ? `${formatBytes(step.freedBytes)} · ${step.filesRemoved.toLocaleString()} files`
+                      : step.ok ? "done" : "skipped"}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <button onClick={onClose} style={{
+              width: "100%", marginTop: 18, padding: "10px 0", borderRadius: 10,
+              border: "1px solid rgba(74,222,128,0.25)", background: "rgba(74,222,128,0.1)",
+              color: "#4ade80", fontSize: 12, fontWeight: 600, cursor: "pointer",
+              transition: `all 0.2s ${EASE}`,
+            }}>
+              Done
+            </button>
+          </>
+        ) : null}
       </div>
     </div>
   );

@@ -2,10 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { escapeShellArg } from "@/lib/tools";
 import { cachedCommand } from "@/lib/cache";
 import { memoryPalaceClient } from "@/lib/memory-palace";
+import { resolveOpenAiApiKeyForCrystal } from "@/lib/openclawSecrets";
 
 /* ─── Types ─── */
 
-export type Surface = "gui-chat" | "voice" | "workflow" | "office" | "discord" | "cron";
+export type Surface = "gui-chat" | "workflow" | "office" | "discord" | "cron";
 
 export interface ChatAttachment {
   id: string;
@@ -180,6 +181,498 @@ export function pickAcpSessionsJson(data: unknown): unknown[] {
   return [];
 }
 
+/** Parsed row from the plain-text `/subagents list` / `/acp status` output. Mirrors the SubAgent fields the Sub-Agents view renders. */
+export interface ParsedSubagentRow {
+  id: string;
+  label?: string;
+  status?: string;
+  task?: string;
+  model?: string;
+  runtime?: string;
+  cwd?: string;
+  recent?: boolean;
+}
+
+const SUBAGENT_ROW_RE = /^(\d+)\.\s+(.+?)\s+\(([^)]*)\)\s+(.+)$/;
+
+/**
+ * Parses a single `/subagents list` row. The backend builds each line as:
+ *   `<#>. [<taskName>: ]<label> (<model>, <runtime>[, <usage>]) <status>[ - <task>]`
+ * e.g. `1. research (anthropic/claude-sonnet-4, 2m 30s, 1.2k tok) running - Investigate the parser bug`.
+ * Returns null for lines that aren't subagent rows.
+ */
+function parseSubagentRow(line: string): ParsedSubagentRow | null {
+  const m = SUBAGENT_ROW_RE.exec(line);
+  if (!m) {
+    // Looser fallback: numbered row without the metadata parens still surfaces a label.
+    const idx = /^(\d+)\.\s+(.+)$/.exec(line);
+    if (!idx) return null;
+    return { id: idx[1], label: idx[2].trim() };
+  }
+  const [, index, labelPart, meta, rest] = m;
+  const metaParts = meta.split(",").map(s => s.trim()).filter(Boolean);
+  const sepIdx = rest.indexOf(" - ");
+  const status = (sepIdx >= 0 ? rest.slice(0, sepIdx) : rest).trim();
+  const task = sepIdx >= 0 ? rest.slice(sepIdx + 3).trim() : undefined;
+  return {
+    id: index,
+    label: labelPart.trim() || undefined,
+    model: metaParts[0] || undefined,
+    runtime: metaParts[1] || undefined,
+    status: status || undefined,
+    task: task || undefined,
+  };
+}
+
+/**
+ * `/subagents list` returns formatted text (no `--json`), e.g.:
+ *   active subagents:
+ *   -----
+ *   1. research (anthropic/claude-sonnet-4, 2m 30s) running - Investigate the parser bug
+ *
+ *   recent subagents (last 30m):
+ *   -----
+ *   (none)
+ * Parse it into rows. `(none)` sections yield no rows (an empty list, not an error).
+ */
+export function parseSubagentListText(text: string): ParsedSubagentRow[] {
+  const rows: ParsedSubagentRow[] = [];
+  if (!text || !text.trim()) return rows;
+  let section: "active" | "recent" | null = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const lower = line.toLowerCase();
+    if (lower.startsWith("active subagents")) { section = "active"; continue; }
+    if (lower.startsWith("recent")) { section = "recent"; continue; }
+    if (line === "-----" || line === "(none)") continue;
+    const row = parseSubagentRow(line);
+    if (row) rows.push({ ...row, recent: section === "recent" });
+  }
+  return rows;
+}
+
+/**
+ * `/acp status` returns a single session's status as key/value lines:
+ *   ACP status:
+ *   -----
+ *   session: main:acp:codex:abc123
+ *   backend: codex
+ *   agent: main
+ *   state: running
+ *   ...
+ * Parse into a single row, or an empty array when no `session` line is present
+ * (e.g. when the command returns a `⚠️` error because no ACP session exists).
+ */
+export function parseAcpStatusText(text: string): ParsedSubagentRow[] {
+  if (!text || !text.trim()) return [];
+  const kv: Record<string, string> = {};
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line === "-----") continue;
+    const lower = line.toLowerCase();
+    if (lower.startsWith("acp status")) continue;
+    const idx = line.indexOf(":");
+    if (idx <= 0) continue;
+    const key = line.slice(0, idx).trim();
+    const value = line.slice(idx + 1).trim();
+    if (key && !(key in kv)) kv[key] = value;
+  }
+  const id = kv.session || kv.sessionKey || kv.sessionId;
+  if (!id) return [];
+  return [{
+    id,
+    label: kv.agent || undefined,
+    runtime: kv.backend || kv.runtime || undefined,
+    status: kv.state || undefined,
+    task: kv.taskProgress || kv.taskSummary || undefined,
+    cwd: kv.cwd || undefined,
+  }];
+}
+
+/* ─── Crystal OS (crystal-os plugin) ───
+ *
+ * Mirror of extensions/crystal-os/src/types.ts. The backend exposes these over
+ * `openclaw os tasks|projects ... --json`, each printing one envelope line:
+ *   { "ok": true, "data": <entity|entity[]> } | { "ok": false, "error": "..." }
+ * Keep these shapes in sync with that file (the canonical contract). The plugin
+ * is opt-in/disabled by default; calls reject when it is not enabled.
+ */
+
+export type OsTaskStatus =
+  | "backlog" | "todo" | "in_progress" | "blocked" | "review" | "completed" | "archived";
+export type OsTaskPriority = "low" | "medium" | "high" | "urgent";
+export type OsProjectStatus = "active" | "paused" | "completed" | "archived";
+export type OsMilestoneStatus = "pending" | "in_progress" | "completed";
+
+export const OS_TASK_STATUSES: OsTaskStatus[] = [
+  "backlog", "todo", "in_progress", "blocked", "review", "completed", "archived",
+];
+export const OS_TASK_PRIORITIES: OsTaskPriority[] = ["low", "medium", "high", "urgent"];
+
+export interface OsTask {
+  id: string;
+  projectId: string | null;
+  parentTaskId: string | null;
+  title: string;
+  description: string | null;
+  status: OsTaskStatus;
+  priority: OsTaskPriority;
+  ownerAgent: string | null;
+  createdAt: string;
+  updatedAt: string;
+  dueDate: string | null;
+  tags: string[];
+  dependsOn: string[];
+  blockedBy: string[];
+}
+
+export interface OsGoal {
+  id: string;
+  projectId: string;
+  text: string;
+  orderIdx: number;
+}
+
+export interface OsMilestone {
+  id: string;
+  projectId: string;
+  title: string;
+  status: OsMilestoneStatus;
+  dueDate: string | null;
+  completedAt: string | null;
+  orderIdx: number;
+}
+
+export interface OsProject {
+  id: string;
+  name: string;
+  description: string | null;
+  status: OsProjectStatus;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+  goals?: OsGoal[];
+  milestones?: OsMilestone[];
+  taskCount?: number;
+  openTaskCount?: number;
+}
+
+export interface OsProjectState {
+  projectId: string;
+  currentMilestoneId: string | null;
+  blockers: string[];
+  nextActions: string[];
+  openQuestions: string[];
+  activeTaskIds: string[];
+  updatedAt: string | null;
+  derived: boolean;
+}
+
+export interface OsTaskFilter {
+  projectId?: string;
+  status?: OsTaskStatus;
+  /** "none" => top-level tasks only; a task id => children of that task. */
+  parentTaskId?: string | "none";
+  search?: string;
+}
+
+export interface OsCreateTaskInput {
+  title: string;
+  projectId?: string | null;
+  parentTaskId?: string | null;
+  description?: string | null;
+  status?: OsTaskStatus;
+  priority?: OsTaskPriority;
+  ownerAgent?: string | null;
+  dueDate?: string | null;
+  tags?: string[];
+  dependsOn?: string[];
+}
+
+export interface OsUpdateTaskInput {
+  title?: string;
+  description?: string | null;
+  status?: OsTaskStatus;
+  priority?: OsTaskPriority;
+  projectId?: string | null;
+  parentTaskId?: string | null;
+  ownerAgent?: string | null;
+  dueDate?: string | null;
+  addTags?: string[];
+  removeTags?: string[];
+}
+
+export interface OsCreateProjectInput {
+  name: string;
+  description?: string | null;
+  status?: OsProjectStatus;
+  goals?: string[];
+}
+
+export interface OsUpdateProjectInput {
+  name?: string;
+  description?: string | null;
+  status?: OsProjectStatus;
+}
+
+/* ─── Crystal OS Phase 2: lessons, decisions, operating state ─── */
+
+export interface OsLesson {
+  id: string;
+  projectId: string | null;
+  problem: string | null;
+  solution: string | null;
+  outcome: string | null;
+  confidence: number | null;
+  date: string | null;
+  sourceRunId: string | null;
+  tags: string[];
+}
+
+export interface OsRecordLessonInput {
+  problem?: string | null;
+  solution?: string | null;
+  outcome?: string | null;
+  confidence?: number | null;
+  projectId?: string | null;
+  tags?: string[];
+  sourceRunId?: string | null;
+}
+
+export interface OsDecisionOption {
+  id: string;
+  decisionId: string;
+  text: string | null;
+  pros: string | null;
+  cons: string | null;
+  chosen: boolean;
+}
+
+export interface OsDecision {
+  id: string;
+  projectId: string | null;
+  title: string | null;
+  context: string | null;
+  selectedOptionId: string | null;
+  rationale: string | null;
+  expectedOutcome: string | null;
+  date: string | null;
+  options: OsDecisionOption[];
+}
+
+export interface OsDecisionOptionInput {
+  text?: string | null;
+  pros?: string | null;
+  cons?: string | null;
+  chosen?: boolean;
+}
+
+export interface OsCreateDecisionInput {
+  title?: string | null;
+  context?: string | null;
+  rationale?: string | null;
+  expectedOutcome?: string | null;
+  projectId?: string | null;
+  options?: OsDecisionOptionInput[];
+  selectedIndex?: number | null;
+}
+
+export interface OsSetProjectStateInput {
+  currentMilestoneId?: string | null;
+  blockers?: string[];
+  nextActions?: string[];
+  openQuestions?: string[];
+  activeTaskIds?: string[];
+}
+
+export interface OsConsult {
+  projectId: string | null;
+  query: string | null;
+  lessons: OsLesson[];
+  decisions: OsDecision[];
+  projectState: OsProjectState | null;
+}
+
+/* ─── Execution plane (Phase 3) ─── */
+
+export type OsTargetKind = "local_desktop" | "secondary_desktop" | "cloud_gpu" | "future_dgx";
+export type OsTargetStatus = "online" | "offline" | "unknown" | "degraded";
+export type OsRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+export interface OsExecutionTarget {
+  id: string;
+  kind: OsTargetKind;
+  label: string | null;
+  endpoint: string | null;
+  authRef: string | null;
+  capabilities: string[];
+  status: OsTargetStatus;
+  lastSeenAt: string | null;
+}
+
+export interface OsRegisterTargetInput {
+  id?: string;
+  kind: OsTargetKind;
+  label?: string | null;
+  endpoint?: string | null;
+  authRef?: string | null;
+  capabilities?: string[];
+  status?: OsTargetStatus;
+}
+
+export interface OsExecutionRun {
+  id: string;
+  taskId: string | null;
+  targetId: string | null;
+  skillId: string | null;
+  status: OsRunStatus;
+  submittedAt: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  request: unknown;
+  result: unknown;
+  benchmark: unknown;
+  /** Adapter/sidecar handle for async work (remote job id / studio run id). */
+  externalRef?: string | null;
+}
+
+export interface OsExecDispatchInput {
+  taskId?: string | null;
+  skillId?: string | null;
+  targetId?: string | null;
+  requiredCapabilities?: string[];
+  command?: string | null;
+  label?: string | null;
+  recordHistory?: boolean;
+}
+
+export interface OsTaskExecutionHistoryEntry {
+  id: string;
+  taskId: string;
+  runId: string | null;
+  targetId: string | null;
+  phase: string | null;
+  status: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  summary: string | null;
+  artifacts: unknown;
+}
+
+export interface OsPevicResult {
+  taskId: string;
+  phase: string;
+  status: string;
+  done: boolean;
+  summary: string;
+  run?: OsExecutionRun;
+  history: OsTaskExecutionHistoryEntry[];
+}
+
+/* ─── Crystal OS Phase 4: NVIDIA Skills Registry ─── */
+
+export type OsSkillCategory =
+  | "data_science" | "training" | "inference" | "evaluation" | "research" | "automation" | "development";
+export type OsSkillSource = "nvidia" | "crystal" | "custom";
+
+export const OS_SKILL_CATEGORIES: OsSkillCategory[] = [
+  "data_science", "training", "inference", "evaluation", "research", "automation", "development",
+];
+export const OS_SKILL_SOURCES: OsSkillSource[] = ["nvidia", "crystal", "custom"];
+
+export interface OsSkillExample {
+  id: string;
+  skillId: string;
+  input: unknown;
+  output: unknown;
+}
+
+export interface OsSkill {
+  id: string;
+  name: string;
+  description: string | null;
+  category: OsSkillCategory | null;
+  source: OsSkillSource;
+  version: string | null;
+  sourceFile: string | null;
+  inputSchema: unknown;
+  outputSchema: unknown;
+  validationRules: Record<string, unknown>[];
+  requiredTools: string[];
+  requiredGpuLibraries: string[];
+  examples: OsSkillExample[];
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface OsSkillFilter {
+  category?: OsSkillCategory;
+  source?: OsSkillSource;
+}
+
+export interface OsRegisterSkillInput {
+  name: string;
+  description?: string | null;
+  category?: OsSkillCategory | null;
+  inputSchema?: unknown;
+  outputSchema?: unknown;
+  validationRules?: Record<string, unknown>[];
+  requiredTools?: string[];
+  requiredGpuLibraries?: string[];
+  version?: string | null;
+  examples?: { input?: unknown; output?: unknown }[];
+}
+
+export interface OsSkillValidationResult {
+  ok: boolean;
+  problems: string[];
+}
+
+export interface OsSkillInvokeResult {
+  skillId: string;
+  skillName: string;
+  route: "sidecar" | "local" | "target";
+  inputValidation: OsSkillValidationResult;
+  outputValidation: OsSkillValidationResult | null;
+  run: OsExecutionRun;
+}
+
+export interface OsSkillImportSummary {
+  source: OsSkillSource;
+  imported: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
+  unavailable?: boolean;
+}
+
+export interface OsInvokeSkillInput {
+  taskId?: string | null;
+  targetId?: string | null;
+  payload?: Record<string, unknown>;
+  command?: string | null;
+  recordHistory?: boolean;
+}
+
+/* ─── Crystal OS Phase 5: Fine-Tuning Studio ─── */
+
+export const OS_STUDIO_STAGES = [
+  "import", "analyze", "pii_scan", "split", "format", "tokenize",
+  "train", "evaluate", "benchmark", "package", "deploy", "report",
+] as const;
+export type OsStudioStage = (typeof OS_STUDIO_STAGES)[number];
+
+export interface OsCreateStudioRunInput {
+  datasetPath: string;
+  baseModel: string;
+  taskId?: string | null;
+  method?: string;
+  trainer?: string;
+  deployer?: string;
+  split?: Record<string, number> | null;
+}
+
 /* ─── Supported channels ─── */
 
 export const SUPPORTED_CHANNELS: Omit<ChannelConfig, "enabled" | "connected" | "config">[] = [
@@ -314,9 +807,10 @@ class OpenClawClient {
     if (lower.includes("gpt") || lower.includes("openai") || lower.startsWith("openai/")) {
       if (!this._openaiKeyCache) {
         try {
-          const { resolveOpenAiApiKeyForCrystal } = await import("@/lib/openclawSecrets");
           this._openaiKeyCache = await resolveOpenAiApiKeyForCrystal();
-        } catch { /* key resolution failed */ }
+        } catch (e) {
+          console.warn("[openclaw] resolveOpenAiApiKeyForCrystal failed:", e);
+        }
       }
       if (this._openaiKeyCache) {
         return { baseUrl: "https://api.openai.com/v1", apiKey: this._openaiKeyCache, model: model.replace(/^openai\//, "") };
@@ -1353,8 +1847,15 @@ class OpenClawClient {
     try {
       const result = await cachedCommand(`${OPENCLAW_CMD} agents list --json`, { ttl: 60_000 });
       if (result.code === 0 && result.stdout.trim()) {
-        const data = JSON.parse(result.stdout);
-        return Array.isArray(data) ? data : (data.agents ?? data.items ?? []);
+        // Tolerant parse: a stray stdout warning before the JSON must not blank the roster.
+        type AgentRoster = Awaited<ReturnType<OpenClawClient["listAgents"]>>;
+        const data = extractJsonFromAgentOutput(result.stdout);
+        if (Array.isArray(data)) return data as AgentRoster;
+        if (data && typeof data === "object") {
+          const o = data as Record<string, unknown>;
+          const arr = o.agents ?? o.items;
+          if (Array.isArray(arr)) return arr as AgentRoster;
+        }
       }
     } catch { /* ignore */ }
     return [];
@@ -1418,23 +1919,27 @@ class OpenClawClient {
     const acpSessions: unknown[] = [];
     const combine = (stdout: string, stderr: string) => `${stdout || ""}\n${stderr || ""}`.trim();
 
-    try {
-      const sub = await this.dispatchToAgent("main", "/subagents list");
+    // Run both agent round-trips concurrently — they're independent reads.
+    const [sub, acp] = await Promise.all([
+      this.dispatchToAgent("main", "/subagents list").catch(() => null),
+      this.dispatchToAgent("main", "/acp status").catch(() => null),
+    ]);
+
+    if (sub) {
       const subText = combine(sub.stdout, sub.stderr);
       if (sub.code === 0 && subText) {
         const data = extractJsonFromAgentOutput(subText);
         if (data !== null) subagents.push(...pickSubagentListJson(data));
       }
-    } catch { /* ignore */ }
+    }
 
-    try {
-      const acp = await this.dispatchToAgent("main", "/acp status");
+    if (acp) {
       const acpText = combine(acp.stdout, acp.stderr);
       if (acp.code === 0 && acpText) {
         const data = extractJsonFromAgentOutput(acpText);
         if (data !== null) acpSessions.push(...pickAcpSessionsJson(data));
       }
-    } catch { /* ignore */ }
+    }
 
     return { subagents, acpSessions };
   }
@@ -1552,6 +2057,67 @@ class OpenClawClient {
     } catch { return false; }
   }
 
+  /** Master scheduler switch — enables/disables ALL cron jobs at once. */
+  async setCronSchedulerEnabled(enabled: boolean): Promise<{
+    enabled: boolean;
+    changed: boolean;
+    jobs: number;
+    nextWakeAtMs: number | null;
+  } | null> {
+    try {
+      const sub = enabled ? "enable" : "disable";
+      const r = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} cron scheduler ${sub} --json`,
+        cwd: null,
+      });
+      if (r.code === 0 && r.stdout.trim()) {
+        const d = JSON.parse(r.stdout);
+        return {
+          enabled: Boolean(d.enabled),
+          changed: Boolean(d.changed),
+          jobs: Number(d.jobs ?? 0),
+          nextWakeAtMs: d.nextWakeAtMs ?? null,
+        };
+      }
+    } catch { /* ignore */ }
+    return null;
+  }
+
+  /** Read the master scheduler status (enabled flag + next wake). */
+  async getCronSchedulerStatus(): Promise<{
+    enabled: boolean;
+    jobs: number;
+    nextWakeAtMs: number | null;
+  } | null> {
+    try {
+      const r = await invoke<{ stdout: string; code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} cron status --json`,
+        cwd: null,
+      });
+      if (r.code === 0 && r.stdout.trim()) {
+        const d = JSON.parse(r.stdout);
+        return {
+          enabled: Boolean(d.enabled),
+          jobs: Number(d.jobs ?? 0),
+          nextWakeAtMs: d.nextWakeAtMs ?? null,
+        };
+      }
+    } catch { /* ignore */ }
+    return null;
+  }
+
+  /** Per-job enable/disable (id or exact name). */
+  async setCronJobEnabled(id: string, enabled: boolean): Promise<boolean> {
+    try {
+      const sub = enabled ? "enable" : "disable";
+      const r = await invoke<{ code: number }>("execute_command", {
+        command: `${OPENCLAW_CMD} cron ${sub} "${escapeShellArg(id)}"`,
+        cwd: null,
+      });
+      return r.code === 0;
+    } catch { return false; }
+  }
+
   /* ── Sessions ── */
 
   async listSessions(): Promise<{ key: string; sessionId: string; model: string; modelProvider: string; inputTokens: number; outputTokens: number; totalTokens: number; contextTokens: number; agentId: string; updatedAt: number; ageMs: number; kind: string }[]> {
@@ -1575,6 +2141,423 @@ class OpenClawClient {
       await new Promise(r => setTimeout(r, 4000));
       return this.connectGateway();
     } catch { return false; }
+  }
+
+  /* ── Crystal OS (crystal-os plugin) ──
+   *
+   * Thin wrappers over `openclaw os tasks|projects ... --json`. Every command
+   * prints a single `{ ok, data }` (or `{ ok:false, error }`) envelope which
+   * osExec parses. The plugin is opt-in; if it is disabled these reject and the
+   * osStore surfaces a friendly "not enabled" message.
+   */
+
+  private async osExec<T>(args: string): Promise<T> {
+    const command = `${OPENCLAW_CMD} os ${args} --json`;
+    // Read-shaped subcommands dedupe + cache through cachedCommand (which also
+    // enforces the 6-way CLI concurrency limit); mutations stay uncached.
+    const isRead = /\b(list|get|search|status|runs|history|state get)\b/.test(args);
+    const result = isRead
+      ? await cachedCommand(command, { ttl: 15_000 })
+      : await invoke<{ stdout: string; stderr: string; code: number }>("execute_command", {
+          command,
+          cwd: null,
+        });
+    const combined = `${result.stdout || ""}\n${result.stderr || ""}`;
+    const envelope = this.parseOsEnvelope(combined);
+    if (!envelope) {
+      const help = combined.toLowerCase().includes("unknown command") || combined.toLowerCase().includes("not found")
+        ? " — is the crystal-os plugin enabled? (plugins.entries.crystal-os.enabled = true)"
+        : "";
+      throw new Error(`Crystal Data Science Workbench command failed${help}`);
+    }
+    if (!envelope.ok) throw new Error(envelope.error || "Crystal Data Science Workbench command failed");
+    return envelope.data as T;
+  }
+
+  /** Extract the `{ ok, data }` JSON envelope from noisy CLI output ([plugins] logs etc). */
+  private parseOsEnvelope(text: string): { ok: boolean; data?: unknown; error?: string } | null {
+    const lines = text.split("\n");
+    // Prefer a single line that parses as the envelope (most common case).
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t.startsWith("{") || !t.includes('"ok"')) continue;
+      try {
+        const parsed = JSON.parse(t);
+        if (parsed && typeof parsed === "object" && "ok" in parsed) return parsed;
+      } catch { /* keep scanning */ }
+    }
+    // Fallback: slice from first { to last }.
+    const first = text.indexOf("{");
+    const last = text.lastIndexOf("}");
+    if (first >= 0 && last > first) {
+      try {
+        const parsed = JSON.parse(text.slice(first, last + 1));
+        if (parsed && typeof parsed === "object" && "ok" in parsed) return parsed;
+      } catch { /* ignore */ }
+    }
+    return null;
+  }
+
+  private osArg(value: string): string {
+    return `"${escapeShellArg(value)}"`;
+  }
+
+  /* tasks */
+
+  async osListTasks(filter: OsTaskFilter = {}): Promise<OsTask[]> {
+    let args = "tasks list";
+    if (filter.projectId) args += ` --project ${this.osArg(filter.projectId)}`;
+    if (filter.status) args += ` --status ${filter.status}`;
+    if (filter.parentTaskId) args += ` --parent ${this.osArg(filter.parentTaskId)}`;
+    if (filter.search) args += ` --search ${this.osArg(filter.search)}`;
+    return this.osExec<OsTask[]>(args);
+  }
+
+  async osGetTask(id: string): Promise<OsTask> {
+    return this.osExec<OsTask>(`tasks get ${this.osArg(id)}`);
+  }
+
+  async osSearchTasks(query: string, limit = 25): Promise<OsTask[]> {
+    return this.osExec<OsTask[]>(`tasks search ${this.osArg(query)} --limit ${limit}`);
+  }
+
+  async osCreateTask(input: OsCreateTaskInput): Promise<OsTask> {
+    let args = `tasks create --title ${this.osArg(input.title)}`;
+    if (input.projectId) args += ` --project ${this.osArg(input.projectId)}`;
+    if (input.parentTaskId) args += ` --parent ${this.osArg(input.parentTaskId)}`;
+    if (input.description) args += ` --description ${this.osArg(input.description)}`;
+    if (input.status) args += ` --status ${input.status}`;
+    if (input.priority) args += ` --priority ${input.priority}`;
+    if (input.ownerAgent) args += ` --owner ${this.osArg(input.ownerAgent)}`;
+    if (input.dueDate) args += ` --due ${this.osArg(input.dueDate)}`;
+    if (input.tags?.length) args += ` --tags ${this.osArg(input.tags.join(","))}`;
+    if (input.dependsOn?.length) args += ` --depends-on ${this.osArg(input.dependsOn.join(","))}`;
+    return this.osExec<OsTask>(args);
+  }
+
+  async osUpdateTask(id: string, input: OsUpdateTaskInput): Promise<OsTask> {
+    let args = `tasks update ${this.osArg(id)}`;
+    if (input.title !== undefined) args += ` --title ${this.osArg(input.title)}`;
+    if (input.description !== undefined) args += ` --description ${this.osArg(input.description ?? "")}`;
+    if (input.status) args += ` --status ${input.status}`;
+    if (input.priority) args += ` --priority ${input.priority}`;
+    if (input.projectId !== undefined) args += ` --project ${this.osArg(input.projectId ?? "")}`;
+    if (input.parentTaskId !== undefined) args += ` --parent ${this.osArg(input.parentTaskId ?? "")}`;
+    if (input.ownerAgent !== undefined) args += ` --owner ${this.osArg(input.ownerAgent ?? "")}`;
+    if (input.dueDate !== undefined) args += ` --due ${this.osArg(input.dueDate ?? "")}`;
+    for (const tag of input.addTags ?? []) args += ` --add-tag ${this.osArg(tag)}`;
+    for (const tag of input.removeTags ?? []) args += ` --remove-tag ${this.osArg(tag)}`;
+    return this.osExec<OsTask>(args);
+  }
+
+  /** Move a task to a new status — the canonical board drag/drop operation. */
+  async osSetTaskStatus(id: string, status: OsTaskStatus): Promise<OsTask> {
+    return this.osUpdateTask(id, { status });
+  }
+
+  async osCompleteTask(id: string): Promise<OsTask> {
+    return this.osExec<OsTask>(`tasks complete ${this.osArg(id)}`);
+  }
+
+  async osDeleteTask(id: string): Promise<void> {
+    await this.osExec<unknown>(`tasks delete ${this.osArg(id)}`);
+  }
+
+  async osAddDependency(id: string, dependsOnId: string): Promise<OsTask> {
+    return this.osExec<OsTask>(`tasks dep add ${this.osArg(id)} --on ${this.osArg(dependsOnId)}`);
+  }
+
+  async osRemoveDependency(id: string, dependsOnId: string): Promise<OsTask> {
+    return this.osExec<OsTask>(`tasks dep remove ${this.osArg(id)} --on ${this.osArg(dependsOnId)}`);
+  }
+
+  /* projects */
+
+  async osListProjects(): Promise<OsProject[]> {
+    return this.osExec<OsProject[]>("projects list");
+  }
+
+  async osGetProject(id: string): Promise<OsProject> {
+    return this.osExec<OsProject>(`projects get ${this.osArg(id)}`);
+  }
+
+  async osCreateProject(input: OsCreateProjectInput): Promise<OsProject> {
+    let args = `projects create --name ${this.osArg(input.name)}`;
+    if (input.description) args += ` --description ${this.osArg(input.description)}`;
+    if (input.status) args += ` --status ${input.status}`;
+    if (input.goals?.length) args += ` --goals ${this.osArg(input.goals.join(","))}`;
+    return this.osExec<OsProject>(args);
+  }
+
+  async osUpdateProject(id: string, input: OsUpdateProjectInput): Promise<OsProject> {
+    let args = `projects update ${this.osArg(id)}`;
+    if (input.name !== undefined) args += ` --name ${this.osArg(input.name)}`;
+    if (input.description !== undefined) args += ` --description ${this.osArg(input.description ?? "")}`;
+    if (input.status) args += ` --status ${input.status}`;
+    return this.osExec<OsProject>(args);
+  }
+
+  async osArchiveProject(id: string): Promise<OsProject> {
+    return this.osExec<OsProject>(`projects archive ${this.osArg(id)}`);
+  }
+
+  async osGetProjectState(projectId: string): Promise<OsProjectState> {
+    return this.osExec<OsProjectState>(`projects state get ${this.osArg(projectId)}`);
+  }
+
+  async osAddMilestone(projectId: string, title: string, dueDate?: string): Promise<OsMilestone> {
+    let args = `projects milestone add ${this.osArg(projectId)} --title ${this.osArg(title)}`;
+    if (dueDate) args += ` --due ${this.osArg(dueDate)}`;
+    return this.osExec<OsMilestone>(args);
+  }
+
+  async osCompleteMilestone(milestoneId: string): Promise<OsMilestone> {
+    return this.osExec<OsMilestone>(`projects milestone complete ${this.osArg(milestoneId)}`);
+  }
+
+  async osAddGoal(projectId: string, text: string): Promise<OsGoal> {
+    return this.osExec<OsGoal>(`projects goal add ${this.osArg(projectId)} --text ${this.osArg(text)}`);
+  }
+
+  /* project operating-memory state (persisted) */
+
+  async osSetProjectState(projectId: string, input: OsSetProjectStateInput): Promise<OsProjectState> {
+    let args = `projects state set ${this.osArg(projectId)}`;
+    if (input.currentMilestoneId !== undefined) args += ` --milestone ${this.osArg(input.currentMilestoneId ?? "")}`;
+    if (input.blockers !== undefined) args += ` --blockers ${this.osArg(input.blockers.join(","))}`;
+    if (input.nextActions !== undefined) args += ` --next ${this.osArg(input.nextActions.join(","))}`;
+    if (input.openQuestions !== undefined) args += ` --questions ${this.osArg(input.openQuestions.join(","))}`;
+    if (input.activeTaskIds !== undefined) args += ` --active ${this.osArg(input.activeTaskIds.join(","))}`;
+    return this.osExec<OsProjectState>(args);
+  }
+
+  /* lessons */
+
+  async osListLessons(projectId?: string): Promise<OsLesson[]> {
+    let args = "lessons list";
+    if (projectId) args += ` --project ${this.osArg(projectId)}`;
+    return this.osExec<OsLesson[]>(args);
+  }
+
+  async osGetLesson(id: string): Promise<OsLesson> {
+    return this.osExec<OsLesson>(`lessons get ${this.osArg(id)}`);
+  }
+
+  async osSearchLessons(query: string, limit = 25): Promise<OsLesson[]> {
+    return this.osExec<OsLesson[]>(`lessons search ${this.osArg(query)} --limit ${limit}`);
+  }
+
+  async osRecordLesson(input: OsRecordLessonInput): Promise<OsLesson> {
+    let args = "lessons record";
+    if (input.problem) args += ` --problem ${this.osArg(input.problem)}`;
+    if (input.solution) args += ` --solution ${this.osArg(input.solution)}`;
+    if (input.outcome) args += ` --outcome ${this.osArg(input.outcome)}`;
+    if (typeof input.confidence === "number") args += ` --confidence ${input.confidence}`;
+    if (input.projectId) args += ` --project ${this.osArg(input.projectId)}`;
+    if (input.tags?.length) args += ` --tags ${this.osArg(input.tags.join(","))}`;
+    if (input.sourceRunId) args += ` --source-run ${this.osArg(input.sourceRunId)}`;
+    return this.osExec<OsLesson>(args);
+  }
+
+  async osConsultLessons(query: string, projectId?: string, limit = 5): Promise<OsLesson[]> {
+    let args = `lessons consult --query ${this.osArg(query)} --limit ${limit}`;
+    if (projectId) args += ` --project ${this.osArg(projectId)}`;
+    return this.osExec<OsLesson[]>(args);
+  }
+
+  /* decisions */
+
+  async osListDecisions(projectId?: string): Promise<OsDecision[]> {
+    let args = "decisions list";
+    if (projectId) args += ` --project ${this.osArg(projectId)}`;
+    return this.osExec<OsDecision[]>(args);
+  }
+
+  async osGetDecision(id: string): Promise<OsDecision> {
+    return this.osExec<OsDecision>(`decisions get ${this.osArg(id)}`);
+  }
+
+  async osSearchDecisions(query: string, limit = 25): Promise<OsDecision[]> {
+    return this.osExec<OsDecision[]>(`decisions search ${this.osArg(query)} --limit ${limit}`);
+  }
+
+  async osCreateDecision(input: OsCreateDecisionInput): Promise<OsDecision> {
+    let args = "decisions create";
+    if (input.title) args += ` --title ${this.osArg(input.title)}`;
+    if (input.context) args += ` --context ${this.osArg(input.context)}`;
+    if (input.rationale) args += ` --rationale ${this.osArg(input.rationale)}`;
+    if (input.expectedOutcome) args += ` --expected ${this.osArg(input.expectedOutcome)}`;
+    if (input.projectId) args += ` --project ${this.osArg(input.projectId)}`;
+    for (const opt of input.options ?? []) {
+      const spec = [opt.text ?? "", opt.pros ?? "", opt.cons ?? "", opt.chosen ? "chosen" : ""].join("|");
+      args += ` --option ${this.osArg(spec)}`;
+    }
+    if (typeof input.selectedIndex === "number") args += ` --selected ${input.selectedIndex}`;
+    return this.osExec<OsDecision>(args);
+  }
+
+  /* execution targets */
+
+  async osListTargets(): Promise<OsExecutionTarget[]> {
+    return this.osExec<OsExecutionTarget[]>("targets list");
+  }
+
+  async osRegisterTarget(input: OsRegisterTargetInput): Promise<OsExecutionTarget> {
+    let args = `targets register --kind ${input.kind}`;
+    if (input.id) args += ` --id ${this.osArg(input.id)}`;
+    if (input.label) args += ` --label ${this.osArg(input.label)}`;
+    if (input.endpoint) args += ` --endpoint ${this.osArg(input.endpoint)}`;
+    if (input.authRef) args += ` --auth-ref ${this.osArg(input.authRef)}`;
+    if (input.capabilities?.length) args += ` --capabilities ${this.osArg(input.capabilities.join(","))}`;
+    if (input.status) args += ` --status ${input.status}`;
+    return this.osExec<OsExecutionTarget>(args);
+  }
+
+  async osHealthCheckTargets(id?: string): Promise<OsExecutionTarget[]> {
+    let args = "targets health";
+    if (id) args += ` --id ${this.osArg(id)}`;
+    return this.osExec<OsExecutionTarget[]>(args);
+  }
+
+  /* execution runs */
+
+  async osDispatchExec(input: OsExecDispatchInput): Promise<OsExecutionRun> {
+    let args = "exec dispatch";
+    if (input.taskId) args += ` --task ${this.osArg(input.taskId)}`;
+    if (input.skillId) args += ` --skill ${this.osArg(input.skillId)}`;
+    if (input.targetId) args += ` --target ${this.osArg(input.targetId)}`;
+    if (input.requiredCapabilities?.length) args += ` --capabilities ${this.osArg(input.requiredCapabilities.join(","))}`;
+    if (input.command) args += ` --command ${this.osArg(input.command)}`;
+    if (input.label) args += ` --label ${this.osArg(input.label)}`;
+    if (input.recordHistory) args += " --record-history";
+    return this.osExec<OsExecutionRun>(args);
+  }
+
+  async osMonitorRun(runId: string): Promise<OsExecutionRun> {
+    return this.osExec<OsExecutionRun>(`exec monitor ${this.osArg(runId)}`);
+  }
+
+  async osRunResults(runId: string): Promise<OsExecutionRun> {
+    return this.osExec<OsExecutionRun>(`exec results ${this.osArg(runId)}`);
+  }
+
+  async osCancelRun(runId: string): Promise<OsExecutionRun> {
+    return this.osExec<OsExecutionRun>(`exec cancel ${this.osArg(runId)}`);
+  }
+
+  async osListRuns(filter: { taskId?: string; targetId?: string; limit?: number } = {}): Promise<OsExecutionRun[]> {
+    let args = "exec runs";
+    if (filter.taskId) args += ` --task ${this.osArg(filter.taskId)}`;
+    if (filter.targetId) args += ` --target ${this.osArg(filter.targetId)}`;
+    if (filter.limit) args += ` --limit ${filter.limit}`;
+    return this.osExec<OsExecutionRun[]>(args);
+  }
+
+  /* PEVIC loop */
+
+  async osPevicHistory(taskId: string): Promise<OsTaskExecutionHistoryEntry[]> {
+    return this.osExec<OsTaskExecutionHistoryEntry[]>(`pevic history ${this.osArg(taskId)}`);
+  }
+
+  async osPevicStep(taskId: string, opts: { command?: string; targetId?: string; capabilities?: string[]; maxIterations?: number } = {}): Promise<OsPevicResult> {
+    let args = `pevic step ${this.osArg(taskId)}`;
+    if (opts.command) args += ` --command ${this.osArg(opts.command)}`;
+    if (opts.targetId) args += ` --target ${this.osArg(opts.targetId)}`;
+    if (opts.capabilities?.length) args += ` --capabilities ${this.osArg(opts.capabilities.join(","))}`;
+    if (typeof opts.maxIterations === "number") args += ` --max-iterations ${opts.maxIterations}`;
+    return this.osExec<OsPevicResult>(args);
+  }
+
+  async osPevicRun(taskId: string, opts: { command?: string; targetId?: string; capabilities?: string[]; maxIterations?: number } = {}): Promise<OsPevicResult> {
+    let args = `pevic run ${this.osArg(taskId)}`;
+    if (opts.command) args += ` --command ${this.osArg(opts.command)}`;
+    if (opts.targetId) args += ` --target ${this.osArg(opts.targetId)}`;
+    if (opts.capabilities?.length) args += ` --capabilities ${this.osArg(opts.capabilities.join(","))}`;
+    if (typeof opts.maxIterations === "number") args += ` --max-iterations ${opts.maxIterations}`;
+    return this.osExec<OsPevicResult>(args);
+  }
+
+  /* skills (NVIDIA Skills Registry — Phase 4) */
+
+  async osListSkills(filter: OsSkillFilter = {}): Promise<OsSkill[]> {
+    let args = "skills list";
+    if (filter.category) args += ` --category ${filter.category}`;
+    if (filter.source) args += ` --source ${filter.source}`;
+    return this.osExec<OsSkill[]>(args);
+  }
+
+  async osGetSkill(idOrName: string): Promise<OsSkill> {
+    return this.osExec<OsSkill>(`skills get ${this.osArg(idOrName)}`);
+  }
+
+  async osSearchSkills(query: string, limit = 25): Promise<OsSkill[]> {
+    return this.osExec<OsSkill[]>(`skills search ${this.osArg(query)} --limit ${limit}`);
+  }
+
+  async osRegisterSkill(input: OsRegisterSkillInput): Promise<OsSkill> {
+    let args = `skills register --name ${this.osArg(input.name)}`;
+    if (input.description) args += ` --description ${this.osArg(input.description)}`;
+    if (input.category) args += ` --category ${input.category}`;
+    if (input.inputSchema !== undefined) args += ` --input-schema ${this.osArg(JSON.stringify(input.inputSchema))}`;
+    if (input.outputSchema !== undefined) args += ` --output-schema ${this.osArg(JSON.stringify(input.outputSchema))}`;
+    if (input.validationRules?.length) args += ` --validation-rules ${this.osArg(JSON.stringify(input.validationRules))}`;
+    if (input.requiredTools?.length) args += ` --required-tools ${this.osArg(input.requiredTools.join(","))}`;
+    if (input.requiredGpuLibraries?.length) args += ` --gpu-libs ${this.osArg(input.requiredGpuLibraries.join(","))}`;
+    if (input.version) args += ` --version ${this.osArg(input.version)}`;
+    if (input.examples?.length) args += ` --examples ${this.osArg(JSON.stringify(input.examples))}`;
+    return this.osExec<OsSkill>(args);
+  }
+
+  async osValidateSkillInput(idOrName: string, payload: Record<string, unknown>): Promise<OsSkillValidationResult> {
+    return this.osExec<OsSkillValidationResult>(
+      `skills validate ${this.osArg(idOrName)} --input ${this.osArg(JSON.stringify(payload))}`,
+    );
+  }
+
+  async osInvokeSkill(idOrName: string, input: OsInvokeSkillInput = {}): Promise<OsSkillInvokeResult> {
+    let args = `skills invoke ${this.osArg(idOrName)}`;
+    if (input.taskId) args += ` --task ${this.osArg(input.taskId)}`;
+    if (input.targetId) args += ` --target ${this.osArg(input.targetId)}`;
+    if (input.payload) args += ` --payload ${this.osArg(JSON.stringify(input.payload))}`;
+    if (input.command) args += ` --command ${this.osArg(input.command)}`;
+    if (input.recordHistory) args += " --record-history";
+    return this.osExec<OsSkillInvokeResult>(args);
+  }
+
+  async osImportSkills(source: "nvidia" | "crystal" | "all" = "all"): Promise<OsSkillImportSummary[]> {
+    return this.osExec<OsSkillImportSummary[]>(`skills import --source ${source}`);
+  }
+
+  /* studio (Fine-Tuning Studio proxy — Phase 5) */
+
+  async osStudioAnalyzeDataset(path: string): Promise<unknown> {
+    return this.osExec<unknown>(`studio dataset analyze ${this.osArg(path)}`);
+  }
+
+  async osStudioImportDataset(path: string): Promise<unknown> {
+    return this.osExec<unknown>(`studio dataset import ${this.osArg(path)}`);
+  }
+
+  async osStudioCreateRun(input: OsCreateStudioRunInput): Promise<OsExecutionRun> {
+    let args = `studio run create --dataset ${this.osArg(input.datasetPath)} --base-model ${this.osArg(input.baseModel)}`;
+    if (input.taskId) args += ` --task ${this.osArg(input.taskId)}`;
+    if (input.method) args += ` --method ${this.osArg(input.method)}`;
+    if (input.trainer) args += ` --trainer ${this.osArg(input.trainer)}`;
+    if (input.deployer) args += ` --deployer ${this.osArg(input.deployer)}`;
+    if (input.split) args += ` --split ${this.osArg(JSON.stringify(input.split))}`;
+    return this.osExec<OsExecutionRun>(args);
+  }
+
+  async osStudioRunStatus(runId: string): Promise<OsExecutionRun> {
+    return this.osExec<OsExecutionRun>(`studio run status ${this.osArg(runId)}`);
+  }
+
+  async osStudioRunReport(runId: string): Promise<unknown> {
+    return this.osExec<unknown>(`studio run report ${this.osArg(runId)}`);
+  }
+
+  async osStudioListRuns(limit = 50): Promise<OsExecutionRun[]> {
+    return this.osExec<OsExecutionRun[]>(`studio runs --limit ${limit}`);
   }
 }
 
